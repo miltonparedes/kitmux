@@ -45,7 +45,7 @@ type Model struct {
 	agentsView    agentsview.Model
 	palette       palette.Model
 	paletteActive bool
-	paletteReturn bool       // return to palette after sub-action completes
+	paletteReturn bool        // return to palette after sub-action completes
 	pendingKey    *tea.KeyMsg // key to inject after sessions load
 	width         int
 	height        int
