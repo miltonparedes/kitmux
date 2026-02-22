@@ -142,82 +142,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
-		// Palette active — route everything there
-		if m.paletteActive {
-			switch msg.String() {
-			case "esc":
-				if m.mode == ModePalette {
-					return m, tea.Quit
-				}
-				m.paletteActive = false
-				return m, nil
-			case "ctrl+c":
-				return m, tea.Quit
-			}
-			var cmd tea.Cmd
-			m.palette, cmd = m.palette.Update(msg)
-			return m, cmd
-		}
-
-		// Global keys (only when not editing and not in palette)
-		isEditing := m.sessions.IsEditing() || m.worktreeView.IsEditing()
-		switch msg.String() {
-		case "ctrl+c":
-			return m, tea.Quit
-		case "q":
-			if !isEditing {
-				return m, tea.Quit
-			}
-		case "ctrl+p":
-			if !isEditing {
-				m.paletteActive = true
-				m.palette.Reset()
-				return m, nil
-			}
-		case "w":
-			if !isEditing && m.view != viewWorktrees {
-				m.view = viewWorktrees
-				return m, m.worktreeView.Init()
-			}
-		case "a":
-			if !isEditing && m.view != viewAgents {
-				m.view = viewAgents
-				return m, nil
-			}
-		case "esc":
-			if m.paletteReturn && !isEditing {
-				return m, m.returnToPalette()
-			}
-			switch m.view {
-			case viewWindows:
-				if m.mode == ModeWindows {
-					return m, tea.Quit
-				}
-				m.view = viewSessions
-				return m, nil
-			case viewWorktrees:
-				if m.mode == ModeWorktrees {
-					return m, tea.Quit
-				}
-				m.view = viewSessions
-				return m, nil
-			case viewAgents:
-				if m.mode == ModeAgents {
-					return m, tea.Quit
-				}
-				m.view = viewSessions
-				return m, nil
-			default:
-				if m.sessions.IsEditing() {
-					if m.mode == ModeProjects {
-						// ESC from project picker in direct mode → quit
-						return m, tea.Quit
-					}
-					// esc in sessions editing → falls through to sessions.Update
-				} else {
-					return m, tea.Quit
-				}
-			}
+		if updated, cmd, handled := m.handleKeyMsg(msg); handled {
+			return updated, cmd
 		}
 
 	case messages.TogglePaletteMsg:
@@ -306,7 +232,92 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
-	// Route to active view
+	return m.routeToView(msg)
+}
+
+// handleKeyMsg processes keyboard input.
+// Returns (model, cmd, handled); when handled is false the caller
+// should route the original message to the active view.
+func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	if m.paletteActive {
+		switch msg.String() {
+		case "esc":
+			if m.mode == ModePalette {
+				return m, tea.Quit, true
+			}
+			m.paletteActive = false
+			return m, nil, true
+		case "ctrl+c":
+			return m, tea.Quit, true
+		}
+		var cmd tea.Cmd
+		m.palette, cmd = m.palette.Update(msg)
+		return m, cmd, true
+	}
+
+	isEditing := m.sessions.IsEditing() || m.worktreeView.IsEditing()
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit, true
+	case "q":
+		if !isEditing {
+			return m, tea.Quit, true
+		}
+	case "ctrl+p":
+		if !isEditing {
+			m.paletteActive = true
+			m.palette.Reset()
+			return m, nil, true
+		}
+	case "w":
+		if !isEditing && m.view != viewWorktrees {
+			m.view = viewWorktrees
+			return m, m.worktreeView.Init(), true
+		}
+	case "a":
+		if !isEditing && m.view != viewAgents {
+			m.view = viewAgents
+			return m, nil, true
+		}
+	case "esc":
+		if m.paletteReturn && !isEditing {
+			return m, m.returnToPalette(), true
+		}
+		switch m.view {
+		case viewWindows:
+			if m.mode == ModeWindows {
+				return m, tea.Quit, true
+			}
+			m.view = viewSessions
+			return m, nil, true
+		case viewWorktrees:
+			if m.mode == ModeWorktrees {
+				return m, tea.Quit, true
+			}
+			m.view = viewSessions
+			return m, nil, true
+		case viewAgents:
+			if m.mode == ModeAgents {
+				return m, tea.Quit, true
+			}
+			m.view = viewSessions
+			return m, nil, true
+		default:
+			if m.sessions.IsEditing() {
+				if m.mode == ModeProjects {
+					return m, tea.Quit, true
+				}
+				// esc in sessions editing → falls through to sessions.Update
+			} else {
+				return m, tea.Quit, true
+			}
+		}
+	}
+	return m, nil, false
+}
+
+// routeToView forwards a message to the active view.
+func (m Model) routeToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.view {
 	case viewSessions:
