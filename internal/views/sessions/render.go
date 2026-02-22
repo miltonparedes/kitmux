@@ -91,7 +91,11 @@ func (m Model) View() string {
 // StatusLine returns the footer content.
 func (m Model) StatusLine() string {
 	if m.confirming {
-		return theme.AttachedBadge.Render(" kill? y/n")
+		name := ""
+		if node := m.selected(); node != nil {
+			name = node.SessionName
+		}
+		return theme.AttachedBadge.Render(fmt.Sprintf(" kill '%s'? y/n", name))
 	}
 	if m.renaming {
 		return " " + m.renameInput.View()
@@ -99,7 +103,7 @@ func (m Model) StatusLine() string {
 	if m.searching {
 		return " " + m.searchInput.View()
 	}
-	return theme.HelpStyle.Render(" ⏎ switch  ␣ fold  J/K group  / search  n open  q quit")
+	return theme.HelpStyle.Render(" ⏎ switch  ␣ fold  J/K group  / search  n open  d kill  r rename  q quit")
 }
 
 func (m Model) viewPicker() string {

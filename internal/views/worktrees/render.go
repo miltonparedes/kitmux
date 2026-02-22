@@ -73,7 +73,11 @@ func (m Model) View() string {
 // StatusLine returns the footer content.
 func (m Model) StatusLine() string {
 	if m.confirming {
-		return theme.AttachedBadge.Render(" remove? y/n")
+		branch := ""
+		if wt := m.selected(); wt != nil {
+			branch = wt.Branch
+		}
+		return theme.AttachedBadge.Render(fmt.Sprintf(" remove '%s'? y/n", branch))
 	}
 	if m.describing {
 		return " " + m.describeInput.View()

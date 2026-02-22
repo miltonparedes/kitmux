@@ -4,14 +4,14 @@ import "github.com/charmbracelet/lipgloss"
 
 // ANSI 16 colors — adapts to the terminal's active theme.
 var (
-	Accent = lipgloss.Color("6")  // Cyan
-	Dim    = lipgloss.Color("8")  // BrightBlack
-	Border = lipgloss.Color("8")  // BrightBlack
-	Muted  = lipgloss.Color("8")  // BrightBlack
-	Purple = lipgloss.Color("5")  // Magenta
-	Green  = lipgloss.Color("2")  // Green
-	Red    = lipgloss.Color("1")  // Red
-	Yellow = lipgloss.Color("3")  // Yellow
+	Accent = lipgloss.Color("6") // Cyan
+	Dim    = lipgloss.Color("8") // BrightBlack
+	Border = lipgloss.Color("8") // BrightBlack
+	Muted  = lipgloss.Color("8") // BrightBlack
+	Purple = lipgloss.Color("5") // Magenta
+	Green  = lipgloss.Color("2") // Green
+	Red    = lipgloss.Color("1") // Red
+	Yellow = lipgloss.Color("3") // Yellow
 )
 
 // Reusable styles

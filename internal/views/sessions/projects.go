@@ -1,6 +1,7 @@
 package sessions
 
 import (
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -12,6 +13,7 @@ import (
 	"github.com/sahilm/fuzzy"
 
 	"github.com/miltonparedes/kitmux/internal/app/messages"
+	"github.com/miltonparedes/kitmux/internal/tmux"
 	"github.com/miltonparedes/kitmux/internal/worktree"
 )
 
@@ -174,9 +176,31 @@ func isGitRepo(dir string) bool {
 }
 
 // openProject resolves the project and emits the message to create the session.
+// If a session already exists at the same path, it switches to it instead.
+// If the session name collides with a different path, a numeric suffix is appended.
 func openProject(proj Project) tea.Cmd {
 	return func() tea.Msg {
 		name, dir := resolveProject(proj.Path)
+
+		sessions, err := tmux.ListSessions()
+		if err == nil {
+			for _, s := range sessions {
+				if s.Path == dir {
+					return messages.SwitchSessionMsg{Name: s.Name}
+				}
+			}
+		}
+
+		if tmux.HasSession(name) {
+			for i := 2; i <= 99; i++ {
+				candidate := fmt.Sprintf("%s-%d", name, i)
+				if !tmux.HasSession(candidate) {
+					name = candidate
+					break
+				}
+			}
+		}
+
 		return messages.CreateSessionInDirMsg{Name: name, Dir: dir}
 	}
 }

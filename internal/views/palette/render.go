@@ -25,18 +25,15 @@ func (m Model) View() string {
 	b.WriteString(mainSep)
 	b.WriteString("\n")
 
-	// Each item = 2 lines (item + separator), last item = 1 line
-	// Available lines = height - 3 (input + main sep + trailing)
-	avail := m.height - 3
-	if avail < 1 {
-		avail = 1
-	}
-	maxItems := (avail + 1) / 2 // N items take 2N-1 lines
-	if len(m.filtered) < maxItems {
-		maxItems = len(m.filtered)
+	maxVisible := m.maxVisible()
+
+	start := m.scroll
+	end := start + maxVisible
+	if end > len(m.filtered) {
+		end = len(m.filtered)
 	}
 
-	for i := 0; i < maxItems; i++ {
+	for i := start; i < end; i++ {
 		cmd := m.filtered[i]
 		cat := theme.PaletteCategory.Render(cmd.Category)
 
@@ -58,7 +55,7 @@ func (m Model) View() string {
 		}
 		b.WriteString("\n")
 
-		if i < maxItems-1 {
+		if i < end-1 {
 			b.WriteString(itemSep)
 			b.WriteString("\n")
 		}

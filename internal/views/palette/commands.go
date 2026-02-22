@@ -28,6 +28,12 @@ func DefaultCommands() []Command {
 			Category:    "Session",
 		},
 		{
+			ID:          "kill_current_session",
+			Title:       "Kill Current Session",
+			Description: "Kill the current tmux session and switch to another",
+			Category:    "Session",
+		},
+		{
 			ID:          "rename_session",
 			Title:       "Rename Session",
 			Description: "Rename the selected session",

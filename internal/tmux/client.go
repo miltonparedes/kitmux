@@ -65,6 +65,20 @@ func ListWindows(session string) ([]Window, error) {
 	return windows, nil
 }
 
+// CurrentSession returns the name of the current tmux session.
+func CurrentSession() (string, error) {
+	out, err := exec.Command("tmux", "display-message", "-p", "#{session_name}").Output()
+	if err != nil {
+		return "", fmt.Errorf("display-message: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+// HasSession returns true if a session with the given name exists.
+func HasSession(name string) bool {
+	return exec.Command("tmux", "has-session", "-t", name).Run() == nil
+}
+
 // SwitchClient switches the current tmux client to the given target.
 func SwitchClient(target string) error {
 	return exec.Command("tmux", "switch-client", "-t", target).Run()

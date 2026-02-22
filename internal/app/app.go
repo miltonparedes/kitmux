@@ -261,6 +261,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case viewSessions:
 		m.sessions, cmd = m.sessions.Update(msg)
 		if m.paletteReturn && !m.sessions.IsEditing() {
+			if cmd != nil {
+				return m, cmd
+			}
 			return m, m.returnToPalette()
 		}
 	case viewWindows:
@@ -268,6 +271,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case viewWorktrees:
 		m.worktreeView, cmd = m.worktreeView.Update(msg)
 		if m.paletteReturn && !m.worktreeView.IsEditing() {
+			if cmd != nil {
+				return m, cmd
+			}
 			return m, m.returnToPalette()
 		}
 	case viewAgents:
@@ -310,6 +316,10 @@ func (m Model) executeCommand(id string) (tea.Model, tea.Cmd) {
 
 	switch id {
 	// Session commands
+	case "switch_session":
+		m.paletteReturn = false
+		m.view = viewSessions
+		return m, m.sessions.Reload()
 	case "open_project":
 		m.view = viewSessions
 		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}}
@@ -322,6 +332,22 @@ func (m Model) executeCommand(id string) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		m.sessions, cmd = m.sessions.Update(km)
 		return m, cmd
+	case "kill_current_session":
+		return m, func() tea.Msg {
+			current, err := tmux.CurrentSession()
+			if err != nil || current == "" {
+				return nil
+			}
+			sessions, _ := tmux.ListSessions()
+			for _, s := range sessions {
+				if s.Name != current {
+					_ = tmux.SwitchClient(s.Name)
+					break
+				}
+			}
+			_ = tmux.KillSession(current)
+			return nil
+		}
 	case "rename_session":
 		m.view = viewSessions
 		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}}

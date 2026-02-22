@@ -13,6 +13,7 @@ type Model struct {
 	filtered []Command
 	input    textinput.Model
 	cursor   int
+	scroll   int
 	height   int
 	width    int
 }
@@ -42,6 +43,7 @@ func (m *Model) Reset() {
 	m.input.Focus()
 	m.filtered = m.commands
 	m.cursor = 0
+	m.scroll = 0
 }
 
 func (m Model) Init() tea.Cmd {
@@ -60,7 +62,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if row < 2 || (row-2)%2 != 0 {
 				return m, nil
 			}
-			idx := (row - 2) / 2
+			idx := m.scroll + (row-2)/2
 			if idx < 0 || idx >= len(m.filtered) {
 				return m, nil
 			}
@@ -73,6 +75,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if m.cursor < 0 {
 				m.cursor = 0
 			}
+			m.ensureVisible()
 		case tea.MouseButtonWheelDown:
 			m.cursor++
 			if m.cursor >= len(m.filtered) {
@@ -81,6 +84,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if m.cursor < 0 {
 				m.cursor = 0
 			}
+			m.ensureVisible()
 		}
 		return m, nil
 
@@ -99,6 +103,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if m.cursor < 0 {
 				m.cursor = 0
 			}
+			m.ensureVisible()
 			return m, nil
 
 		case "down", "ctrl+j":
@@ -109,6 +114,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			if m.cursor < 0 {
 				m.cursor = 0
 			}
+			m.ensureVisible()
 			return m, nil
 
 		case "alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "alt+6", "alt+7", "alt+8", "alt+9":
@@ -142,6 +148,28 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		}
 	}
 	m.cursor = 0
+	m.scroll = 0
 
 	return m, cmd
+}
+
+func (m Model) maxVisible() int {
+	avail := m.height - 3
+	if avail < 1 {
+		avail = 1
+	}
+	return (avail + 1) / 2
+}
+
+func (m *Model) ensureVisible() {
+	visible := m.maxVisible()
+	if visible < 1 {
+		visible = 1
+	}
+	if m.cursor < m.scroll {
+		m.scroll = m.cursor
+	}
+	if m.cursor >= m.scroll+visible {
+		m.scroll = m.cursor - visible + 1
+	}
 }
