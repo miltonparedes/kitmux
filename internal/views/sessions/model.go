@@ -27,6 +27,7 @@ type Model struct {
 	searchInput textinput.Model
 	picking     bool // project picker active
 	picker      projectPicker
+	justLoaded  bool // set on sessionsLoadedMsg, cleared by ConsumeLoaded
 }
 
 func New() Model {
@@ -134,6 +135,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.roots = BuildTree(msg.sessions, msg.repoRoots)
 		m.visible = Flatten(m.roots)
 		m.clampCursor()
+		m.justLoaded = true
 		// Fire async stats load
 		sessions := msg.sessions
 		repoRoots := msg.repoRoots
@@ -562,4 +564,40 @@ func (m Model) emitCursorChange() tea.Cmd {
 // Reload triggers a session reload from tmux.
 func (m Model) Reload() tea.Cmd {
 	return m.loadSessions
+}
+
+// HasData returns true when sessions have been loaded.
+func (m Model) HasData() bool {
+	return len(m.visible) > 0
+}
+
+// ConsumeLoaded returns true once after a sessionsLoadedMsg was processed,
+// then resets the flag. Use this to gate deferred actions on a fresh reload.
+func (m *Model) ConsumeLoaded() bool {
+	if m.justLoaded {
+		m.justLoaded = false
+		return true
+	}
+	return false
+}
+
+// SetPickingMode activates the project picker state.
+// Use this from a value-receiver context (e.g. Init) where pointer-receiver
+// mutations would be lost.
+func (m *Model) SetPickingMode() {
+	m.picking = true
+	m.picker.input.SetValue("")
+	m.picker.input.Focus()
+}
+
+// ProjectPickerCmds returns the commands needed for the project picker
+// without mutating state.
+func (m Model) ProjectPickerCmds() tea.Cmd {
+	return tea.Batch(textinput.Blink, loadProjects)
+}
+
+// InitProjectPicker activates the project picker and starts loading projects.
+func (m *Model) InitProjectPicker() tea.Cmd {
+	m.SetPickingMode()
+	return m.ProjectPickerCmds()
 }

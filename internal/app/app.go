@@ -18,10 +18,13 @@ import (
 type Mode int
 
 const (
-	ModeSidebar   Mode = iota
-	ModePalette        // Command palette-only mode
-	ModeWorktrees      // Worktrees view
-	ModeAgents         // Agents view
+	ModeSessions  Mode = iota // Session tree view
+	ModePalette               // Command palette-only mode
+	ModeWorktrees             // Worktrees view
+	ModeAgents                // Agents view
+	ModeProjects              // Project picker (direct access)
+	ModeWindows               // Windows for current session
+	ModeRun                   // Execute a palette command directly
 )
 
 type activeView int
@@ -42,12 +45,14 @@ type Model struct {
 	agentsView    agentsview.Model
 	palette       palette.Model
 	paletteActive bool
-	paletteReturn bool // return to palette after sub-action completes
+	paletteReturn bool        // return to palette after sub-action completes
+	pendingKey    *tea.KeyMsg // key to inject after sessions load
 	width         int
 	height        int
+	runCommandID  string // for ModeRun: the command to execute
 }
 
-func New(mode Mode) Model {
+func New(mode Mode, opts ...Option) Model {
 	m := Model{
 		mode:         mode,
 		view:         viewSessions,
@@ -57,6 +62,9 @@ func New(mode Mode) Model {
 		agentsView:   agentsview.New(),
 		palette:      palette.New(),
 	}
+	for _, opt := range opts {
+		opt(&m)
+	}
 	switch mode {
 	case ModePalette:
 		m.paletteActive = true
@@ -64,18 +72,55 @@ func New(mode Mode) Model {
 		m.view = viewWorktrees
 	case ModeAgents:
 		m.view = viewAgents
+	case ModeProjects:
+		m.view = viewSessions
+		m.sessions.SetPickingMode()
+	case ModeWindows:
+		m.view = viewWindows
 	}
 	return m
 }
 
+// Option configures a Model.
+type Option func(*Model)
+
+// WithRunCommand sets the command ID for ModeRun.
+func WithRunCommand(id string) Option {
+	return func(m *Model) {
+		m.runCommandID = id
+	}
+}
+
 func (m Model) Init() tea.Cmd {
-	switch m.view {
-	case viewWorktrees:
-		return m.worktreeView.Init()
-	case viewAgents:
-		return m.agentsView.Init()
+	switch m.mode {
+	case ModeRun:
+		id := m.runCommandID
+		return func() tea.Msg {
+			return messages.ExecuteCommandMsg{ID: id}
+		}
+	case ModeProjects:
+		return m.sessions.ProjectPickerCmds()
+	case ModeWindows:
+		return m.initCurrentSessionWindows()
 	default:
-		return m.sessions.Init()
+		switch m.view {
+		case viewWorktrees:
+			return m.worktreeView.Init()
+		case viewAgents:
+			return m.agentsView.Init()
+		default:
+			return m.sessions.Init()
+		}
+	}
+}
+
+func (m Model) initCurrentSessionWindows() tea.Cmd {
+	return func() tea.Msg {
+		name, err := tmux.CurrentSession()
+		if err != nil || name == "" {
+			return tea.QuitMsg{}
+		}
+		return messages.DrillWindowsMsg{SessionName: name}
 	}
 }
 
@@ -99,74 +144,8 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 
 	case tea.KeyMsg:
-		// Palette active — route everything there
-		if m.paletteActive {
-			switch msg.String() {
-			case "esc":
-				if m.mode == ModePalette {
-					return m, tea.Quit
-				}
-				m.paletteActive = false
-				return m, nil
-			case "ctrl+c":
-				return m, tea.Quit
-			}
-			var cmd tea.Cmd
-			m.palette, cmd = m.palette.Update(msg)
-			return m, cmd
-		}
-
-		// Global keys (only when not editing and not in palette)
-		isEditing := m.sessions.IsEditing() || m.worktreeView.IsEditing()
-		switch msg.String() {
-		case "ctrl+c":
-			return m, tea.Quit
-		case "q":
-			if !isEditing {
-				return m, tea.Quit
-			}
-		case "ctrl+p":
-			if !isEditing {
-				m.paletteActive = true
-				m.palette.Reset()
-				return m, nil
-			}
-		case "w":
-			if !isEditing && m.view != viewWorktrees {
-				m.view = viewWorktrees
-				return m, m.worktreeView.Init()
-			}
-		case "a":
-			if !isEditing && m.view != viewAgents {
-				m.view = viewAgents
-				return m, nil
-			}
-		case "esc":
-			if m.paletteReturn && !isEditing {
-				return m, m.returnToPalette()
-			}
-			switch m.view {
-			case viewWindows:
-				m.view = viewSessions
-				return m, nil
-			case viewWorktrees:
-				if m.mode == ModeWorktrees {
-					return m, tea.Quit
-				}
-				m.view = viewSessions
-				return m, nil
-			case viewAgents:
-				if m.mode == ModeAgents {
-					return m, tea.Quit
-				}
-				m.view = viewSessions
-				return m, nil
-			default:
-				if !m.sessions.IsEditing() {
-					return m, tea.Quit
-				}
-				// esc in sessions editing → falls through to sessions.Update
-			}
+		if updated, cmd, handled := m.handleKeyMsg(msg); handled {
+			return updated, cmd
 		}
 
 	case messages.TogglePaletteMsg:
@@ -255,11 +234,103 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 
-	// Route to active view
+	return m.routeToView(msg)
+}
+
+// handleKeyMsg processes keyboard input.
+// Returns (model, cmd, handled); when handled is false the caller
+// should route the original message to the active view.
+func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	if m.paletteActive {
+		switch msg.String() {
+		case "esc":
+			if m.mode == ModePalette {
+				return m, tea.Quit, true
+			}
+			m.paletteActive = false
+			return m, nil, true
+		case "ctrl+c":
+			return m, tea.Quit, true
+		}
+		var cmd tea.Cmd
+		m.palette, cmd = m.palette.Update(msg)
+		return m, cmd, true
+	}
+
+	isEditing := m.sessions.IsEditing() || m.worktreeView.IsEditing()
+	switch msg.String() {
+	case "ctrl+c":
+		return m, tea.Quit, true
+	case "q":
+		if !isEditing {
+			return m, tea.Quit, true
+		}
+	case "ctrl+p":
+		if !isEditing {
+			m.paletteActive = true
+			m.palette.Reset()
+			return m, nil, true
+		}
+	case "w":
+		if !isEditing && m.view != viewWorktrees {
+			m.view = viewWorktrees
+			return m, m.worktreeView.Init(), true
+		}
+	case "a":
+		if !isEditing && m.view != viewAgents {
+			m.view = viewAgents
+			return m, nil, true
+		}
+	case "esc":
+		if m.paletteReturn && !isEditing {
+			return m, m.returnToPalette(), true
+		}
+		switch m.view {
+		case viewWindows:
+			if m.mode == ModeWindows {
+				return m, tea.Quit, true
+			}
+			m.view = viewSessions
+			return m, nil, true
+		case viewWorktrees:
+			if m.mode == ModeWorktrees {
+				return m, tea.Quit, true
+			}
+			m.view = viewSessions
+			return m, nil, true
+		case viewAgents:
+			if m.mode == ModeAgents {
+				return m, tea.Quit, true
+			}
+			m.view = viewSessions
+			return m, nil, true
+		default:
+			if m.sessions.IsEditing() {
+				if m.mode == ModeProjects {
+					return m, tea.Quit, true
+				}
+				// esc in sessions editing → falls through to sessions.Update
+			} else {
+				return m, tea.Quit, true
+			}
+		}
+	}
+	return m, nil, false
+}
+
+// routeToView forwards a message to the active view.
+func (m Model) routeToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.view {
 	case viewSessions:
 		m.sessions, cmd = m.sessions.Update(msg)
+		if m.pendingKey != nil && m.sessions.ConsumeLoaded() {
+			km := *m.pendingKey
+			m.pendingKey = nil
+			var cmd2 tea.Cmd
+			m.sessions, cmd2 = m.sessions.Update(km)
+			cmd = tea.Batch(cmd, cmd2)
+		}
 		if m.paletteReturn && !m.sessions.IsEditing() {
 			if cmd != nil {
 				return m, cmd
@@ -299,11 +370,11 @@ func (m Model) View() string {
 	}
 }
 
-// returnToPalette reactivates the palette or quits if in palette-only mode.
+// returnToPalette reactivates the palette or quits if in a terminal mode.
 // Must be called on the m being returned (value receiver — mutations stay local).
 func (m *Model) returnToPalette() tea.Cmd {
 	m.paletteReturn = false
-	if m.mode == ModePalette {
+	if m.mode == ModePalette || m.mode == ModeRun || m.mode == ModeProjects {
 		return tea.Quit
 	}
 	m.paletteActive = true
@@ -322,21 +393,17 @@ func (m Model) executeCommand(id string) (tea.Model, tea.Cmd) {
 		return m, m.sessions.Reload()
 	case "open_project":
 		m.view = viewSessions
-		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}}
-		var cmd tea.Cmd
-		m.sessions, cmd = m.sessions.Update(km)
-		return m, cmd
+		return m, m.sessions.InitProjectPicker()
 	case "kill_session":
 		m.view = viewSessions
 		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}
-		var cmd tea.Cmd
-		m.sessions, cmd = m.sessions.Update(km)
-		return m, cmd
+		m.pendingKey = &km
+		return m, m.sessions.Reload()
 	case "kill_current_session":
 		return m, func() tea.Msg {
 			current, err := tmux.CurrentSession()
 			if err != nil || current == "" {
-				return nil
+				return tea.QuitMsg{}
 			}
 			sessions, _ := tmux.ListSessions()
 			for _, s := range sessions {
@@ -346,14 +413,13 @@ func (m Model) executeCommand(id string) (tea.Model, tea.Cmd) {
 				}
 			}
 			_ = tmux.KillSession(current)
-			return nil
+			return tea.QuitMsg{}
 		}
 	case "rename_session":
 		m.view = viewSessions
 		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}}
-		var cmd tea.Cmd
-		m.sessions, cmd = m.sessions.Update(km)
-		return m, cmd
+		m.pendingKey = &km
+		return m, m.sessions.Reload()
 
 	// Worktree commands — switch to worktrees view and simulate keys
 	case "wt_switch":

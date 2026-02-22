@@ -21,6 +21,11 @@ lint:
 fmt:
     golangci-lint run --fix
 
+# Run all checks (lint, format, tests)
+check:
+    golangci-lint run
+    go test ./...
+
 # Tidy modules
 tidy:
     go mod tidy
