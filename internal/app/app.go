@@ -118,7 +118,7 @@ func (m Model) initCurrentSessionWindows() tea.Cmd {
 	return func() tea.Msg {
 		name, err := tmux.CurrentSession()
 		if err != nil || name == "" {
-			return nil
+			return tea.QuitMsg{}
 		}
 		return messages.DrillWindowsMsg{SessionName: name}
 	}
