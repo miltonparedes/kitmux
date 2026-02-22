@@ -324,7 +324,7 @@ func (m Model) routeToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.view {
 	case viewSessions:
 		m.sessions, cmd = m.sessions.Update(msg)
-		if m.pendingKey != nil && m.sessions.HasData() {
+		if m.pendingKey != nil && m.sessions.ConsumeLoaded() {
 			km := *m.pendingKey
 			m.pendingKey = nil
 			var cmd2 tea.Cmd
