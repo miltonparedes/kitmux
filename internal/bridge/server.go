@@ -81,6 +81,11 @@ func handleConn(conn net.Conn) {
 		writeError(conn, fmt.Sprintf("launch %s: %v", bin, err))
 		return
 	}
+	go func() {
+		if err := cmd.Wait(); err != nil {
+			log.Printf("bridge: %s exited with error: %v", bin, err)
+		}
+	}()
 
 	log.Printf("bridge: opened %s %v (pid %d)", bin, args, cmd.Process.Pid)
 	writeOK(conn)

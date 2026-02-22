@@ -120,3 +120,8 @@ func DisplayPopup(command, width, height string) error {
 		"-d", "#{pane_current_path}",
 		"-w", width, "-h", height, "-E", command).Run()
 }
+
+// DisplayMessage shows a transient message in the tmux status area.
+func DisplayMessage(message string) error {
+	return exec.Command("tmux", "display-message", message).Run()
+}

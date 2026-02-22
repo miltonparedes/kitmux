@@ -237,7 +237,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return m, tea.Quit
 
 	case messages.OpenLocalEditorMsg:
-		// Bridge succeeded or returned fallback; just quit.
+		if msg.Err != nil {
+			_ = tmux.DisplayMessage(fmt.Sprintf("open_local_editor error: %v", msg.Err))
+			return m, tea.Quit
+		}
+		if msg.Fallback != "" {
+			_ = tmux.DisplayMessage(fmt.Sprintf("bridge unavailable, run manually: %s", msg.Fallback))
+			return m, tea.Quit
+		}
+		_ = tmux.DisplayMessage("opened local editor")
 		return m, tea.Quit
 	}
 
