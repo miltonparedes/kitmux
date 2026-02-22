@@ -27,16 +27,10 @@ var plistTemplate = template.Must(template.New("plist").Parse(`<?xml version="1.
     <string>--socket</string>
     <string>{{ .Socket }}</string>
   </array>
-  <key>Sockets</key>
-  <dict>
-    <key>Listeners</key>
-    <dict>
-      <key>SockPathName</key>
-      <string>{{ .Socket }}</string>
-      <key>SockPathMode</key>
-      <integer>384</integer>
-    </dict>
-  </dict>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <true/>
   <key>StandardOutPath</key>
   <string>{{ .LogDir }}/bridge.log</string>
   <key>StandardErrorPath</key>
