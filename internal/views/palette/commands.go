@@ -126,6 +126,14 @@ func DefaultCommands() []Command {
 			Category:    "Agent",
 		},
 
+		// Editor
+		{
+			ID:          "open_local_editor",
+			Title:       "Open in Local Editor",
+			Description: "Open current session in your local editor via SSH",
+			Category:    "Editor",
+		},
+
 		// Tools
 		{
 			ID:          "tool_lazygit",

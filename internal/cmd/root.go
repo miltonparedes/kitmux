@@ -36,6 +36,7 @@ func newRootCmd() *cobra.Command {
 	addViewCommands(cmd)
 	addRunCommand(cmd)
 	addCommandsCommand(cmd)
+	addBridgeCommand(cmd)
 
 	// Register each palette command ID as a hidden subcommand so that
 	// "kitmux switch_session" works as shorthand for "kitmux run switch_session".

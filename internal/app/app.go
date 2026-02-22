@@ -1,10 +1,13 @@
 package app
 
 import (
+	"fmt"
+
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/app/messages"
+	"github.com/miltonparedes/kitmux/internal/openlocal"
 	"github.com/miltonparedes/kitmux/internal/tmux"
 	agentsview "github.com/miltonparedes/kitmux/internal/views/agents"
 	"github.com/miltonparedes/kitmux/internal/views/palette"
@@ -231,6 +234,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case messages.RunPopupMsg:
 		_ = tmux.DisplayPopup(msg.Command, msg.Width, msg.Height)
+		return m, tea.Quit
+
+	case messages.OpenLocalEditorMsg:
+		// Bridge succeeded or returned fallback; just quit.
 		return m, tea.Quit
 	}
 
@@ -475,6 +482,38 @@ func (m Model) executeCommand(id string) (tea.Model, tea.Cmd) {
 	case "launch_opencode":
 		return m, func() tea.Msg {
 			return messages.LaunchAgentMsg{AgentID: "opencode", ModeID: "default", Target: "pane"}
+		}
+
+	// Editor commands
+	case "open_local_editor":
+		return m, func() tea.Msg {
+			path, err := openlocal.ResolveCurrentSessionPath()
+			if err != nil {
+				return messages.OpenLocalEditorMsg{Err: err}
+			}
+
+			host := openlocal.ResolveSSHHost()
+			if host == "" {
+				return messages.OpenLocalEditorMsg{
+					Err: fmt.Errorf("SSH host not configured: set KITMUX_SSH_HOST or run from a session with a cached host"),
+				}
+			}
+
+			editor := openlocal.ResolveEditor()
+			socketPath := openlocal.ResolveSocketPath()
+
+			req := openlocal.Request{
+				Editor: editor,
+				Host:   host,
+				Path:   path,
+			}
+
+			if err := openlocal.SendOpenRequest(socketPath, req); err != nil {
+				fallback := openlocal.FallbackCommand(editor, host, path)
+				return messages.OpenLocalEditorMsg{Fallback: fallback}
+			}
+
+			return messages.OpenLocalEditorMsg{}
 		}
 
 	// Tool commands

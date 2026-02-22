@@ -77,3 +77,9 @@ type RunPopupMsg struct {
 	Width   string
 	Height  string
 }
+
+// OpenLocalEditorMsg signals the result of the open-in-local-editor action.
+type OpenLocalEditorMsg struct {
+	Fallback string // non-empty when bridge was unreachable; contains the manual command
+	Err      error  // non-nil on hard failure
+}

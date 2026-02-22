@@ -306,6 +306,11 @@ func (m Model) handleNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.picker.input.Focus()
 		return m, tea.Batch(textinput.Blink, loadProjects)
 
+	case "ctrl+o":
+		return m, func() tea.Msg {
+			return messages.ExecuteCommandMsg{ID: "open_local_editor"}
+		}
+
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9",
 		"alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "alt+6", "alt+7", "alt+8", "alt+9":
 		if config.SuperKey == "none" && !msg.Alt || config.SuperKey == "alt" && msg.Alt {
