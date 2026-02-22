@@ -105,7 +105,7 @@ kitmux bridge serve
 |------------|---------|-----------|
 | [zoxide](https://github.com/ajeetdsouza/zoxide) | `projects` — indexes project directories | Yes, for project picker |
 | [git](https://git-scm.com/) | `sessions`, `projects` — detects repos and worktrees | Yes, for git-aware features |
-| [worktrunk](https://github.com/miltonparedes/worktrunk) (`wt`) | `worktrees` — manages git worktrees | Yes, for worktree manager |
+| [worktrunk](https://github.com/max-sixty/worktrunk) (`wt`) | `worktrees` — manages git worktrees | Yes, for worktree manager |
 | [lazygit](https://github.com/jesseduffield/lazygit) | `tool_lazygit` palette command | Optional |
 | [claude](https://docs.anthropic.com/en/docs/claude-code) | `agents` — Claude Code | Optional |
 | [gemini](https://github.com/google-gemini/gemini-cli) | `agents` — Gemini CLI | Optional |
