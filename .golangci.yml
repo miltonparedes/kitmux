@@ -1,0 +1,80 @@
+version: "2"
+
+run:
+  timeout: 5m
+  tests: true
+
+formatters:
+  enable:
+    - gofumpt
+  settings:
+    gofumpt:
+      extra-rules: true
+
+linters:
+  default: standard
+  enable:
+    - copyloopvar
+    - dupword
+    - durationcheck
+    - errname
+    - gochecknoinits
+    - gocognit
+    - goconst
+    - gocritic
+    - gosec
+    - misspell
+    - nilerr
+    - prealloc
+    - revive
+    - unconvert
+    - unparam
+    - usestdlibvars
+    - wastedassign
+  settings:
+    gocognit:
+      min-complexity: 65
+    goconst:
+      min-len: 5
+      min-occurrences: 5
+    gocritic:
+      enabled-tags:
+        - diagnostic
+        - performance
+      disabled-checks:
+        - singleCaseSwitch
+        - hugeParam        # Bubble Tea requires value receivers on Model
+        - rangeValCopy     # Acceptable for small-to-medium structs
+        - evalOrder        # returnToPalette pointer-receiver pattern is intentional
+    gosec:
+      excludes:
+        - G204
+    revive:
+      rules:
+        - name: blank-imports
+        - name: context-as-argument
+        - name: context-keys-type
+        - name: dot-imports
+        - name: error-naming
+        - name: error-return
+        - name: error-strings
+        - name: increment-decrement
+        - name: indent-error-flow
+        - name: range
+        - name: receiver-naming
+        - name: redefines-builtin-id
+        - name: time-naming
+        - name: unexported-return
+        - name: var-declaration
+
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+
+output:
+  formats:
+    text:
+      path: stdout
+  sort-order:
+    - linter
+    - file

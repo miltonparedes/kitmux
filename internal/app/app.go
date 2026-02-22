@@ -1,0 +1,429 @@
+package app
+
+import (
+	tea "github.com/charmbracelet/bubbletea"
+
+	"github.com/miltonparedes/kitmux/internal/agents"
+	"github.com/miltonparedes/kitmux/internal/app/messages"
+	"github.com/miltonparedes/kitmux/internal/tmux"
+	agentsview "github.com/miltonparedes/kitmux/internal/views/agents"
+	"github.com/miltonparedes/kitmux/internal/views/palette"
+	"github.com/miltonparedes/kitmux/internal/views/sessions"
+	"github.com/miltonparedes/kitmux/internal/views/windows"
+	"github.com/miltonparedes/kitmux/internal/views/worktrees"
+	"github.com/miltonparedes/kitmux/internal/worktree"
+)
+
+// Mode determines how kitmux starts.
+type Mode int
+
+const (
+	ModeSidebar   Mode = iota
+	ModePalette        // Command palette-only mode
+	ModeWorktrees      // Worktrees view
+	ModeAgents         // Agents view
+)
+
+type activeView int
+
+const (
+	viewSessions  activeView = iota
+	viewWindows              // Windows drill-down
+	viewWorktrees            // Worktree list
+	viewAgents               // Agent launcher
+)
+
+type Model struct {
+	mode          Mode
+	view          activeView
+	sessions      sessions.Model
+	windows       windows.Model
+	worktreeView  worktrees.Model
+	agentsView    agentsview.Model
+	palette       palette.Model
+	paletteActive bool
+	paletteReturn bool // return to palette after sub-action completes
+	width         int
+	height        int
+}
+
+func New(mode Mode) Model {
+	m := Model{
+		mode:         mode,
+		view:         viewSessions,
+		sessions:     sessions.New(),
+		windows:      windows.New(),
+		worktreeView: worktrees.New(),
+		agentsView:   agentsview.New(),
+		palette:      palette.New(),
+	}
+	switch mode {
+	case ModePalette:
+		m.paletteActive = true
+	case ModeWorktrees:
+		m.view = viewWorktrees
+	case ModeAgents:
+		m.view = viewAgents
+	}
+	return m
+}
+
+func (m Model) Init() tea.Cmd {
+	switch m.view {
+	case viewWorktrees:
+		return m.worktreeView.Init()
+	case viewAgents:
+		return m.agentsView.Init()
+	default:
+		return m.sessions.Init()
+	}
+}
+
+func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	switch msg := msg.(type) {
+	case tea.WindowSizeMsg:
+		m.width = msg.Width
+		m.height = msg.Height
+		m.sessions.SetSize(m.width, m.height-1)
+		m.windows.SetSize(m.width, m.height-1)
+		m.worktreeView.SetSize(m.width, m.height-1)
+		m.agentsView.SetSize(m.width, m.height-1)
+		m.palette.SetSize(m.width, m.height)
+		return m, nil
+
+	case tea.KeyMsg:
+		// Palette active — route everything there
+		if m.paletteActive {
+			switch msg.String() {
+			case "esc":
+				if m.mode == ModePalette {
+					return m, tea.Quit
+				}
+				m.paletteActive = false
+				return m, nil
+			case "ctrl+c":
+				return m, tea.Quit
+			}
+			var cmd tea.Cmd
+			m.palette, cmd = m.palette.Update(msg)
+			return m, cmd
+		}
+
+		// Global keys (only when not editing and not in palette)
+		isEditing := m.sessions.IsEditing() || m.worktreeView.IsEditing()
+		switch msg.String() {
+		case "ctrl+c":
+			return m, tea.Quit
+		case "q":
+			if !isEditing {
+				return m, tea.Quit
+			}
+		case "ctrl+p":
+			if !isEditing {
+				m.paletteActive = true
+				m.palette.Reset()
+				return m, nil
+			}
+		case "w":
+			if !isEditing && m.view != viewWorktrees {
+				m.view = viewWorktrees
+				return m, m.worktreeView.Init()
+			}
+		case "a":
+			if !isEditing && m.view != viewAgents {
+				m.view = viewAgents
+				return m, nil
+			}
+		case "esc":
+			if m.paletteReturn && !isEditing {
+				return m, m.returnToPalette()
+			}
+			switch m.view {
+			case viewWindows:
+				m.view = viewSessions
+				return m, nil
+			case viewWorktrees:
+				if m.mode == ModeWorktrees {
+					return m, tea.Quit
+				}
+				m.view = viewSessions
+				return m, nil
+			case viewAgents:
+				if m.mode == ModeAgents {
+					return m, tea.Quit
+				}
+				m.view = viewSessions
+				return m, nil
+			default:
+				if !m.sessions.IsEditing() {
+					return m, tea.Quit
+				}
+				// esc in sessions editing → falls through to sessions.Update
+			}
+		}
+
+	case messages.TogglePaletteMsg:
+		if m.mode == ModePalette {
+			return m, tea.Quit
+		}
+		m.paletteActive = !m.paletteActive
+		if m.paletteActive {
+			m.palette.Reset()
+		}
+		return m, nil
+
+	case messages.ExecuteCommandMsg:
+		m.paletteActive = false
+		return m.executeCommand(msg.ID)
+
+	case messages.SwitchSessionMsg:
+		_ = tmux.SwitchClient(msg.Name)
+		return m, tea.Quit
+
+	case messages.SwitchWindowMsg:
+		_ = tmux.SwitchClient(msg.Target)
+		return m, tea.Quit
+
+	case messages.DrillWindowsMsg:
+		m.view = viewWindows
+		cmd := m.windows.LoadSession(msg.SessionName)
+		return m, cmd
+
+	case messages.BackToSessionsMsg:
+		if m.paletteReturn {
+			return m, m.returnToPalette()
+		}
+		m.view = viewSessions
+		return m, nil
+
+	case messages.SessionCursorMsg:
+		return m, nil
+
+	case messages.ReloadSessionsMsg:
+		m.view = viewSessions
+		return m, m.sessions.Reload()
+
+	case messages.CreateSessionInDirMsg:
+		_ = tmux.NewSessionInDir(msg.Name, msg.Dir)
+		_ = tmux.SwitchClient(msg.Name)
+		return m, tea.Quit
+
+	case messages.SwitchWorktreeMsg:
+		_ = worktree.SwitchTo(msg.Branch)
+		return m, tea.Quit
+
+	case messages.CreateWorktreeMsg:
+		_ = worktree.Create(msg.Branch)
+		return m, tea.Quit
+
+	case messages.RemoveWorktreeMsg:
+		_ = worktree.Remove(msg.Branch)
+		return m, m.worktreeView.Reload()
+
+	case messages.ReloadWorktreesMsg:
+		return m, m.worktreeView.Reload()
+
+	case messages.LaunchAgentMsg:
+		return m.launchAgent(msg)
+
+	case messages.SwitchViewMsg:
+		switch msg.View {
+		case "sessions":
+			if m.paletteReturn {
+				return m, m.returnToPalette()
+			}
+			m.view = viewSessions
+			return m, nil
+		case "worktrees":
+			m.view = viewWorktrees
+			return m, m.worktreeView.Init()
+		case "agents":
+			m.view = viewAgents
+			return m, nil
+		}
+		return m, nil
+
+	case messages.RunPopupMsg:
+		_ = tmux.DisplayPopup(msg.Command, msg.Width, msg.Height)
+		return m, tea.Quit
+	}
+
+	// Route to active view
+	var cmd tea.Cmd
+	switch m.view {
+	case viewSessions:
+		m.sessions, cmd = m.sessions.Update(msg)
+		if m.paletteReturn && !m.sessions.IsEditing() {
+			return m, m.returnToPalette()
+		}
+	case viewWindows:
+		m.windows, cmd = m.windows.Update(msg)
+	case viewWorktrees:
+		m.worktreeView, cmd = m.worktreeView.Update(msg)
+		if m.paletteReturn && !m.worktreeView.IsEditing() {
+			return m, m.returnToPalette()
+		}
+	case viewAgents:
+		m.agentsView, cmd = m.agentsView.Update(msg)
+	}
+	return m, cmd
+}
+
+func (m Model) View() string {
+	if m.paletteActive {
+		return m.palette.View()
+	}
+
+	switch m.view {
+	case viewWindows:
+		return m.windows.View()
+	case viewWorktrees:
+		return m.worktreeView.View()
+	case viewAgents:
+		return m.agentsView.View()
+	default:
+		return m.sessions.View()
+	}
+}
+
+// returnToPalette reactivates the palette or quits if in palette-only mode.
+// Must be called on the m being returned (value receiver — mutations stay local).
+func (m *Model) returnToPalette() tea.Cmd {
+	m.paletteReturn = false
+	if m.mode == ModePalette {
+		return tea.Quit
+	}
+	m.paletteActive = true
+	m.palette.Reset()
+	return nil
+}
+
+func (m Model) executeCommand(id string) (tea.Model, tea.Cmd) {
+	m.paletteReturn = true
+
+	switch id {
+	// Session commands
+	case "open_project":
+		m.view = viewSessions
+		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}}
+		var cmd tea.Cmd
+		m.sessions, cmd = m.sessions.Update(km)
+		return m, cmd
+	case "kill_session":
+		m.view = viewSessions
+		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}
+		var cmd tea.Cmd
+		m.sessions, cmd = m.sessions.Update(km)
+		return m, cmd
+	case "rename_session":
+		m.view = viewSessions
+		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}}
+		var cmd tea.Cmd
+		m.sessions, cmd = m.sessions.Update(km)
+		return m, cmd
+
+	// Worktree commands — switch to worktrees view and simulate keys
+	case "wt_switch":
+		m.view = viewWorktrees
+		return m, m.worktreeView.Init()
+	case "wt_create":
+		m.view = viewWorktrees
+		cmd := m.worktreeView.Init()
+		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}}
+		var cmd2 tea.Cmd
+		m.worktreeView, cmd2 = m.worktreeView.Update(km)
+		return m, tea.Batch(cmd, cmd2)
+	case "wt_create_describe":
+		m.view = viewWorktrees
+		cmd := m.worktreeView.Init()
+		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}}
+		var cmd2 tea.Cmd
+		m.worktreeView, cmd2 = m.worktreeView.Update(km)
+		return m, tea.Batch(cmd, cmd2)
+	case "wt_remove":
+		m.view = viewWorktrees
+		cmd := m.worktreeView.Init()
+		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}
+		var cmd2 tea.Cmd
+		m.worktreeView, cmd2 = m.worktreeView.Update(km)
+		return m, tea.Batch(cmd, cmd2)
+	case "wt_merge":
+		return m, func() tea.Msg {
+			return messages.RunPopupMsg{Command: "wt merge", Width: "80%", Height: "80%"}
+		}
+	case "wt_commit":
+		return m, func() tea.Msg {
+			return messages.RunPopupMsg{Command: "wt step commit", Width: "80%", Height: "80%"}
+		}
+
+	// Agent commands — launch directly
+	case "launch_claude":
+		return m, func() tea.Msg {
+			return messages.LaunchAgentMsg{AgentID: "claude", ModeID: "default", Target: "pane"}
+		}
+	case "launch_gemini":
+		return m, func() tea.Msg {
+			return messages.LaunchAgentMsg{AgentID: "gemini", ModeID: "default", Target: "pane"}
+		}
+	case "launch_codex":
+		return m, func() tea.Msg {
+			return messages.LaunchAgentMsg{AgentID: "codex", ModeID: "default", Target: "pane"}
+		}
+	case "launch_aichat":
+		return m, func() tea.Msg {
+			return messages.LaunchAgentMsg{AgentID: "aichat", ModeID: "default", Target: "pane"}
+		}
+	case "launch_opencode":
+		return m, func() tea.Msg {
+			return messages.LaunchAgentMsg{AgentID: "opencode", ModeID: "default", Target: "pane"}
+		}
+
+	// Tool commands
+	case "tool_lazygit":
+		return m, func() tea.Msg {
+			return messages.RunPopupMsg{Command: "lazygit", Width: "100%", Height: "100%"}
+		}
+	case "tool_lumen_diff":
+		return m, func() tea.Msg {
+			return messages.RunPopupMsg{Command: "lumen diff", Width: "100%", Height: "100%"}
+		}
+
+	// View commands
+	case "view_sessions":
+		m.view = viewSessions
+		return m, nil
+	case "view_worktrees":
+		m.view = viewWorktrees
+		return m, m.worktreeView.Init()
+	case "view_agents":
+		m.view = viewAgents
+		return m, nil
+	}
+	return m, nil
+}
+
+func (m Model) launchAgent(msg messages.LaunchAgentMsg) (tea.Model, tea.Cmd) {
+	// Find the agent and mode
+	agentsList := agents.DefaultAgents()
+	for _, a := range agentsList {
+		if a.ID != msg.AgentID {
+			continue
+		}
+		for _, mode := range a.Modes {
+			if mode.ID != msg.ModeID {
+				continue
+			}
+			command := a.FullCommand(mode)
+			switch msg.Target {
+			case "split":
+				_ = tmux.SplitWindow(command)
+			case "window":
+				_ = tmux.NewWindowWithCommand(a.Name, command)
+			default: // "pane"
+				_ = tmux.SendKeys("!", command)
+			}
+			return m, tea.Quit
+		}
+	}
+	return m, tea.Quit
+}
