@@ -563,3 +563,11 @@ func (m Model) emitCursorChange() tea.Cmd {
 func (m Model) Reload() tea.Cmd {
 	return m.loadSessions
 }
+
+// InitProjectPicker activates the project picker and starts loading projects.
+func (m *Model) InitProjectPicker() tea.Cmd {
+	m.picking = true
+	m.picker.input.SetValue("")
+	m.picker.input.Focus()
+	return tea.Batch(textinput.Blink, loadProjects)
+}

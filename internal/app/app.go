@@ -18,10 +18,13 @@ import (
 type Mode int
 
 const (
-	ModeSidebar   Mode = iota
-	ModePalette        // Command palette-only mode
-	ModeWorktrees      // Worktrees view
-	ModeAgents         // Agents view
+	ModeSessions  Mode = iota // Session tree view
+	ModePalette               // Command palette-only mode
+	ModeWorktrees             // Worktrees view
+	ModeAgents                // Agents view
+	ModeProjects              // Project picker (direct access)
+	ModeWindows               // Windows for current session
+	ModeRun                   // Execute a palette command directly
 )
 
 type activeView int
@@ -45,9 +48,10 @@ type Model struct {
 	paletteReturn bool // return to palette after sub-action completes
 	width         int
 	height        int
+	runCommandID  string // for ModeRun: the command to execute
 }
 
-func New(mode Mode) Model {
+func New(mode Mode, opts ...Option) Model {
 	m := Model{
 		mode:         mode,
 		view:         viewSessions,
@@ -57,6 +61,9 @@ func New(mode Mode) Model {
 		agentsView:   agentsview.New(),
 		palette:      palette.New(),
 	}
+	for _, opt := range opts {
+		opt(&m)
+	}
 	switch mode {
 	case ModePalette:
 		m.paletteActive = true
@@ -64,18 +71,54 @@ func New(mode Mode) Model {
 		m.view = viewWorktrees
 	case ModeAgents:
 		m.view = viewAgents
+	case ModeProjects:
+		m.view = viewSessions
+	case ModeWindows:
+		m.view = viewWindows
 	}
 	return m
 }
 
+// Option configures a Model.
+type Option func(*Model)
+
+// WithRunCommand sets the command ID for ModeRun.
+func WithRunCommand(id string) Option {
+	return func(m *Model) {
+		m.runCommandID = id
+	}
+}
+
 func (m Model) Init() tea.Cmd {
-	switch m.view {
-	case viewWorktrees:
-		return m.worktreeView.Init()
-	case viewAgents:
-		return m.agentsView.Init()
+	switch m.mode {
+	case ModeRun:
+		id := m.runCommandID
+		return func() tea.Msg {
+			return messages.ExecuteCommandMsg{ID: id}
+		}
+	case ModeProjects:
+		return m.sessions.InitProjectPicker()
+	case ModeWindows:
+		return m.initCurrentSessionWindows()
 	default:
-		return m.sessions.Init()
+		switch m.view {
+		case viewWorktrees:
+			return m.worktreeView.Init()
+		case viewAgents:
+			return m.agentsView.Init()
+		default:
+			return m.sessions.Init()
+		}
+	}
+}
+
+func (m Model) initCurrentSessionWindows() tea.Cmd {
+	return func() tea.Msg {
+		name, err := tmux.CurrentSession()
+		if err != nil || name == "" {
+			return nil
+		}
+		return messages.DrillWindowsMsg{SessionName: name}
 	}
 }
 
@@ -147,6 +190,9 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			}
 			switch m.view {
 			case viewWindows:
+				if m.mode == ModeWindows {
+					return m, tea.Quit
+				}
 				m.view = viewSessions
 				return m, nil
 			case viewWorktrees:
@@ -162,10 +208,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				m.view = viewSessions
 				return m, nil
 			default:
-				if !m.sessions.IsEditing() {
+				if m.sessions.IsEditing() {
+					if m.mode == ModeProjects {
+						// ESC from project picker in direct mode → quit
+						return m, tea.Quit
+					}
+					// esc in sessions editing → falls through to sessions.Update
+				} else {
 					return m, tea.Quit
 				}
-				// esc in sessions editing → falls through to sessions.Update
 			}
 		}
 
@@ -299,11 +350,11 @@ func (m Model) View() string {
 	}
 }
 
-// returnToPalette reactivates the palette or quits if in palette-only mode.
+// returnToPalette reactivates the palette or quits if in a terminal mode.
 // Must be called on the m being returned (value receiver — mutations stay local).
 func (m *Model) returnToPalette() tea.Cmd {
 	m.paletteReturn = false
-	if m.mode == ModePalette {
+	if m.mode == ModePalette || m.mode == ModeRun || m.mode == ModeProjects {
 		return tea.Quit
 	}
 	m.paletteActive = true
@@ -322,10 +373,7 @@ func (m Model) executeCommand(id string) (tea.Model, tea.Cmd) {
 		return m, m.sessions.Reload()
 	case "open_project":
 		m.view = viewSessions
-		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}}
-		var cmd tea.Cmd
-		m.sessions, cmd = m.sessions.Update(km)
-		return m, cmd
+		return m, m.sessions.InitProjectPicker()
 	case "kill_session":
 		m.view = viewSessions
 		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}
@@ -333,7 +381,7 @@ func (m Model) executeCommand(id string) (tea.Model, tea.Cmd) {
 		m.sessions, cmd = m.sessions.Update(km)
 		return m, cmd
 	case "kill_current_session":
-		return m, func() tea.Msg {
+		return m, tea.Batch(func() tea.Msg {
 			current, err := tmux.CurrentSession()
 			if err != nil || current == "" {
 				return nil
@@ -347,7 +395,7 @@ func (m Model) executeCommand(id string) (tea.Model, tea.Cmd) {
 			}
 			_ = tmux.KillSession(current)
 			return nil
-		}
+		}, tea.Quit)
 	case "rename_session":
 		m.view = viewSessions
 		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}}

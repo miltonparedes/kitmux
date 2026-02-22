@@ -11,6 +11,16 @@ type Command struct {
 	Action      func() tea.Msg
 }
 
+// IsValidCommand returns true if the given ID matches a registered command.
+func IsValidCommand(id string) bool {
+	for _, cmd := range DefaultCommands() {
+		if cmd.ID == id {
+			return true
+		}
+	}
+	return false
+}
+
 // DefaultCommands returns the built-in command registry.
 func DefaultCommands() []Command {
 	return []Command{
