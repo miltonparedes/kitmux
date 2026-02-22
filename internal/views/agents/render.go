@@ -38,6 +38,11 @@ func (m Model) View() string {
 	for i := start; i < end; i++ {
 		a := m.agents[i]
 		selected := i == m.cursor
+		if i < 9 {
+			b.WriteString(theme.TreeMeta.Render(fmt.Sprintf("%d", i+1)))
+		} else {
+			b.WriteString(" ")
+		}
 		b.WriteString(renderAgent(a, m.modeIndex[i], selected))
 		b.WriteString("\n")
 

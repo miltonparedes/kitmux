@@ -76,6 +76,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 				m.cursor = 0
 			}
 			return m, nil
+
+		case "alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "alt+6", "alt+7", "alt+8", "alt+9":
+			idx := int(msg.Runes[0]-'0') - 1
+			if idx < len(m.filtered) {
+				cmd := m.filtered[idx]
+				return m, func() tea.Msg {
+					return messages.ExecuteCommandMsg{ID: cmd.ID}
+				}
+			}
+			return m, nil
 		}
 	}
 

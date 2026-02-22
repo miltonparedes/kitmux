@@ -39,10 +39,27 @@ func (m Model) View() string {
 		end = len(m.visible)
 	}
 
+	// Count sessions before the visible window for correct numbering
+	sessionNum := 0
+	for i := 0; i < start; i++ {
+		if m.visible[i].Kind == KindSession {
+			sessionNum++
+		}
+	}
 	for i := start; i < end; i++ {
 		node := m.visible[i]
 		selected := i == m.cursor
-		b.WriteString(renderNode(node, selected, m.width))
+		if node.Kind == KindSession {
+			sessionNum++
+			if sessionNum <= 9 {
+				b.WriteString(theme.TreeMeta.Render(fmt.Sprintf("%d", sessionNum)))
+			} else {
+				b.WriteString(" ")
+			}
+		} else {
+			b.WriteString(" ")
+		}
+		b.WriteString(renderNode(node, selected, m.width-1))
 		b.WriteString("\n")
 
 		if i < end-1 {

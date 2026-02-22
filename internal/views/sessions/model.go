@@ -6,6 +6,7 @@ import (
 	"github.com/sahilm/fuzzy"
 
 	"github.com/miltonparedes/kitmux/internal/app/messages"
+	"github.com/miltonparedes/kitmux/internal/config"
 	"github.com/miltonparedes/kitmux/internal/tmux"
 	"github.com/miltonparedes/kitmux/internal/worktree"
 )
@@ -261,11 +262,23 @@ func (m Model) handleNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.picker.input.Focus()
 		return m, tea.Batch(textinput.Blink, loadProjects)
 
-	case "1", "2", "3", "4", "5", "6", "7", "8", "9":
-		idx := int(msg.String()[0]-'0') - 1
-		if msg.Alt && idx < len(m.visible) {
-			m.cursor = idx
-			m.ensureVisible()
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9",
+		"alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "alt+6", "alt+7", "alt+8", "alt+9":
+		if config.SuperKey == "none" && !msg.Alt || config.SuperKey == "alt" && msg.Alt {
+			digit := msg.Runes[0]
+			target := int(digit - '0')
+			n := 0
+			for _, node := range m.visible {
+				if node.Kind == KindSession {
+					n++
+					if n == target {
+						name := node.SessionName
+						return m, func() tea.Msg {
+							return messages.SwitchSessionMsg{Name: name}
+						}
+					}
+				}
+			}
 		}
 	}
 

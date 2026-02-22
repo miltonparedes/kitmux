@@ -5,6 +5,7 @@ import (
 
 	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/app/messages"
+	"github.com/miltonparedes/kitmux/internal/config"
 )
 
 // Model is the agents list view.
@@ -71,6 +72,16 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, m.launchCmd("split")
 		case "w":
 			return m, m.launchCmd("window")
+
+		case "1", "2", "3", "4", "5", "6", "7", "8", "9",
+			"alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "alt+6", "alt+7", "alt+8", "alt+9":
+			if config.SuperKey == "none" && !msg.Alt || config.SuperKey == "alt" && msg.Alt {
+				idx := int(msg.Runes[0]-'0') - 1
+				if idx < len(m.agents) {
+					m.cursor = idx
+					return m, m.launchCmd("pane")
+				}
+			}
 
 		case "esc":
 			return m, func() tea.Msg {

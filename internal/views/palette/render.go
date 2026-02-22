@@ -40,6 +40,12 @@ func (m Model) View() string {
 		cmd := m.filtered[i]
 		cat := theme.PaletteCategory.Render(cmd.Category)
 
+		if i < 9 {
+			b.WriteString(theme.TreeMeta.Render(fmt.Sprintf("%d", i+1)))
+		} else {
+			b.WriteString(" ")
+		}
+
 		if i == m.cursor {
 			fmt.Fprintf(&b, " %s %s  %s",
 				theme.PaletteItemSelected.Render("▸"),

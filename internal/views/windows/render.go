@@ -40,6 +40,12 @@ func (m Model) View() string {
 				active = " " + theme.AttachedBadge.Render("●")
 			}
 
+			if i < 9 {
+				b.WriteString(theme.TreeMeta.Render(fmt.Sprintf("%d", i+1)))
+			} else {
+				b.WriteString(" ")
+			}
+
 			if selected {
 				fmt.Fprintf(&b, " %s%s", theme.TreeNodeSelected.Render(name), active)
 			} else {

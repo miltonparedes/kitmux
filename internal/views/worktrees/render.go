@@ -34,9 +34,14 @@ func (m Model) View() string {
 	}
 
 	for i := start; i < end; i++ {
-		wt := &m.worktrees[i]
+		w := &m.worktrees[i]
 		selected := i == m.cursor
-		b.WriteString(renderWorktree(wt, selected))
+		if i < 9 {
+			b.WriteString(theme.TreeMeta.Render(fmt.Sprintf("%d", i+1)))
+		} else {
+			b.WriteString(" ")
+		}
+		b.WriteString(renderWorktree(w, selected))
 		b.WriteString("\n")
 
 		if i < end-1 {
@@ -82,7 +87,7 @@ func (m Model) StatusLine() string {
 	return theme.HelpStyle.Render(" ⏎ switch  n new  N describe  d rm  q quit")
 }
 
-func renderWorktree(wt *worktree.Worktree, selected bool) string {
+func renderWorktree(w *worktree.Worktree, selected bool) string {
 	var parts []string
 
 	// Cursor indicator
@@ -94,40 +99,40 @@ func renderWorktree(wt *worktree.Worktree, selected bool) string {
 
 	// Branch name
 	if selected {
-		parts = append(parts, theme.TreeNodeSelected.Render(wt.Branch))
+		parts = append(parts, theme.TreeNodeSelected.Render(w.Branch))
 	} else {
-		parts = append(parts, theme.TreeNodeNormal.Render(wt.Branch))
+		parts = append(parts, theme.TreeNodeNormal.Render(w.Branch))
 	}
 
 	// Status symbols
-	if wt.Symbols != "" {
-		if strings.ContainsAny(wt.Symbols, "+!?") {
-			parts = append(parts, theme.DirtyBadge.Render(wt.Symbols))
+	if w.Symbols != "" {
+		if strings.ContainsAny(w.Symbols, "+!?") {
+			parts = append(parts, theme.DirtyBadge.Render(w.Symbols))
 		} else {
-			parts = append(parts, theme.CleanBadge.Render(wt.Symbols))
+			parts = append(parts, theme.CleanBadge.Render(w.Symbols))
 		}
 	}
 
 	// Diff stats
-	if wt.WorkingTree.Diff.Added > 0 || wt.WorkingTree.Diff.Deleted > 0 {
-		if wt.WorkingTree.Diff.Added > 0 {
-			parts = append(parts, theme.DiffAdded.Render(fmt.Sprintf("+%d", wt.WorkingTree.Diff.Added)))
+	if w.WorkingTree.Diff.Added > 0 || w.WorkingTree.Diff.Deleted > 0 {
+		if w.WorkingTree.Diff.Added > 0 {
+			parts = append(parts, theme.DiffAdded.Render(fmt.Sprintf("+%d", w.WorkingTree.Diff.Added)))
 		}
-		if wt.WorkingTree.Diff.Deleted > 0 {
-			parts = append(parts, theme.DiffRemoved.Render(fmt.Sprintf("-%d", wt.WorkingTree.Diff.Deleted)))
+		if w.WorkingTree.Diff.Deleted > 0 {
+			parts = append(parts, theme.DiffRemoved.Render(fmt.Sprintf("-%d", w.WorkingTree.Diff.Deleted)))
 		}
 	}
 
 	// Remote ahead/behind
-	if wt.Remote.Ahead > 0 {
-		parts = append(parts, theme.DiffAdded.Render(fmt.Sprintf("⇡%d", wt.Remote.Ahead)))
+	if w.Remote.Ahead > 0 {
+		parts = append(parts, theme.DiffAdded.Render(fmt.Sprintf("⇡%d", w.Remote.Ahead)))
 	}
-	if wt.Remote.Behind > 0 {
-		parts = append(parts, theme.DiffRemoved.Render(fmt.Sprintf("⇣%d", wt.Remote.Behind)))
+	if w.Remote.Behind > 0 {
+		parts = append(parts, theme.DiffRemoved.Render(fmt.Sprintf("⇣%d", w.Remote.Behind)))
 	}
 
 	// Current indicator
-	if wt.IsCurrent {
+	if w.IsCurrent {
 		parts = append(parts, theme.AttachedBadge.Render("●"))
 	}
 

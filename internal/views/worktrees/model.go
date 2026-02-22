@@ -5,6 +5,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/miltonparedes/kitmux/internal/app/messages"
+	"github.com/miltonparedes/kitmux/internal/config"
 	"github.com/miltonparedes/kitmux/internal/worktree"
 )
 
@@ -146,6 +147,18 @@ func (m Model) handleNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "c":
 		return m, func() tea.Msg {
 			return messages.RunPopupMsg{Command: "wt step commit", Width: "80%", Height: "80%"}
+		}
+
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9",
+		"alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "alt+6", "alt+7", "alt+8", "alt+9":
+		if config.SuperKey == "none" && !msg.Alt || config.SuperKey == "alt" && msg.Alt {
+			idx := int(msg.Runes[0]-'0') - 1
+			if idx < len(m.worktrees) {
+				branch := m.worktrees[idx].Branch
+				return m, func() tea.Msg {
+					return messages.SwitchWorktreeMsg{Branch: branch}
+				}
+			}
 		}
 
 	case "esc":
