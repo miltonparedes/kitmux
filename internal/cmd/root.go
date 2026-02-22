@@ -1,6 +1,8 @@
 package cmd
 
 import (
+	"fmt"
+
 	"github.com/spf13/cobra"
 
 	"github.com/miltonparedes/kitmux/internal/app"
@@ -22,6 +24,14 @@ func newRootCmd() *cobra.Command {
 
 	cmd.PersistentFlags().StringVar(&config.SuperKey, "super", "none",
 		"modifier for 1-9 jump (alt|none)")
+	cmd.PersistentPreRunE = func(_ *cobra.Command, _ []string) error {
+		switch config.SuperKey {
+		case "alt", "none":
+			return nil
+		default:
+			return fmt.Errorf("invalid --super value %q (must be alt or none)", config.SuperKey)
+		}
+	}
 
 	addViewCommands(cmd)
 	addRunCommand(cmd)

@@ -45,7 +45,8 @@ type Model struct {
 	agentsView    agentsview.Model
 	palette       palette.Model
 	paletteActive bool
-	paletteReturn bool // return to palette after sub-action completes
+	paletteReturn bool       // return to palette after sub-action completes
+	pendingKey    *tea.KeyMsg // key to inject after sessions load
 	width         int
 	height        int
 	runCommandID  string // for ModeRun: the command to execute
@@ -73,6 +74,7 @@ func New(mode Mode, opts ...Option) Model {
 		m.view = viewAgents
 	case ModeProjects:
 		m.view = viewSessions
+		m.sessions.SetPickingMode()
 	case ModeWindows:
 		m.view = viewWindows
 	}
@@ -97,7 +99,7 @@ func (m Model) Init() tea.Cmd {
 			return messages.ExecuteCommandMsg{ID: id}
 		}
 	case ModeProjects:
-		return m.sessions.InitProjectPicker()
+		return m.sessions.ProjectPickerCmds()
 	case ModeWindows:
 		return m.initCurrentSessionWindows()
 	default:
@@ -322,6 +324,13 @@ func (m Model) routeToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch m.view {
 	case viewSessions:
 		m.sessions, cmd = m.sessions.Update(msg)
+		if m.pendingKey != nil && m.sessions.HasData() {
+			km := *m.pendingKey
+			m.pendingKey = nil
+			var cmd2 tea.Cmd
+			m.sessions, cmd2 = m.sessions.Update(km)
+			cmd = tea.Batch(cmd, cmd2)
+		}
 		if m.paletteReturn && !m.sessions.IsEditing() {
 			if cmd != nil {
 				return m, cmd
@@ -388,14 +397,13 @@ func (m Model) executeCommand(id string) (tea.Model, tea.Cmd) {
 	case "kill_session":
 		m.view = viewSessions
 		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}
-		var cmd tea.Cmd
-		m.sessions, cmd = m.sessions.Update(km)
-		return m, cmd
+		m.pendingKey = &km
+		return m, m.sessions.Reload()
 	case "kill_current_session":
-		return m, tea.Batch(func() tea.Msg {
+		return m, func() tea.Msg {
 			current, err := tmux.CurrentSession()
 			if err != nil || current == "" {
-				return nil
+				return tea.QuitMsg{}
 			}
 			sessions, _ := tmux.ListSessions()
 			for _, s := range sessions {
@@ -405,14 +413,13 @@ func (m Model) executeCommand(id string) (tea.Model, tea.Cmd) {
 				}
 			}
 			_ = tmux.KillSession(current)
-			return nil
-		}, tea.Quit)
+			return tea.QuitMsg{}
+		}
 	case "rename_session":
 		m.view = viewSessions
 		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}}
-		var cmd tea.Cmd
-		m.sessions, cmd = m.sessions.Update(km)
-		return m, cmd
+		m.pendingKey = &km
+		return m, m.sessions.Reload()
 
 	// Worktree commands — switch to worktrees view and simulate keys
 	case "wt_switch":

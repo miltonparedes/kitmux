@@ -564,10 +564,28 @@ func (m Model) Reload() tea.Cmd {
 	return m.loadSessions
 }
 
-// InitProjectPicker activates the project picker and starts loading projects.
-func (m *Model) InitProjectPicker() tea.Cmd {
+// HasData returns true when sessions have been loaded.
+func (m Model) HasData() bool {
+	return len(m.visible) > 0
+}
+
+// SetPickingMode activates the project picker state.
+// Use this from a value-receiver context (e.g. Init) where pointer-receiver
+// mutations would be lost.
+func (m *Model) SetPickingMode() {
 	m.picking = true
 	m.picker.input.SetValue("")
 	m.picker.input.Focus()
+}
+
+// ProjectPickerCmds returns the commands needed for the project picker
+// without mutating state.
+func (m Model) ProjectPickerCmds() tea.Cmd {
 	return tea.Batch(textinput.Blink, loadProjects)
+}
+
+// InitProjectPicker activates the project picker and starts loading projects.
+func (m *Model) InitProjectPicker() tea.Cmd {
+	m.SetPickingMode()
+	return m.ProjectPickerCmds()
 }
