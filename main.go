@@ -47,7 +47,7 @@ func main() {
 		os.Exit(1)
 	}
 
-	p := tea.NewProgram(app.New(mode), tea.WithAltScreen())
+	p := tea.NewProgram(app.New(mode), tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
 		fmt.Fprintf(os.Stderr, "kitmux: %v\n", err)
 		os.Exit(1)

@@ -79,6 +79,38 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.clampCursor()
 		return m, nil
 
+	case tea.MouseMsg:
+		if m.IsEditing() {
+			return m, nil
+		}
+		switch msg.Button {
+		case tea.MouseButtonLeft:
+			if msg.Action != tea.MouseActionRelease {
+				return m, nil
+			}
+			row := msg.Y
+			if row%2 != 0 {
+				return m, nil
+			}
+			idx := m.scroll + row/2
+			if idx < 0 || idx >= len(m.worktrees) {
+				return m, nil
+			}
+			branch := m.worktrees[idx].Branch
+			return m, func() tea.Msg {
+				return messages.SwitchWorktreeMsg{Branch: branch}
+			}
+		case tea.MouseButtonWheelUp:
+			m.cursor--
+			m.clampCursor()
+			m.ensureVisible()
+		case tea.MouseButtonWheelDown:
+			m.cursor++
+			m.clampCursor()
+			m.ensureVisible()
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		if m.confirming {
 			return m.handleConfirm(msg)

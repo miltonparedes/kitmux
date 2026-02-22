@@ -50,6 +50,40 @@ func (m Model) Init() tea.Cmd {
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case tea.MouseMsg:
+		switch msg.Button {
+		case tea.MouseButtonLeft:
+			if msg.Action != tea.MouseActionRelease {
+				return m, nil
+			}
+			row := msg.Y
+			if row < 2 || (row-2)%2 != 0 {
+				return m, nil
+			}
+			idx := (row - 2) / 2
+			if idx < 0 || idx >= len(m.filtered) {
+				return m, nil
+			}
+			cmd := m.filtered[idx]
+			return m, func() tea.Msg {
+				return messages.ExecuteCommandMsg{ID: cmd.ID}
+			}
+		case tea.MouseButtonWheelUp:
+			m.cursor--
+			if m.cursor < 0 {
+				m.cursor = 0
+			}
+		case tea.MouseButtonWheelDown:
+			m.cursor++
+			if m.cursor >= len(m.filtered) {
+				m.cursor = len(m.filtered) - 1
+			}
+			if m.cursor < 0 {
+				m.cursor = 0
+			}
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "enter":

@@ -91,6 +91,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.palette.SetSize(m.width, m.height)
 		return m, nil
 
+	case tea.MouseMsg:
+		if m.paletteActive {
+			var cmd tea.Cmd
+			m.palette, cmd = m.palette.Update(msg)
+			return m, cmd
+		}
+
 	case tea.KeyMsg:
 		// Palette active — route everything there
 		if m.paletteActive {

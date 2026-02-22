@@ -149,6 +149,48 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.picker.setProjects(msg.projects)
 		return m, nil
 
+	case tea.MouseMsg:
+		if m.IsEditing() {
+			return m, nil
+		}
+		switch msg.Button {
+		case tea.MouseButtonLeft:
+			if msg.Action != tea.MouseActionRelease {
+				return m, nil
+			}
+			row := msg.Y
+			if row%2 != 0 {
+				return m, nil
+			}
+			idx := m.scroll + row/2
+			if idx < 0 || idx >= len(m.visible) {
+				return m, nil
+			}
+			node := m.visible[idx]
+			if len(node.Children) > 0 {
+				node.Expanded = !node.Expanded
+				m.visible = Flatten(m.roots)
+				m.clampCursor()
+				return m, nil
+			}
+			if node.Kind == KindSession {
+				return m, func() tea.Msg {
+					return messages.SwitchSessionMsg{Name: node.SessionName}
+				}
+			}
+		case tea.MouseButtonWheelUp:
+			m.cursor--
+			m.clampCursor()
+			m.ensureVisible()
+			return m, m.emitCursorChange()
+		case tea.MouseButtonWheelDown:
+			m.cursor++
+			m.clampCursor()
+			m.ensureVisible()
+			return m, m.emitCursorChange()
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		if m.picking {
 			return m.handlePicker(msg)

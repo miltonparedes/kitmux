@@ -67,6 +67,36 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			m.clampCursor()
 		}
 
+	case tea.MouseMsg:
+		switch msg.Button {
+		case tea.MouseButtonLeft:
+			if msg.Action != tea.MouseActionRelease {
+				return m, nil
+			}
+			row := msg.Y
+			if row < 1 {
+				return m, nil
+			}
+			idx := m.scroll + (row - 1)
+			if idx < 0 || idx >= len(m.windows) {
+				return m, nil
+			}
+			w := m.windows[idx]
+			target := fmt.Sprintf("%s:%d", w.SessionName, w.Index)
+			return m, func() tea.Msg {
+				return messages.SwitchWindowMsg{Target: target}
+			}
+		case tea.MouseButtonWheelUp:
+			m.cursor--
+			m.clampCursor()
+			m.ensureVisible()
+		case tea.MouseButtonWheelDown:
+			m.cursor++
+			m.clampCursor()
+			m.ensureVisible()
+		}
+		return m, nil
+
 	case tea.KeyMsg:
 		switch msg.String() {
 		case "j", "down":
