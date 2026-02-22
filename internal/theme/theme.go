@@ -2,23 +2,21 @@ package theme
 
 import "github.com/charmbracelet/lipgloss"
 
-// Mellifluous palette extracted from tmux/darwin.conf
+// ANSI 16 colors — adapts to the terminal's active theme.
 var (
-	Accent = lipgloss.Color("#c0af8c")
-	Dim    = lipgloss.Color("#5b5b5b")
-	Fg     = lipgloss.Color("#dadada")
-	Border = lipgloss.Color("#5b5b5b")
-	Muted  = lipgloss.Color("#3d3d3d")
-	Purple = lipgloss.Color("#a8a1be")
-	Green  = lipgloss.Color("#8fae80")
-	Red    = lipgloss.Color("#c47a7a")
-	Yellow = lipgloss.Color("#d4a959")
+	Accent = lipgloss.Color("6")  // Cyan
+	Dim    = lipgloss.Color("8")  // BrightBlack
+	Border = lipgloss.Color("8")  // BrightBlack
+	Muted  = lipgloss.Color("8")  // BrightBlack
+	Purple = lipgloss.Color("5")  // Magenta
+	Green  = lipgloss.Color("2")  // Green
+	Red    = lipgloss.Color("1")  // Red
+	Yellow = lipgloss.Color("3")  // Yellow
 )
 
 // Reusable styles
 var (
-	TreeNodeNormal = lipgloss.NewStyle().
-			Foreground(Fg)
+	TreeNodeNormal = lipgloss.NewStyle()
 
 	TreeNodeSelected = lipgloss.NewStyle().
 				Foreground(Accent).
@@ -39,8 +37,7 @@ var (
 				BorderForeground(Border).
 				Padding(1, 2)
 
-	PaletteItem = lipgloss.NewStyle().
-			Foreground(Fg)
+	PaletteItem = lipgloss.NewStyle()
 
 	PaletteItemSelected = lipgloss.NewStyle().
 				Foreground(Accent).
@@ -88,8 +85,7 @@ var (
 			Foreground(Red)
 
 	// Agent styles
-	AgentName = lipgloss.NewStyle().
-			Foreground(Fg)
+	AgentName = lipgloss.NewStyle()
 
 	AgentMode = lipgloss.NewStyle().
 			Foreground(Dim)
