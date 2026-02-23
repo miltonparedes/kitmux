@@ -9,7 +9,7 @@ func EditorCommand(editor, sshHost, remotePath string) (bin string, args []strin
 		remote := fmt.Sprintf("ssh-remote+%s", sshHost)
 		return "code", []string{"--remote", remote, remotePath}
 	default: // zed
-		uri := fmt.Sprintf("ssh://%s/%s", sshHost, remotePath)
+		uri := fmt.Sprintf("ssh://%s%s", sshHost, remotePath)
 		return "zed", []string{uri}
 	}
 }

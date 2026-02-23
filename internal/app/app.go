@@ -507,6 +507,8 @@ func (m Model) executeCommand(id string) (tea.Model, tea.Cmd) {
 				}
 			}
 
+			_ = openlocal.CacheSSHHost(host)
+
 			editor := openlocal.ResolveEditor()
 			socketPath := openlocal.ResolveSocketPath()
 
