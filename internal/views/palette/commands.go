@@ -130,7 +130,7 @@ func DefaultCommands() []Command {
 		{
 			ID:          "open_local_editor",
 			Title:       "Open in Local Editor",
-			Description: "Open current session in your local editor via SSH",
+			Description: "Open current session in your local editor",
 			Category:    "Editor",
 		},
 

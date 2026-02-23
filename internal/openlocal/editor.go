@@ -14,6 +14,16 @@ func EditorCommand(editor, sshHost, remotePath string) (bin string, args []strin
 	}
 }
 
+// LocalEditorCommand builds the CLI command to open a local path in the given editor.
+func LocalEditorCommand(editor, path string) (bin string, args []string) {
+	switch editor {
+	case EditorVSCode:
+		return "code", []string{path}
+	default: // zed
+		return "zed", []string{path}
+	}
+}
+
 // FallbackCommand returns a human-readable command string for manual execution.
 func FallbackCommand(editor, sshHost, remotePath string) string {
 	bin, args := EditorCommand(editor, sshHost, remotePath)

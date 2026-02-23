@@ -24,6 +24,11 @@ type hostsCache struct {
 	Hosts map[string]string `json:"hosts"`
 }
 
+// IsSSH reports whether the current session is running over SSH.
+func IsSSH() bool {
+	return os.Getenv("SSH_CONNECTION") != ""
+}
+
 // ResolveEditor returns the configured editor or the default.
 func ResolveEditor() string {
 	if e := os.Getenv("KITMUX_EDITOR"); e == EditorZed || e == EditorVSCode {

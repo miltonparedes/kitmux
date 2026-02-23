@@ -2,6 +2,7 @@ package app
 
 import (
 	"fmt"
+	"os/exec"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -500,6 +501,20 @@ func (m Model) executeCommand(id string) (tea.Model, tea.Cmd) {
 				return messages.OpenLocalEditorMsg{Err: err}
 			}
 
+			editor := openlocal.ResolveEditor()
+
+			if !openlocal.IsSSH() {
+				bin, args := openlocal.LocalEditorCommand(editor, path)
+				cmd := exec.Command(bin, args...)
+				if err := cmd.Start(); err != nil {
+					return messages.OpenLocalEditorMsg{
+						Err: fmt.Errorf("open editor: %w", err),
+					}
+				}
+				go func() { _ = cmd.Wait() }()
+				return messages.OpenLocalEditorMsg{}
+			}
+
 			host := openlocal.ResolveSSHHost()
 			if host == "" {
 				return messages.OpenLocalEditorMsg{
@@ -509,7 +524,6 @@ func (m Model) executeCommand(id string) (tea.Model, tea.Cmd) {
 
 			_ = openlocal.CacheSSHHost(host)
 
-			editor := openlocal.ResolveEditor()
 			socketPath := openlocal.ResolveSocketPath()
 
 			req := openlocal.Request{
