@@ -2,7 +2,7 @@ package bridge
 
 import (
 	"fmt"
-	"html/template"
+	"text/template"
 	"os"
 	"os/exec"
 	"path/filepath"
