@@ -2,10 +2,10 @@ package bridge
 
 import (
 	"fmt"
+	"html/template"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"html/template"
 )
 
 const (
