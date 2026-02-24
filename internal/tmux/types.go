@@ -6,6 +6,7 @@ type Session struct {
 	Windows  int
 	Attached bool
 	Path     string // session working directory
+	Activity int64  // unix timestamp of last activity
 }
 
 // Window represents a tmux window within a session.
