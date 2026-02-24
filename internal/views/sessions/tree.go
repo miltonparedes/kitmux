@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 
+	"github.com/miltonparedes/kitmux/internal/cache"
 	"github.com/miltonparedes/kitmux/internal/tmux"
 )
 
@@ -297,6 +298,48 @@ func resolveRepoRoots(sessions []tmux.Session) map[string]string {
 		if s.Path == "" {
 			continue
 		}
+		root := resolveRepoRoot(s.Path)
+		if root == "" {
+			continue
+		}
+		base := filepath.Base(root)
+		normName := normalize(s.Name)
+		normBase := normalize(base)
+		if normName == normBase || strings.HasPrefix(normName, normBase+"-") {
+			roots[s.Name] = root
+		}
+	}
+	return roots
+}
+
+// resolveRepoRootsIncremental reuses cached repo roots when the session path
+// hasn't changed, and only calls git for new or changed sessions.
+func resolveRepoRootsIncremental(sessions []tmux.Session, snap *cache.Snapshot) map[string]string {
+	if snap == nil || len(snap.RepoRoots) == 0 {
+		return resolveRepoRoots(sessions)
+	}
+
+	// Build a path lookup from the cached sessions
+	cachedPaths := make(map[string]string, len(snap.Sessions))
+	for _, s := range snap.Sessions {
+		cachedPaths[s.Name] = s.Path
+	}
+
+	roots := make(map[string]string, len(sessions))
+	for _, s := range sessions {
+		if s.Path == "" {
+			continue
+		}
+
+		// Reuse cached root if the session path hasn't changed
+		if cachedPath, ok := cachedPaths[s.Name]; ok && cachedPath == s.Path {
+			if root, ok := snap.RepoRoots[s.Name]; ok {
+				roots[s.Name] = root
+				continue
+			}
+		}
+
+		// Resolve fresh
 		root := resolveRepoRoot(s.Path)
 		if root == "" {
 			continue

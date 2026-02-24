@@ -1,11 +1,14 @@
 package sessions
 
 import (
+	"time"
+
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sahilm/fuzzy"
 
 	"github.com/miltonparedes/kitmux/internal/app/messages"
+	"github.com/miltonparedes/kitmux/internal/cache"
 	"github.com/miltonparedes/kitmux/internal/config"
 	"github.com/miltonparedes/kitmux/internal/tmux"
 	"github.com/miltonparedes/kitmux/internal/worktree"
@@ -48,7 +51,7 @@ func New() Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return m.loadSessions
+	return m.loadSessionsCached()
 }
 
 func (m *Model) SetSize(w, h int) {
@@ -83,13 +86,56 @@ type statsLoadedMsg struct {
 	stats map[string]sessionStats
 }
 
+// cachedSnapshotMsg delivers a cached snapshot for immediate display.
+type cachedSnapshotMsg struct {
+	sessions  []tmux.Session
+	repoRoots map[string]string
+	stats     map[string]sessionStats
+}
+
+const statsTTL = 30 * time.Second
+
 func (m Model) loadSessions() tea.Msg {
 	sessions, err := tmux.ListSessions()
 	if err != nil {
 		return sessionsLoadedMsg{}
 	}
-	repoRoots := resolveRepoRoots(sessions)
+	snap := cache.Load()
+	repoRoots := resolveRepoRootsIncremental(sessions, snap)
+
+	go func() {
+		_ = cache.Save(&cache.Snapshot{
+			Sessions:  sessions,
+			RepoRoots: repoRoots,
+		})
+	}()
+
 	return sessionsLoadedMsg{sessions: sessions, repoRoots: repoRoots}
+}
+
+// loadSessionsCached emits a cached snapshot first (if available), then
+// returns a command that reconciles with the live tmux state.
+func (m Model) loadSessionsCached() tea.Cmd {
+	snap := cache.Load()
+	if snap == nil || len(snap.Sessions) == 0 {
+		return m.loadSessions
+	}
+
+	var cachedStats map[string]sessionStats
+	if snap.StatsValid() {
+		cachedStats = make(map[string]sessionStats, len(snap.Stats))
+		for k, v := range snap.Stats {
+			cachedStats[k] = sessionStats{Added: v.Added, Deleted: v.Deleted}
+		}
+	}
+
+	return func() tea.Msg {
+		return cachedSnapshotMsg{
+			sessions:  snap.Sessions,
+			repoRoots: snap.RepoRoots,
+			stats:     cachedStats,
+		}
+	}
 }
 
 // resolveWorktreeStats collects diff stats from `wt list` for each unique repo root.
@@ -131,12 +177,21 @@ func resolveWorktreeStats(sessions []tmux.Session, repoRoots map[string]string) 
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
+	case cachedSnapshotMsg:
+		m.roots = BuildTree(msg.sessions, msg.repoRoots)
+		m.visible = Flatten(m.roots)
+		m.clampCursor()
+		if len(msg.stats) > 0 {
+			applyStats(m.roots, msg.stats)
+		}
+		// Reconcile with live tmux data in background
+		return m, tea.Batch(m.emitCursorChange(), m.loadSessions)
+
 	case sessionsLoadedMsg:
 		m.roots = BuildTree(msg.sessions, msg.repoRoots)
 		m.visible = Flatten(m.roots)
 		m.clampCursor()
 		m.justLoaded = true
-		// Fire async stats load
 		sessions := msg.sessions
 		repoRoots := msg.repoRoots
 		return m, tea.Batch(m.emitCursorChange(), func() tea.Msg {
@@ -145,6 +200,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case statsLoadedMsg:
 		applyStats(m.roots, msg.stats)
+		// Persist stats to cache
+		go saveStatsToCache(msg.stats)
 		return m, nil
 
 	case projectsLoadedMsg:
@@ -564,6 +621,19 @@ func (m Model) emitCursorChange() tea.Cmd {
 	return func() tea.Msg {
 		return messages.SessionCursorMsg{SessionName: name}
 	}
+}
+
+func saveStatsToCache(stats map[string]sessionStats) {
+	snap := cache.Load()
+	if snap == nil {
+		return
+	}
+	snap.Stats = make(map[string]cache.DiffStat, len(stats))
+	for k, v := range stats {
+		snap.Stats[k] = cache.DiffStat{Added: v.Added, Deleted: v.Deleted}
+	}
+	snap.StatsTTL = time.Now().Add(statsTTL)
+	_ = cache.Save(snap)
 }
 
 // Reload triggers a session reload from tmux.

@@ -3,6 +3,7 @@ package sessions
 import (
 	"testing"
 
+	"github.com/miltonparedes/kitmux/internal/cache"
 	"github.com/miltonparedes/kitmux/internal/tmux"
 )
 
@@ -333,5 +334,42 @@ func TestSortKey_UnderscoreMain(t *testing.T) {
 		if got != tt.want {
 			t.Errorf("sortKey(%q) = %q, want %q", tt.name, got, tt.want)
 		}
+	}
+}
+
+func TestResolveRepoRootsIncremental_ReusesCachedRoots(t *testing.T) {
+	sessions := []tmux.Session{
+		{Name: "myrepo-main", Windows: 1, Path: "/home/user/myrepo/main"},
+		{Name: "myrepo-feat", Windows: 1, Path: "/home/user/myrepo/feat"},
+	}
+	snap := &cache.Snapshot{
+		Sessions: []tmux.Session{
+			{Name: "myrepo-main", Windows: 1, Path: "/home/user/myrepo/main"},
+			{Name: "myrepo-feat", Windows: 1, Path: "/home/user/myrepo/feat"},
+		},
+		RepoRoots: map[string]string{
+			"myrepo-main": "/home/user/myrepo",
+			"myrepo-feat": "/home/user/myrepo",
+		},
+	}
+
+	roots := resolveRepoRootsIncremental(sessions, snap)
+
+	if roots["myrepo-main"] != "/home/user/myrepo" {
+		t.Errorf("expected cached root for myrepo-main, got %q", roots["myrepo-main"])
+	}
+	if roots["myrepo-feat"] != "/home/user/myrepo" {
+		t.Errorf("expected cached root for myrepo-feat, got %q", roots["myrepo-feat"])
+	}
+}
+
+func TestResolveRepoRootsIncremental_NilSnapshot(t *testing.T) {
+	sessions := []tmux.Session{
+		{Name: "tmp", Windows: 1, Path: "/tmp"},
+	}
+	roots := resolveRepoRootsIncremental(sessions, nil)
+	// /tmp is not a git repo, so no roots expected
+	if len(roots) != 0 {
+		t.Errorf("expected 0 roots for non-git path with nil snapshot, got %d", len(roots))
 	}
 }
