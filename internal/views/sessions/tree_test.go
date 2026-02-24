@@ -2,6 +2,7 @@ package sessions
 
 import (
 	"testing"
+	"time"
 
 	"github.com/miltonparedes/kitmux/internal/cache"
 	"github.com/miltonparedes/kitmux/internal/tmux"
@@ -351,9 +352,10 @@ func TestResolveRepoRootsIncremental_ReusesCachedRoots(t *testing.T) {
 			"myrepo-main": "/home/user/myrepo",
 			"myrepo-feat": "/home/user/myrepo",
 		},
+		RepoRootsRefreshedAt: time.Now(),
 	}
 
-	roots := resolveRepoRootsIncremental(sessions, snap)
+	roots, refreshedAt := resolveRepoRootsIncremental(sessions, snap, time.Now())
 
 	if roots["myrepo-main"] != "/home/user/myrepo" {
 		t.Errorf("expected cached root for myrepo-main, got %q", roots["myrepo-main"])
@@ -361,15 +363,38 @@ func TestResolveRepoRootsIncremental_ReusesCachedRoots(t *testing.T) {
 	if roots["myrepo-feat"] != "/home/user/myrepo" {
 		t.Errorf("expected cached root for myrepo-feat, got %q", roots["myrepo-feat"])
 	}
+	if refreshedAt.IsZero() {
+		t.Error("expected non-zero repo roots refreshed time")
+	}
 }
 
 func TestResolveRepoRootsIncremental_NilSnapshot(t *testing.T) {
 	sessions := []tmux.Session{
 		{Name: "tmp", Windows: 1, Path: "/tmp"},
 	}
-	roots := resolveRepoRootsIncremental(sessions, nil)
+	roots, refreshedAt := resolveRepoRootsIncremental(sessions, nil, time.Now())
 	// /tmp is not a git repo, so no roots expected
 	if len(roots) != 0 {
 		t.Errorf("expected 0 roots for non-git path with nil snapshot, got %d", len(roots))
+	}
+	if refreshedAt.IsZero() {
+		t.Error("expected non-zero refreshed time when resolving without cache")
+	}
+}
+
+func TestResolveRepoRootsIncremental_ExpiredCacheForcesRefresh(t *testing.T) {
+	sessions := []tmux.Session{{Name: "tmp", Windows: 1, Path: "/tmp"}}
+	snap := &cache.Snapshot{
+		Sessions:             sessions,
+		RepoRoots:            map[string]string{"tmp": "/stale/repo"},
+		RepoRootsRefreshedAt: time.Now().Add(-repoRootsRevalidateTTL - time.Second),
+	}
+
+	roots, refreshedAt := resolveRepoRootsIncremental(sessions, snap, time.Now())
+	if len(roots) != 0 {
+		t.Errorf("expected stale cache to be refreshed (tmp non-git), got %+v", roots)
+	}
+	if !refreshedAt.After(snap.RepoRootsRefreshedAt) {
+		t.Error("expected refreshedAt to advance after forced refresh")
 	}
 }

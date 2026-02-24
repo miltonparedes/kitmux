@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"sync"
 	"time"
 
 	"github.com/miltonparedes/kitmux/internal/tmux"
@@ -15,14 +16,17 @@ const (
 	version   = 1
 )
 
+var mu sync.Mutex
+
 // Snapshot holds the cached session data persisted to disk.
 type Snapshot struct {
-	Version   int                 `json:"version"`
-	UpdatedAt time.Time           `json:"updated_at"`
-	Sessions  []tmux.Session      `json:"sessions"`
-	RepoRoots map[string]string   `json:"repo_roots"`
-	Stats     map[string]DiffStat `json:"stats,omitempty"`
-	StatsTTL  time.Time           `json:"stats_ttl,omitempty"`
+	Version              int                 `json:"version"`
+	UpdatedAt            time.Time           `json:"updated_at"`
+	Sessions             []tmux.Session      `json:"sessions"`
+	RepoRoots            map[string]string   `json:"repo_roots"`
+	RepoRootsRefreshedAt time.Time           `json:"repo_roots_refreshed_at,omitempty"`
+	Stats                map[string]DiffStat `json:"stats,omitempty"`
+	StatsTTL             time.Time           `json:"stats_ttl,omitempty"`
 }
 
 // DiffStat holds working tree diff stats for a session.
@@ -33,6 +37,30 @@ type DiffStat struct {
 
 // Load reads the cached snapshot from disk. Returns nil if not found or invalid.
 func Load() *Snapshot {
+	mu.Lock()
+	defer mu.Unlock()
+	return loadLocked()
+}
+
+func Save(snap *Snapshot) error {
+	mu.Lock()
+	defer mu.Unlock()
+	return saveLocked(snap)
+}
+
+func Update(updateFn func(*Snapshot)) error {
+	mu.Lock()
+	defer mu.Unlock()
+
+	snap := loadLocked()
+	if snap == nil {
+		snap = &Snapshot{}
+	}
+	updateFn(snap)
+	return saveLocked(snap)
+}
+
+func loadLocked() *Snapshot {
 	data, err := os.ReadFile(filePath())
 	if err != nil {
 		return nil
@@ -47,8 +75,7 @@ func Load() *Snapshot {
 	return &snap
 }
 
-// Save persists the snapshot to disk.
-func Save(snap *Snapshot) error {
+func saveLocked(snap *Snapshot) error {
 	snap.Version = version
 	snap.UpdatedAt = time.Now()
 
@@ -60,7 +87,29 @@ func Save(snap *Snapshot) error {
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(p, data, 0o600)
+
+	tmp, err := os.CreateTemp(filepath.Dir(p), cacheFile+".*.tmp")
+	if err != nil {
+		return err
+	}
+	tmpPath := tmp.Name()
+	defer func() {
+		_ = os.Remove(tmpPath)
+	}()
+
+	if err := tmp.Chmod(0o600); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+
+	return os.Rename(tmpPath, p) //nolint:gosec // tmpPath is created by os.CreateTemp in the destination directory
 }
 
 // StatsValid reports whether the cached stats are still within their TTL.

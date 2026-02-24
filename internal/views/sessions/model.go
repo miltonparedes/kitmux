@@ -101,14 +101,13 @@ func (m Model) loadSessions() tea.Msg {
 		return sessionsLoadedMsg{}
 	}
 	snap := cache.Load()
-	repoRoots := resolveRepoRootsIncremental(sessions, snap)
+	repoRoots, repoRootsRefreshedAt := resolveRepoRootsIncremental(sessions, snap, time.Now())
 
-	go func() {
-		_ = cache.Save(&cache.Snapshot{
-			Sessions:  sessions,
-			RepoRoots: repoRoots,
-		})
-	}()
+	_ = cache.Update(func(curr *cache.Snapshot) {
+		curr.Sessions = sessions
+		curr.RepoRoots = repoRoots
+		curr.RepoRootsRefreshedAt = repoRootsRefreshedAt
+	})
 
 	return sessionsLoadedMsg{sessions: sessions, repoRoots: repoRoots}
 }
@@ -200,8 +199,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case statsLoadedMsg:
 		applyStats(m.roots, msg.stats)
-		// Persist stats to cache
-		go saveStatsToCache(msg.stats)
+		saveStatsToCache(msg.stats)
 		return m, nil
 
 	case projectsLoadedMsg:
@@ -624,16 +622,13 @@ func (m Model) emitCursorChange() tea.Cmd {
 }
 
 func saveStatsToCache(stats map[string]sessionStats) {
-	snap := cache.Load()
-	if snap == nil {
-		return
-	}
-	snap.Stats = make(map[string]cache.DiffStat, len(stats))
-	for k, v := range stats {
-		snap.Stats[k] = cache.DiffStat{Added: v.Added, Deleted: v.Deleted}
-	}
-	snap.StatsTTL = time.Now().Add(statsTTL)
-	_ = cache.Save(snap)
+	_ = cache.Update(func(snap *cache.Snapshot) {
+		snap.Stats = make(map[string]cache.DiffStat, len(stats))
+		for k, v := range stats {
+			snap.Stats[k] = cache.DiffStat{Added: v.Added, Deleted: v.Deleted}
+		}
+		snap.StatsTTL = time.Now().Add(statsTTL)
+	})
 }
 
 // Reload triggers a session reload from tmux.

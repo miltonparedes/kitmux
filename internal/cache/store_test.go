@@ -100,3 +100,31 @@ func TestStatsValid_NilSnapshot(t *testing.T) {
 		t.Error("expected nil snapshot stats to be invalid")
 	}
 }
+
+func TestUpdate_ReadModifyWrite(t *testing.T) {
+	dir := t.TempDir()
+	t.Setenv("HOME", dir)
+
+	if err := Save(&Snapshot{RepoRoots: map[string]string{"a": "/repo/a"}}); err != nil {
+		t.Fatalf("Save: %v", err)
+	}
+
+	err := Update(func(s *Snapshot) {
+		s.Stats = map[string]DiffStat{"a": {Added: 3, Deleted: 1}}
+		s.StatsTTL = time.Now().Add(time.Minute)
+	})
+	if err != nil {
+		t.Fatalf("Update: %v", err)
+	}
+
+	loaded := Load()
+	if loaded == nil {
+		t.Fatal("Load returned nil")
+	}
+	if loaded.RepoRoots["a"] != "/repo/a" {
+		t.Errorf("expected existing repo root to be preserved, got %q", loaded.RepoRoots["a"])
+	}
+	if loaded.Stats["a"].Added != 3 || loaded.Stats["a"].Deleted != 1 {
+		t.Errorf("expected stats to be updated, got %+v", loaded.Stats["a"])
+	}
+}
