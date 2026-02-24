@@ -64,6 +64,19 @@ bind-key C display-popup -E "kitmux launch_claude"
 bind-key g display-popup -E "kitmux tool_lazygit"
 ```
 
+> **Tip: faster popups.** tmux uses `default-shell` to run popup commands.
+> If your shell is fish/zsh (~650ms startup), popups will feel sluggish. Set
+> `default-shell` to `/bin/sh` (~3ms) and use `default-command` for interactive
+> sessions:
+>
+> ```tmux
+> set -g default-shell /bin/sh
+> set -g default-command "exec /path/to/fish"
+> ```
+>
+> Popup commands like `kitmux palette` will now run via `/bin/sh -c` (instant),
+> while new panes and windows still start your preferred shell.
+
 ## Open in Local Editor (coming soon)
 
 A bridge that lets you open remote tmux session directories in your local editor (Zed or VS Code) over SSH.
