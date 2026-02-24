@@ -10,7 +10,7 @@ import (
 // ListSessions returns all tmux sessions.
 func ListSessions() ([]Session, error) {
 	out, err := exec.Command("tmux", "list-sessions", "-F",
-		"#{session_name}\t#{session_windows}\t#{?session_attached,1,0}\t#{session_path}").Output()
+		"#{session_name}\t#{session_windows}\t#{?session_attached,1,0}\t#{session_path}\t#{session_activity}").Output()
 	if err != nil {
 		return nil, fmt.Errorf("list-sessions: %w", err)
 	}
@@ -19,7 +19,7 @@ func ListSessions() ([]Session, error) {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 4)
+		parts := strings.SplitN(line, "\t", 5)
 		if len(parts) < 3 {
 			continue
 		}
@@ -28,11 +28,16 @@ func ListSessions() ([]Session, error) {
 		if len(parts) >= 4 {
 			path = parts[3]
 		}
+		var activity int64
+		if len(parts) >= 5 {
+			activity, _ = strconv.ParseInt(parts[4], 10, 64)
+		}
 		sessions = append(sessions, Session{
 			Name:     parts[0],
 			Windows:  wins,
 			Attached: parts[2] == "1",
 			Path:     path,
+			Activity: activity,
 		})
 	}
 	return sessions, nil

@@ -31,8 +31,9 @@ type TreeNode struct {
 	Children    []*TreeNode
 	Expanded    bool
 	Depth       int
-	Added       int // working tree lines added
-	Deleted     int // working tree lines deleted
+	Added       int
+	Deleted     int
+	Activity    int64
 }
 
 // BuildTree groups sessions by git repository root.
@@ -40,17 +41,28 @@ type TreeNode struct {
 // Sessions that share the same repo root (including worktrees) are grouped together.
 // For groups with 2+ sessions, the display name is the repo directory basename.
 // Sessions without a repo root fall back to parent-child grouping by name prefix.
-// Sorting: -main/-master float to top within their group.
+// Sorting: groups ordered by most-recent activity; -main/-master float to top within groups,
+// remaining children sorted by activity descending.
 func BuildTree(sessions []tmux.Session, repoRoots map[string]string) []*TreeNode {
 	if repoRoots == nil {
 		repoRoots = make(map[string]string)
 	}
 
-	// Sort: -main/-master first within same prefix, then lexicographic.
+	// Build activity lookup
+	activityOf := make(map[string]int64, len(sessions))
+	for _, s := range sessions {
+		activityOf[s.Name] = s.Activity
+	}
+
+	// Sort: -main/-master first within same prefix, then by activity desc, then lexicographic.
 	sorted := make([]tmux.Session, len(sessions))
 	copy(sorted, sessions)
-	sort.Slice(sorted, func(i, j int) bool {
-		return sortKey(sorted[i].Name) < sortKey(sorted[j].Name)
+	sort.SliceStable(sorted, func(i, j int) bool {
+		ki, kj := sortKey(sorted[i].Name), sortKey(sorted[j].Name)
+		if ki != kj {
+			return ki < kj
+		}
+		return sorted[i].Activity > sorted[j].Activity
 	})
 
 	// Build session lookup
@@ -73,14 +85,7 @@ func BuildTree(sessions []tmux.Session, repoRoots map[string]string) []*TreeNode
 
 	var roots []*TreeNode
 
-	// Process repo groups in sorted order
-	repoKeys := make([]string, 0, len(repoGroups))
-	for k := range repoGroups {
-		repoKeys = append(repoKeys, k)
-	}
-	sort.Strings(repoKeys)
-
-	for _, repoRoot := range repoKeys {
+	for _, repoRoot := range sortedKeys(repoGroups) {
 		group := repoGroups[repoRoot]
 
 		if len(group) == 1 {
@@ -91,6 +96,7 @@ func BuildTree(sessions []tmux.Session, repoRoots map[string]string) []*TreeNode
 				SessionName: s.Name,
 				Windows:     s.Windows,
 				Attached:    s.Attached,
+				Activity:    s.Activity,
 				Depth:       0,
 			})
 			continue
@@ -98,7 +104,6 @@ func BuildTree(sessions []tmux.Session, repoRoots map[string]string) []*TreeNode
 
 		groupName := filepath.Base(repoRoot)
 
-		// Check if any session is named exactly like the group (normalized)
 		var rootSession *tmux.Session
 		var children []tmux.Session
 		for i := range group {
@@ -109,6 +114,15 @@ func BuildTree(sessions []tmux.Session, repoRoots map[string]string) []*TreeNode
 			}
 		}
 
+		// Sort children: main/master first, then by activity desc
+		sort.SliceStable(children, func(i, j int) bool {
+			mi, mj := isMainBranch(children[i].Name), isMainBranch(children[j].Name)
+			if mi != mj {
+				return mi
+			}
+			return children[i].Activity > children[j].Activity
+		})
+
 		var parent *TreeNode
 		if rootSession != nil {
 			parent = &TreeNode{
@@ -117,6 +131,7 @@ func BuildTree(sessions []tmux.Session, repoRoots map[string]string) []*TreeNode
 				SessionName: rootSession.Name,
 				Windows:     rootSession.Windows,
 				Attached:    rootSession.Attached,
+				Activity:    rootSession.Activity,
 				Expanded:    true,
 				Depth:       0,
 			}
@@ -131,20 +146,25 @@ func BuildTree(sessions []tmux.Session, repoRoots map[string]string) []*TreeNode
 
 		for _, cs := range children {
 			childName := trimNormalizedPrefix(cs.Name, groupName)
-			parent.Children = append(parent.Children, &TreeNode{
+			child := &TreeNode{
 				Kind:        KindSession,
 				Name:        childName,
 				SessionName: cs.Name,
 				Windows:     cs.Windows,
 				Attached:    cs.Attached,
+				Activity:    cs.Activity,
 				Depth:       1,
-			})
+			}
+			parent.Children = append(parent.Children, child)
+			if cs.Activity > parent.Activity {
+				parent.Activity = cs.Activity
+			}
 		}
 		roots = append(roots, parent)
 	}
 
 	// Process no-repo sessions with findRealParent fallback
-	normMap := make(map[string]string, len(noRepo)) // normalized → original
+	normMap := make(map[string]string, len(noRepo))
 	nameSet := make(map[string]bool, len(noRepo))
 	for _, s := range noRepo {
 		norm := normalize(s.Name)
@@ -177,10 +197,18 @@ func BuildTree(sessions []tmux.Session, repoRoots map[string]string) []*TreeNode
 				SessionName: s.Name,
 				Windows:     s.Windows,
 				Attached:    s.Attached,
+				Activity:    s.Activity,
 				Expanded:    true,
 				Depth:       0,
 			}
-			for _, cname := range childrenOf[s.Name] {
+
+			// Sort children by activity desc
+			cnames := childrenOf[s.Name]
+			sort.SliceStable(cnames, func(i, j int) bool {
+				return activityOf[cnames[i]] > activityOf[cnames[j]]
+			})
+
+			for _, cname := range cnames {
 				cs := sesMap[cname]
 				node.Children = append(node.Children, &TreeNode{
 					Kind:        KindSession,
@@ -188,8 +216,12 @@ func BuildTree(sessions []tmux.Session, repoRoots map[string]string) []*TreeNode
 					SessionName: cname,
 					Windows:     cs.Windows,
 					Attached:    cs.Attached,
+					Activity:    cs.Activity,
 					Depth:       1,
 				})
+				if cs.Activity > node.Activity {
+					node.Activity = cs.Activity
+				}
 				processed[cname] = true
 			}
 			roots = append(roots, node)
@@ -203,12 +235,35 @@ func BuildTree(sessions []tmux.Session, repoRoots map[string]string) []*TreeNode
 			SessionName: s.Name,
 			Windows:     s.Windows,
 			Attached:    s.Attached,
+			Activity:    s.Activity,
 			Depth:       0,
 		})
 		processed[s.Name] = true
 	}
 
+	// Sort all root nodes by most-recent activity (descending)
+	sort.SliceStable(roots, func(i, j int) bool {
+		return roots[i].Activity > roots[j].Activity
+	})
+
 	return roots
+}
+
+// sortedKeys returns map keys sorted alphabetically (used as fallback grouping order
+// before the final activity-based sort).
+func sortedKeys(m map[string][]tmux.Session) []string {
+	keys := make([]string, 0, len(m))
+	for k := range m {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
+}
+
+// isMainBranch returns true if the session name ends with -main or -master.
+func isMainBranch(name string) bool {
+	norm := normalize(name)
+	return strings.HasSuffix(norm, "-main") || strings.HasSuffix(norm, "-master")
 }
 
 // Flatten returns the visible (expanded) nodes in order.

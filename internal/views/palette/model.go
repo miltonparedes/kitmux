@@ -6,6 +6,7 @@ import (
 	"github.com/sahilm/fuzzy"
 
 	"github.com/miltonparedes/kitmux/internal/app/messages"
+	"github.com/miltonparedes/kitmux/internal/recency"
 )
 
 type Model struct {
@@ -41,6 +42,10 @@ func (m *Model) SetSize(w, h int) {
 func (m *Model) Reset() {
 	m.input.SetValue("")
 	m.input.Focus()
+	store := recency.Load()
+	m.commands = recency.SortByRecency(DefaultCommands(), store.Commands, func(c Command) string {
+		return c.ID
+	})
 	m.filtered = m.commands
 	m.cursor = 0
 	m.scroll = 0

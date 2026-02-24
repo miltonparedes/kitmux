@@ -9,6 +9,7 @@ import (
 	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/app/messages"
 	"github.com/miltonparedes/kitmux/internal/openlocal"
+	"github.com/miltonparedes/kitmux/internal/recency"
 	"github.com/miltonparedes/kitmux/internal/tmux"
 	agentsview "github.com/miltonparedes/kitmux/internal/views/agents"
 	"github.com/miltonparedes/kitmux/internal/views/palette"
@@ -399,6 +400,7 @@ func (m *Model) returnToPalette() tea.Cmd {
 }
 
 func (m Model) executeCommand(id string) (tea.Model, tea.Cmd) {
+	recency.RecordCommand(id)
 	m.paletteReturn = true
 
 	switch id {
