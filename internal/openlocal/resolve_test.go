@@ -2,6 +2,18 @@ package openlocal
 
 import "testing"
 
+func TestIsSSH(t *testing.T) {
+	t.Setenv("SSH_CONNECTION", "")
+	if IsSSH() {
+		t.Fatal("expected false when SSH_CONNECTION is empty")
+	}
+
+	t.Setenv("SSH_CONNECTION", "192.168.1.1 12345 192.168.1.2 22")
+	if !IsSSH() {
+		t.Fatal("expected true when SSH_CONNECTION is set")
+	}
+}
+
 func TestResolveEditor(t *testing.T) {
 	t.Setenv("KITMUX_EDITOR", "")
 	if got := ResolveEditor(); got != defaultEditor {

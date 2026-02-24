@@ -22,6 +22,26 @@ func TestEditorCommand_VSCode(t *testing.T) {
 	}
 }
 
+func TestLocalEditorCommand_Zed(t *testing.T) {
+	bin, args := LocalEditorCommand(EditorZed, "/home/user/project")
+	if bin != "zed" {
+		t.Fatalf("expected bin=zed, got %s", bin)
+	}
+	if len(args) != 1 || args[0] != "/home/user/project" {
+		t.Fatalf("unexpected args: %v", args)
+	}
+}
+
+func TestLocalEditorCommand_VSCode(t *testing.T) {
+	bin, args := LocalEditorCommand(EditorVSCode, "/home/user/project")
+	if bin != "code" {
+		t.Fatalf("expected bin=code, got %s", bin)
+	}
+	if len(args) != 1 || args[0] != "/home/user/project" {
+		t.Fatalf("unexpected args: %v", args)
+	}
+}
+
 func TestFallbackCommand(t *testing.T) {
 	got := FallbackCommand(EditorZed, "myhost", "/path")
 	want := "zed ssh://myhost/path"
