@@ -73,6 +73,7 @@ func New(mode Mode, opts ...Option) Model {
 	switch mode {
 	case ModePalette:
 		m.paletteActive = true
+		m.palette.Reset()
 	case ModeWorktrees:
 		m.view = viewWorktrees
 	case ModeAgents:
