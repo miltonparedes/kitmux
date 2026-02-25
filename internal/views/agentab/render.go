@@ -30,6 +30,6 @@ func (m Model) View() string {
 		used++
 	}
 
-	b.WriteString(theme.HelpStyle.Render(" ⏎ launch  ⇥ plan  esc back  q quit"))
+	b.WriteString(theme.HelpStyle.Render(" ⏎ launch  ⇥ plan  esc back  ctrl+c quit"))
 	return b.String()
 }
