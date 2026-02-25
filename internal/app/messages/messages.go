@@ -60,6 +60,17 @@ type LaunchAgentMsg struct {
 	Prompt  string
 }
 
+type OpenAgentABMsg struct {
+	Source string // "palette" or "agents"
+}
+
+type LaunchAgentABMsg struct {
+	Prompt   string
+	PlanMode bool
+}
+
+type BackFromAgentABMsg struct{}
+
 // SwitchViewMsg switches between sessions/worktrees/agents views.
 type SwitchViewMsg struct {
 	View string // "sessions", "worktrees", "agents"

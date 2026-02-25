@@ -74,7 +74,7 @@ func (m Model) View() string {
 
 // StatusLine returns the footer content.
 func (m Model) StatusLine() string {
-	return theme.HelpStyle.Render(" ⏎ launch  s split  w window  ⇥ mode  q quit")
+	return theme.HelpStyle.Render(" ⏎ launch  s split  w window  A A/B  ⇥ mode  q quit")
 }
 
 func renderAgent(a agents.Agent, modeIdx int, selected bool) string {

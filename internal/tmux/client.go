@@ -79,6 +79,14 @@ func CurrentSession() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+func CurrentPanePath() (string, error) {
+	out, err := exec.Command("tmux", "display-message", "-p", "#{pane_current_path}").Output()
+	if err != nil {
+		return "", fmt.Errorf("display-message pane path: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 // HasSession returns true if a session with the given name exists.
 func HasSession(name string) bool {
 	return exec.Command("tmux", "has-session", "-t", name).Run() == nil
@@ -117,6 +125,43 @@ func SplitWindow(command string) error {
 // NewWindowWithCommand creates a new window running the given command.
 func NewWindowWithCommand(name, command string) error {
 	return exec.Command("tmux", "new-window", "-n", name, command).Run()
+}
+
+func NewWindowInDir(name, dir, command string) (string, error) {
+	out, err := exec.Command("tmux", "new-window",
+		"-P", "-F", "#{pane_id}",
+		"-n", name,
+		"-c", dir,
+		command,
+	).Output()
+	if err != nil {
+		return "", fmt.Errorf("new-window: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func SplitWindowInDir(targetPane, dir, command string) (string, error) {
+	args := []string{
+		"split-window", "-h",
+		"-P", "-F", "#{pane_id}",
+	}
+	if targetPane != "" {
+		args = append(args, "-t", targetPane)
+	}
+	if dir != "" {
+		args = append(args, "-c", dir)
+	}
+	args = append(args, command)
+
+	out, err := exec.Command("tmux", args...).Output()
+	if err != nil {
+		return "", fmt.Errorf("split-window: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func SelectLayout(target, layout string) error {
+	return exec.Command("tmux", "select-layout", "-t", target, layout).Run()
 }
 
 // DisplayPopup opens a tmux popup running the given command.

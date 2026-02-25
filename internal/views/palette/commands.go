@@ -125,6 +125,12 @@ func DefaultCommands() []Command {
 			Description: "Start OpenCode in the current pane",
 			Category:    "Agent",
 		},
+		{
+			ID:          "agent_ab",
+			Title:       "Launch A/B (Codex + Claude)",
+			Description: "Start Codex and Claude side-by-side in a new tmux window",
+			Category:    "Agent",
+		},
 
 		// Editor
 		{

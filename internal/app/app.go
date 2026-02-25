@@ -3,14 +3,17 @@ package app
 import (
 	"fmt"
 	"os/exec"
+	"strings"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/app/messages"
+	"github.com/miltonparedes/kitmux/internal/config"
 	"github.com/miltonparedes/kitmux/internal/openlocal"
 	"github.com/miltonparedes/kitmux/internal/recency"
 	"github.com/miltonparedes/kitmux/internal/tmux"
+	agentabview "github.com/miltonparedes/kitmux/internal/views/agentab"
 	agentsview "github.com/miltonparedes/kitmux/internal/views/agents"
 	"github.com/miltonparedes/kitmux/internal/views/palette"
 	"github.com/miltonparedes/kitmux/internal/views/sessions"
@@ -39,6 +42,7 @@ const (
 	viewWindows              // Windows drill-down
 	viewWorktrees            // Worktree list
 	viewAgents               // Agent launcher
+	viewAgentAB              // A/B launcher form
 )
 
 type Model struct {
@@ -48,9 +52,11 @@ type Model struct {
 	windows       windows.Model
 	worktreeView  worktrees.Model
 	agentsView    agentsview.Model
+	agentABView   agentabview.Model
 	palette       palette.Model
 	paletteActive bool
 	paletteReturn bool        // return to palette after sub-action completes
+	returnView    activeView  // view to return to from transient forms
 	pendingKey    *tea.KeyMsg // key to inject after sessions load
 	width         int
 	height        int
@@ -65,6 +71,7 @@ func New(mode Mode, opts ...Option) Model {
 		windows:      windows.New(),
 		worktreeView: worktrees.New(),
 		agentsView:   agentsview.New(),
+		agentABView:  agentabview.New(),
 		palette:      palette.New(),
 	}
 	for _, opt := range opts {
@@ -114,6 +121,8 @@ func (m Model) Init() tea.Cmd {
 			return m.worktreeView.Init()
 		case viewAgents:
 			return m.agentsView.Init()
+		case viewAgentAB:
+			return m.agentABView.Init()
 		default:
 			return m.sessions.Init()
 		}
@@ -139,6 +148,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.windows.SetSize(m.width, m.height-1)
 		m.worktreeView.SetSize(m.width, m.height-1)
 		m.agentsView.SetSize(m.width, m.height-1)
+		m.agentABView.SetSize(m.width, m.height-1)
 		m.palette.SetSize(m.width, m.height)
 		return m, nil
 
@@ -218,6 +228,25 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case messages.LaunchAgentMsg:
 		return m.launchAgent(msg)
 
+	case messages.OpenAgentABMsg:
+		m.returnView = m.view
+		m.view = viewAgentAB
+		m.agentABView.Reset()
+		return m, m.agentABView.Init()
+
+	case messages.BackFromAgentABMsg:
+		if m.paletteReturn {
+			return m, m.returnToPalette()
+		}
+		m.view = m.returnView
+		if m.view == viewAgentAB {
+			m.view = viewSessions
+		}
+		return m, nil
+
+	case messages.LaunchAgentABMsg:
+		return m.launchAgentAB(msg)
+
 	case messages.SwitchViewMsg:
 		switch msg.View {
 		case "sessions":
@@ -275,7 +304,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, cmd, true
 	}
 
-	isEditing := m.sessions.IsEditing() || m.worktreeView.IsEditing()
+	isEditing := m.sessions.IsEditing() || m.worktreeView.IsEditing() || (m.view == viewAgentAB && m.agentABView.IsEditing())
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit, true
@@ -322,6 +351,10 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			}
 			m.view = viewSessions
 			return m, nil, true
+		case viewAgentAB:
+			return m, func() tea.Msg {
+				return messages.BackFromAgentABMsg{}
+			}, true
 		default:
 			if m.sessions.IsEditing() {
 				if m.mode == ModeProjects {
@@ -367,6 +400,8 @@ func (m Model) routeToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case viewAgents:
 		m.agentsView, cmd = m.agentsView.Update(msg)
+	case viewAgentAB:
+		m.agentABView, cmd = m.agentABView.Update(msg)
 	}
 	return m, cmd
 }
@@ -383,6 +418,8 @@ func (m Model) View() string {
 		return m.worktreeView.View()
 	case viewAgents:
 		return m.agentsView.View()
+	case viewAgentAB:
+		return m.agentABView.View()
 	default:
 		return m.sessions.View()
 	}
@@ -495,6 +532,10 @@ func (m Model) executeCommand(id string) (tea.Model, tea.Cmd) {
 		return m, func() tea.Msg {
 			return messages.LaunchAgentMsg{AgentID: "opencode", ModeID: "default", Target: "pane"}
 		}
+	case "agent_ab":
+		return m, func() tea.Msg {
+			return messages.OpenAgentABMsg{Source: "palette"}
+		}
 
 	// Editor commands
 	case "open_local_editor":
@@ -590,5 +631,54 @@ func (m Model) launchAgent(msg messages.LaunchAgentMsg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 	}
+	return m, tea.Quit
+}
+
+func (m Model) launchAgentAB(msg messages.LaunchAgentABMsg) (tea.Model, tea.Cmd) {
+	prompt := strings.TrimSpace(msg.Prompt)
+	if prompt == "" {
+		_ = tmux.DisplayMessage("agent_ab: prompt is required")
+		return m, nil
+	}
+
+	finalPrompt := prompt
+	if msg.PlanMode {
+		finalPrompt = config.ABPlanPrefix() + prompt
+	}
+
+	codexCmd, err := agents.RenderPromptTemplate(config.ABCodexTemplate(), finalPrompt)
+	if err != nil {
+		_ = tmux.DisplayMessage(fmt.Sprintf("agent_ab codex template error: %v", err))
+		return m, nil
+	}
+	claudeCmd, err := agents.RenderPromptTemplate(config.ABClaudeTemplate(), finalPrompt)
+	if err != nil {
+		_ = tmux.DisplayMessage(fmt.Sprintf("agent_ab claude template error: %v", err))
+		return m, nil
+	}
+
+	currentPath, err := tmux.CurrentPanePath()
+	if err != nil {
+		_ = tmux.DisplayMessage(fmt.Sprintf("agent_ab pane path error: %v", err))
+		return m, nil
+	}
+
+	codexPath, claudePath, err := worktree.PrepareABWorktrees(currentPath, config.ABBaseBranch())
+	if err != nil {
+		_ = tmux.DisplayMessage(fmt.Sprintf("agent_ab worktree error: %v", err))
+		return m, nil
+	}
+
+	paneID, err := tmux.NewWindowInDir("A/B", codexPath, codexCmd)
+	if err != nil {
+		_ = tmux.DisplayMessage(fmt.Sprintf("agent_ab new-window error: %v", err))
+		return m, nil
+	}
+	if _, err := tmux.SplitWindowInDir(paneID, claudePath, claudeCmd); err != nil {
+		_ = tmux.DisplayMessage(fmt.Sprintf("agent_ab split-window error: %v", err))
+		return m, nil
+	}
+	_ = tmux.SelectLayout(paneID, "even-horizontal")
+
 	return m, tea.Quit
 }
