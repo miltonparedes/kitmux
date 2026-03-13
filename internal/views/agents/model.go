@@ -99,6 +99,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 			return m, m.launchCmd("split")
 		case "w":
 			return m, m.launchCmd("window")
+		case "A":
+			return m, func() tea.Msg {
+				return messages.OpenAgentABMsg{Source: "agents"}
+			}
 
 		case "1", "2", "3", "4", "5", "6", "7", "8", "9",
 			"alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "alt+6", "alt+7", "alt+8", "alt+9":

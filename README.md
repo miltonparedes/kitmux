@@ -12,6 +12,7 @@ Every operation is a command that can be triggered from the palette, bound to a 
 - **Window list** (`windows`) — switch windows in the current session
 - **Worktree manager** (`worktrees`) — list, create, switch, and remove git worktrees
 - **Agent launcher** (`agents`) — launch AI coding agents (Claude, Gemini, Codex, etc.)
+- **A/B agent launch** (`agent_ab`) — launch Codex and Claude side-by-side with a shared prompt
 - **Open in local editor** (`open_local_editor`) — open remote sessions in your local editor via SSH (coming soon)
 - **Direct execution** (`run <id>`) — execute any palette command headlessly
 
@@ -59,6 +60,9 @@ bind-key w display-popup -E -w 40% -h 60% "kitmux windows"
 
 # Direct agent launch
 bind-key C display-popup -E "kitmux launch_claude"
+
+# A/B launch (Codex + Claude)
+bind-key A display-popup -E "kitmux agent_ab"
 
 # Lazygit in popup
 bind-key g display-popup -E "kitmux tool_lazygit"
@@ -123,6 +127,17 @@ kitmux bridge serve
 | [claude](https://docs.anthropic.com/en/docs/claude-code) | `agents` — Claude Code | Optional |
 | [gemini](https://github.com/google-gemini/gemini-cli) | `agents` — Gemini CLI | Optional |
 | [codex](https://github.com/openai/codex) | `agents` — Codex CLI | Optional |
+
+## A/B Mode Configuration
+
+`agent_ab` uses these optional environment variables:
+
+| Environment variable | Description | Default |
+|---------------------|-------------|---------|
+| `KITMUX_AB_CODEX_TEMPLATE` | Command template for Codex (`{prompt}` placeholder required) | `codex {prompt}` |
+| `KITMUX_AB_CLAUDE_TEMPLATE` | Command template for Claude (`{prompt}` placeholder required) | `claude {prompt}` |
+| `KITMUX_AB_PLAN_PREFIX` | Prefix added to prompt when plan mode is enabled | `/plan ` |
+| `KITMUX_AB_BASE_BRANCH` | Base branch used to create/reuse A/B worktrees | `main` |
 
 ## Install
 
