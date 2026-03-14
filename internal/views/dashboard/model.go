@@ -8,7 +8,6 @@ import (
 	"sort"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -148,8 +147,6 @@ type wtLoadedMsg struct {
 }
 
 type (
-	tickMsg       struct{}
-	statsTickMsg  struct{}
 	actionDoneMsg struct{}
 	switchDoneMsg struct{}
 )
@@ -363,18 +360,6 @@ func loadWorktrees(project, projPath string) tea.Cmd {
 	}
 }
 
-func tickCmd() tea.Cmd {
-	return tea.Tick(5*time.Second, func(_ time.Time) tea.Msg {
-		return tickMsg{}
-	})
-}
-
-func statsTickCmd() tea.Cmd {
-	return tea.Tick(30*time.Second, func(_ time.Time) tea.Msg {
-		return statsTickMsg{}
-	})
-}
-
 // Model methods
 
 func (m *Model) SetSize(w, h int) {
@@ -459,27 +444,17 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.rebuildVisible()
 		m.clampCursor()
 		projs := projects.LoadRegistry()
-		return m, tea.Batch(tickCmd(), loadStats(projs))
+		return m, loadStats(projs)
 
 	case statsLoadedMsg:
 		m.stats = msg.stats
-		return m, statsTickCmd()
+		return m, nil
 
 	case switchDoneMsg:
 		return m, tea.Quit
 
 	case actionDoneMsg:
 		return m, loadTree
-
-	case tickMsg:
-		if m.mode == modeNormal {
-			return m, loadTree
-		}
-		return m, tickCmd()
-
-	case statsTickMsg:
-		projs := projects.LoadRegistry()
-		return m, loadStats(projs)
 
 	case zoxideLoadedMsg:
 		m.zoxide.all = msg.entries

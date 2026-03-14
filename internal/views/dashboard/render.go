@@ -297,7 +297,7 @@ func (m Model) statusLine() string {
 	if m.mode == modeFiltering {
 		return theme.HelpStyle.Render(" arrows navigate  enter accept  esc clear")
 	}
-	return theme.HelpStyle.Render(" enter open  / filter  n add  d remove")
+	return theme.HelpStyle.Render(" enter open  / filter  n add  d remove  r refresh")
 }
 
 func (m Model) renderNode(node *sessions.TreeNode, selected bool) string {
