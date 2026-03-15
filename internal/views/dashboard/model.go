@@ -390,7 +390,7 @@ func (m *Model) applyFilter() {
 	names := make([]string, len(m.allFlat))
 	for i, n := range m.allFlat {
 		if n.SessionName != "" {
-			names[i] = n.SessionName
+			names[i] = n.Name + " " + n.SessionName
 		} else {
 			names[i] = n.Name
 		}
