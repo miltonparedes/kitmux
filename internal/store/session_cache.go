@@ -378,7 +378,10 @@ func tableCountQuery(table string) string {
 }
 
 func setMetaTime(tx *sql.Tx, key string, value time.Time) error {
-	encoded := strconv.FormatInt(value.UnixNano(), 10)
+	encoded := "0"
+	if !value.IsZero() {
+		encoded = strconv.FormatInt(value.UnixNano(), 10)
+	}
 	if _, err := tx.Exec(`INSERT INTO metadata(key, value) VALUES(?, ?)`, key, encoded); err != nil {
 		return fmt.Errorf("set metadata %q: %w", key, err)
 	}
