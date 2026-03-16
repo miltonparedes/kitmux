@@ -1,12 +1,10 @@
 package cache
 
 import (
-	"encoding/json"
-	"os"
-	"path/filepath"
 	"sync"
 	"time"
 
+	"github.com/miltonparedes/kitmux/internal/store"
 	"github.com/miltonparedes/kitmux/internal/tmux"
 )
 
@@ -61,55 +59,49 @@ func Update(updateFn func(*Snapshot)) error {
 }
 
 func loadLocked() *Snapshot {
-	data, err := os.ReadFile(filePath())
+	persisted, err := store.LoadSessionCache()
 	if err != nil {
 		return nil
 	}
-	var snap Snapshot
-	if err := json.Unmarshal(data, &snap); err != nil {
+	if persisted == nil {
 		return nil
 	}
-	if snap.Version != version {
-		return nil
+
+	stats := make(map[string]DiffStat, len(persisted.Stats))
+	for sessionName, stat := range persisted.Stats {
+		stats[sessionName] = DiffStat{Added: stat.Added, Deleted: stat.Deleted}
 	}
-	return &snap
+
+	return &Snapshot{
+		Version:              version,
+		UpdatedAt:            persisted.UpdatedAt,
+		Sessions:             persisted.Sessions,
+		RepoRoots:            persisted.RepoRoots,
+		RepoRootsRefreshedAt: persisted.RepoRootsRefreshedAt,
+		Stats:                stats,
+		StatsTTL:             persisted.StatsTTL,
+	}
 }
 
 func saveLocked(snap *Snapshot) error {
 	snap.Version = version
 	snap.UpdatedAt = time.Now()
 
-	p := filePath()
-	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
-		return err
+	persisted := &store.SessionCache{
+		UpdatedAt:            snap.UpdatedAt,
+		Sessions:             snap.Sessions,
+		RepoRoots:            snap.RepoRoots,
+		RepoRootsRefreshedAt: snap.RepoRootsRefreshedAt,
+		StatsTTL:             snap.StatsTTL,
 	}
-	data, err := json.Marshal(snap)
-	if err != nil {
-		return err
-	}
-
-	tmp, err := os.CreateTemp(filepath.Dir(p), cacheFile+".*.tmp")
-	if err != nil {
-		return err
-	}
-	tmpPath := tmp.Name()
-	defer func() {
-		_ = os.Remove(tmpPath)
-	}()
-
-	if err := tmp.Chmod(0o600); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if _, err := tmp.Write(data); err != nil {
-		_ = tmp.Close()
-		return err
-	}
-	if err := tmp.Close(); err != nil {
-		return err
+	if len(snap.Stats) > 0 {
+		persisted.Stats = make(map[string]store.DiffStat, len(snap.Stats))
+		for sessionName, stat := range snap.Stats {
+			persisted.Stats[sessionName] = store.DiffStat{Added: stat.Added, Deleted: stat.Deleted}
+		}
 	}
 
-	return os.Rename(tmpPath, p) //nolint:gosec // tmpPath is created by os.CreateTemp in the destination directory
+	return store.SaveSessionCache(persisted)
 }
 
 // StatsValid reports whether the cached stats are still within their TTL.
@@ -118,9 +110,4 @@ func (s *Snapshot) StatsValid() bool {
 		return false
 	}
 	return time.Now().Before(s.StatsTTL)
-}
-
-func filePath() string {
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, cacheDir, cacheFile)
 }
