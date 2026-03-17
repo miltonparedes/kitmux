@@ -1,8 +1,8 @@
 # kitmux
 
-A tmux command palette and session manager built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
+Think [Raycast](https://www.raycast.com/), but for tmux — a command palette, session manager, worktree navigator, and AI agent launcher that lives inside your terminal.
 
-Every operation is a command that can be triggered from the palette, bound to a tmux key, or run directly from the CLI.
+Fast, lightweight, and built in Go. Every operation is a command you can fuzzy-search from the palette, bind to a tmux key, or fire directly from the CLI.
 
 ## Features
 
@@ -11,7 +11,7 @@ Every operation is a command that can be triggered from the palette, bound to a 
 - **Workspace dashboard** (`workspaces`) — browse registered repos, open or switch tmux sessions, inspect worktrees, and hide repos from the dashboard
 - **Window list** (`windows`) — switch windows in the current session
 - **Worktree manager** (`worktrees`) — list, create, switch, and remove git worktrees
-- **Agent launcher** (`agents`) — launch AI coding agents (Claude, Gemini, Codex, etc.)
+- **Agent launcher** (`agents`) — launch AI coding agents from your session directory
 - **A/B agent launch** (`agent_ab`) — launch Codex and Claude side-by-side with a shared prompt
 - **Open in local editor** (`open_local_editor`) — open remote sessions in your local editor via SSH (coming soon)
 - **Direct execution** (`run <id>`) — execute any palette command headlessly
@@ -120,22 +120,34 @@ kitmux bridge serve
 
 ## Requirements
 
-**Required:**
-
-- Go 1.25+
+- Go 1.25+ (build only)
 - tmux
 
-**Runtime dependencies (used by specific features):**
+## Recommended Dependencies
 
-| Dependency | Used by | Required? |
-|------------|---------|-----------|
-| [zoxide](https://github.com/ajeetdsouza/zoxide) | `workspaces` — discovers project directories | Yes, for workspace discovery |
-| [git](https://git-scm.com/) | `sessions`, `workspaces` — detects repos, branches, and worktrees | Yes, for git-aware features |
-| [worktrunk](https://github.com/max-sixty/worktrunk) (`wt`) | `workspaces`, `worktrees` — lists, creates, switches, and removes git worktrees | Yes, for worktree features |
-| [lazygit](https://github.com/jesseduffield/lazygit) | `tool_lazygit` palette command | Optional |
-| [claude](https://docs.anthropic.com/en/docs/claude-code) | `agents` — Claude Code | Optional |
-| [gemini](https://github.com/google-gemini/gemini-cli) | `agents` — Gemini CLI | Optional |
-| [codex](https://github.com/openai/codex) | `agents` — Codex CLI | Optional |
+kitmux shells out to external tools for most of its features. Install the ones you plan to use:
+
+**Core — highly recommended for the full experience:**
+
+| Tool | Features it unlocks |
+|------|-------------------|
+| [git](https://git-scm.com/) | Repo detection, branch info, worktree support |
+| [zoxide](https://github.com/ajeetdsouza/zoxide) | Workspace discovery — find and register project directories |
+| [worktrunk](https://github.com/max-sixty/worktrunk) (`wt`) | Worktree management — create, switch, and remove git worktrees |
+
+**AI agents — special support for these coding agents (others work too):**
+
+| Tool | Description |
+|------|-------------|
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Anthropic's CLI coding agent |
+| [Codex](https://github.com/openai/codex) | OpenAI's CLI coding agent |
+| [Droid](https://docs.factory.ai/droid/overview) | Factory's CLI coding agent (coming soon) |
+
+**Extras:**
+
+| Tool | What it does |
+|------|-------------|
+| [lazygit](https://github.com/jesseduffield/lazygit) | Git TUI — launched via the `tool_lazygit` palette command |
 
 ## A/B Mode Configuration
 
