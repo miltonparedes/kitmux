@@ -194,11 +194,11 @@ func TestInsertWorktreeStats_FillsRepoRootFromRepoRoots(t *testing.T) {
 	}
 }
 
-func TestProjectsAndSessionCache_CoexistInSameStateDB(t *testing.T) {
+func TestWorkspacesAndSessionCache_CoexistInSameStateDB(t *testing.T) {
 	home := useTempHome(t)
 
-	if _, err := AddProject("kitmux", "/tmp/kitmux"); err != nil {
-		t.Fatalf("AddProject: %v", err)
+	if _, err := AddWorkspace("kitmux", "/tmp/kitmux"); err != nil {
+		t.Fatalf("AddWorkspace: %v", err)
 	}
 	if err := SaveSessionCache(&SessionCache{
 		UpdatedAt: time.Unix(100, 0),
@@ -210,16 +210,16 @@ func TestProjectsAndSessionCache_CoexistInSameStateDB(t *testing.T) {
 		t.Fatalf("SaveSessionCache: %v", err)
 	}
 
-	projects, err := LoadProjects()
+	workspaces, err := LoadWorkspaces()
 	if err != nil {
-		t.Fatalf("LoadProjects: %v", err)
+		t.Fatalf("LoadWorkspaces: %v", err)
 	}
 	cache, err := LoadSessionCache()
 	if err != nil {
 		t.Fatalf("LoadSessionCache: %v", err)
 	}
-	if len(projects) != 1 || projects[0].Path != "/tmp/kitmux" {
-		t.Fatalf("unexpected projects: %+v", projects)
+	if len(workspaces) != 1 || workspaces[0].Path != "/tmp/kitmux" {
+		t.Fatalf("unexpected workspaces: %+v", workspaces)
 	}
 	if cache == nil || len(cache.Sessions) != 1 || cache.Sessions[0].Name != "kitmux-main" {
 		t.Fatalf("unexpected session cache: %+v", cache)
@@ -231,14 +231,14 @@ func TestProjectsAndSessionCache_CoexistInSameStateDB(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 
-	var projectCount, sessionCount int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM projects`).Scan(&projectCount); err != nil {
-		t.Fatalf("count projects: %v", err)
+	var workspaceCount, sessionCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM workspaces`).Scan(&workspaceCount); err != nil {
+		t.Fatalf("count workspaces: %v", err)
 	}
 	if err := db.QueryRow(`SELECT COUNT(*) FROM session_snapshots`).Scan(&sessionCount); err != nil {
 		t.Fatalf("count session_snapshots: %v", err)
 	}
-	if projectCount != 1 || sessionCount != 1 {
-		t.Fatalf("expected shared state.db with 1 project and 1 session, got projects=%d sessions=%d", projectCount, sessionCount)
+	if workspaceCount != 1 || sessionCount != 1 {
+		t.Fatalf("expected shared state.db with 1 workspace and 1 session, got workspaces=%d sessions=%d", workspaceCount, sessionCount)
 	}
 }

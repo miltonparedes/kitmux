@@ -17,8 +17,8 @@ func stateDBPath(home string) string {
 	return filepath.Join(home, configDir, databaseFile)
 }
 
-func legacyProjectsJSONPath(home string) string {
-	return filepath.Join(home, configDir, legacyProjectsFile)
+func legacyWorkspacesJSONPath(home string) string {
+	return filepath.Join(home, configDir, legacyWorkspacesFile)
 }
 
 func legacySessionCacheJSONPath(home string) string {

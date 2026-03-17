@@ -17,7 +17,7 @@ const (
 	metaUpdatedAt          = "session_cache.updated_at"
 	metaRepoRootsAt        = "session_cache.repo_roots_refreshed_at"
 	metaStatsTTL           = "session_cache.stats_ttl"
-	tableProjects          = "projects"
+	tableWorkspaces        = "workspaces"
 	tableSessionSnapshots  = "session_snapshots"
 	tableRepoRoots         = "repo_roots"
 	tableWorktreeStats     = "worktree_stats"
@@ -364,8 +364,8 @@ func tableEmpty(db *sql.DB, table string) (bool, error) {
 
 func tableCountQuery(table string) string {
 	switch table {
-	case tableProjects:
-		return `SELECT COUNT(*) FROM projects`
+	case tableWorkspaces:
+		return `SELECT COUNT(*) FROM workspaces`
 	case tableSessionSnapshots:
 		return `SELECT COUNT(*) FROM session_snapshots`
 	case tableRepoRoots:

@@ -7,12 +7,8 @@ import (
 	"github.com/miltonparedes/kitmux/internal/store"
 )
 
-// Workspace represents a registered workspace.
-type Workspace struct {
-	Name    string `json:"name"`
-	Path    string `json:"path"`
-	AddedAt int64  `json:"added_at"`
-}
+// Workspace is an alias for store.Workspace so callers keep a clean import.
+type Workspace = store.Workspace
 
 var registryMu sync.Mutex
 
@@ -21,18 +17,9 @@ func LoadRegistry() []Workspace {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 
-	records, err := store.LoadProjects()
+	workspaces, err := store.LoadWorkspaces()
 	if err != nil {
 		return nil
-	}
-
-	workspaces := make([]Workspace, 0, len(records))
-	for _, record := range records {
-		workspaces = append(workspaces, Workspace{
-			Name:    record.Name,
-			Path:    record.Path,
-			AddedAt: record.AddedAt,
-		})
 	}
 	return workspaces
 }
@@ -42,16 +29,7 @@ func SaveRegistry(workspaces []Workspace) error {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 
-	records := make([]store.Project, 0, len(workspaces))
-	for _, ws := range workspaces {
-		records = append(records, store.Project{
-			Name:       ws.Name,
-			Path:       ws.Path,
-			AddedAt:    ws.AddedAt,
-			LastSeenAt: ws.AddedAt,
-		})
-	}
-	return store.SaveProjects(records)
+	return store.SaveWorkspaces(workspaces)
 }
 
 // AddWorkspace adds a workspace if not already registered by path. Returns true if added.
@@ -59,7 +37,7 @@ func AddWorkspace(name, path string) bool {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 
-	added, err := store.AddProject(name, path)
+	added, err := store.AddWorkspace(name, path)
 	return err == nil && added
 }
 
@@ -68,7 +46,7 @@ func RemoveWorkspace(name string) bool {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 
-	removed, err := store.RemoveProject(name)
+	removed, err := store.RemoveWorkspace(name)
 	return err == nil && removed
 }
 
@@ -77,7 +55,7 @@ func HasPath(path string) bool {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 
-	hasPath, err := store.HasProjectPath(path)
+	hasPath, err := store.HasWorkspacePath(path)
 	return err == nil && hasPath
 }
 

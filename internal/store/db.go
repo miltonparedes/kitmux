@@ -20,7 +20,7 @@ type migration func(tx *sql.Tx) error
 
 // migrations is the ordered list of schema migrations.
 // The schema version equals len(migrations) — adding a new entry auto-bumps it.
-var migrations = []migration{migrateV1}
+var migrations = []migration{migrateV1, migrateV2}
 
 func schemaVersion() int { return len(migrations) }
 
@@ -105,6 +105,20 @@ func migrate(db *sql.DB) error {
 	}
 	if err := tx.Commit(); err != nil {
 		return fmt.Errorf("commit sqlite migration: %w", err)
+	}
+	return nil
+}
+
+func migrateV2(tx *sql.Tx) error {
+	stmts := []string{
+		`ALTER TABLE projects RENAME TO workspaces;`,
+		`DROP INDEX IF EXISTS idx_projects_name;`,
+		`CREATE INDEX idx_workspaces_name ON workspaces(name);`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("v2: %w", err)
+		}
 	}
 	return nil
 }

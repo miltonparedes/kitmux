@@ -30,7 +30,7 @@ func TestOpen_RunsMigrations(t *testing.T) {
 	}
 	defer func() { _ = db.Close() }()
 
-	tables := []string{"metadata", "projects", "session_snapshots", "repo_roots", "worktree_stats"}
+	tables := []string{"metadata", "workspaces", "session_snapshots", "repo_roots", "worktree_stats"}
 	for _, table := range tables {
 		assertTableExists(t, db, table)
 	}
