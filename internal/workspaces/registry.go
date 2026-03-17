@@ -41,12 +41,12 @@ func AddWorkspace(name, path string) bool {
 	return err == nil && added
 }
 
-// RemoveWorkspace removes a workspace by name. Returns true if found and removed.
-func RemoveWorkspace(name string) bool {
+// RemoveWorkspace removes a workspace by path. Returns true if found and removed.
+func RemoveWorkspace(path string) bool {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 
-	removed, err := store.RemoveWorkspace(name)
+	removed, err := store.RemoveWorkspace(path)
 	return err == nil && removed
 }
 

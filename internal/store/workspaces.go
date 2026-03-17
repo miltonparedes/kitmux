@@ -116,7 +116,7 @@ func AddWorkspace(name, path string) (bool, error) {
 	return true, nil
 }
 
-func RemoveWorkspace(name string) (bool, error) {
+func RemoveWorkspace(path string) (bool, error) {
 	db, err := open()
 	if err != nil {
 		return false, err
@@ -127,13 +127,13 @@ func RemoveWorkspace(name string) (bool, error) {
 		return false, err
 	}
 
-	result, err := db.Exec(`DELETE FROM workspaces WHERE name = ?`, name)
+	result, err := db.Exec(`DELETE FROM workspaces WHERE path = ?`, path)
 	if err != nil {
-		return false, fmt.Errorf("delete workspace %q: %w", name, err)
+		return false, fmt.Errorf("delete workspace %q: %w", path, err)
 	}
 	rows, err := result.RowsAffected()
 	if err != nil {
-		return false, fmt.Errorf("rows affected removing workspace %q: %w", name, err)
+		return false, fmt.Errorf("rows affected removing workspace %q: %w", path, err)
 	}
 	return rows > 0, nil
 }

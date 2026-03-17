@@ -157,15 +157,6 @@ func loadTree() tea.Msg {
 	sess, _ := tmux.ListSessions()
 	repoRoots := resolveRepoRoots(sess)
 
-	for _, s := range sess {
-		root, ok := repoRoots[s.Name]
-		if !ok || root == "" {
-			continue
-		}
-		name := filepath.Base(root)
-		workspaces.AddWorkspace(name, root)
-	}
-
 	projs := workspaces.LoadRegistry()
 	roots := buildProjectTree(projs, sess, repoRoots)
 	return treeLoadedMsg{roots: roots}
@@ -188,6 +179,7 @@ func buildProjectTree(projs []workspaces.Workspace, sess []tmux.Session, repoRoo
 		group := &sessions.TreeNode{
 			Kind:     sessions.KindGroupHeader,
 			Name:     proj.Name,
+			Path:     proj.Path,
 			Expanded: true,
 			Depth:    0,
 		}
@@ -369,7 +361,7 @@ func (m *Model) SetSize(w, h int) {
 
 func (m *Model) applyCollapsedState() {
 	for _, r := range m.roots {
-		if m.collapsed[r.Name] {
+		if m.collapsed[nodeKey(r)] {
 			r.Expanded = false
 		}
 	}
@@ -534,13 +526,13 @@ func (m Model) activateNode(node *sessions.TreeNode) (tea.Model, tea.Cmd) {
 	if node.Depth == 0 {
 		if len(node.Children) > 0 {
 			node.Expanded = !node.Expanded
-			m.collapsed[node.Name] = !node.Expanded
+			m.collapsed[nodeKey(node)] = !node.Expanded
 			m.rebuildVisible()
 			m.clampCursor()
 			return m, nil
 		}
 		// Inactive project — load worktrees
-		return m, m.enterWorktreePicker(node.Name)
+		return m, m.enterWorktreePicker(node.Path)
 	}
 	if node.Kind == sessions.KindSession && node.SessionName != "" {
 		return m, m.switchTo(node.SessionName)
@@ -580,7 +572,7 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case " ":
 		if node := m.selected(); node != nil && len(node.Children) > 0 {
 			node.Expanded = !node.Expanded
-			m.collapsed[node.Name] = !node.Expanded
+			m.collapsed[nodeKey(node)] = !node.Expanded
 			m.rebuildVisible()
 			m.clampCursor()
 		}
@@ -670,7 +662,7 @@ func (m Model) handleProjectSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			name := filepath.Base(path)
 			workspaces.AddWorkspace(name, path)
 			m.mode = modeNormal
-			return m, tea.Batch(loadTree, m.enterWorktreePicker(name))
+			return m, tea.Batch(loadTree, m.enterWorktreePicker(path))
 		}
 		return m, nil
 	case "up", "ctrl+k":
@@ -751,7 +743,7 @@ func (m Model) handleConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "y":
 		m.mode = modeNormal
 		if node := m.selected(); node != nil && node.Depth == 0 {
-			workspaces.RemoveWorkspace(node.Name)
+			workspaces.RemoveWorkspace(node.Path)
 			return m, loadTree
 		}
 		return m, nil
@@ -763,11 +755,11 @@ func (m Model) handleConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 // Actions
 
-func (m Model) enterWorktreePicker(projectName string) tea.Cmd {
+func (m Model) enterWorktreePicker(projectPath string) tea.Cmd {
 	projs := workspaces.LoadRegistry()
 	for _, p := range projs {
-		if p.Name == projectName {
-			return loadWorktrees(projectName, p.Path)
+		if p.Path == projectPath {
+			return loadWorktrees(p.Name, p.Path)
 		}
 	}
 	return nil
@@ -842,6 +834,19 @@ func uniqueSessName(name string) string {
 
 func isGitRepo(dir string) bool {
 	return exec.Command("git", "-C", dir, "rev-parse", "--git-dir").Run() == nil
+}
+
+func nodeKey(node *sessions.TreeNode) string {
+	if node == nil {
+		return ""
+	}
+	if node.Path != "" {
+		return node.Path
+	}
+	if node.SessionName != "" {
+		return node.SessionName
+	}
+	return node.Name
 }
 
 func (m Model) selected() *sessions.TreeNode {

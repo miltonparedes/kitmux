@@ -124,14 +124,17 @@ func TestAddWorkspace_DedupesByPath(t *testing.T) {
 	}
 }
 
-func TestRemoveWorkspace_RemovesByName(t *testing.T) {
+func TestRemoveWorkspace_RemovesOnlyMatchingPath(t *testing.T) {
 	useTempHome(t)
 
-	if err := SaveWorkspaces([]Workspace{{Name: "kitmux", Path: "/tmp/kitmux", AddedAt: 1, LastSeenAt: 1}}); err != nil {
+	if err := SaveWorkspaces([]Workspace{
+		{Name: "api", Path: "/tmp/acme/api", AddedAt: 1, LastSeenAt: 1},
+		{Name: "api", Path: "/tmp/internal/api", AddedAt: 2, LastSeenAt: 2},
+	}); err != nil {
 		t.Fatalf("SaveWorkspaces: %v", err)
 	}
 
-	removed, err := RemoveWorkspace("kitmux")
+	removed, err := RemoveWorkspace("/tmp/acme/api")
 	if err != nil {
 		t.Fatalf("RemoveWorkspace: %v", err)
 	}
@@ -143,11 +146,11 @@ func TestRemoveWorkspace_RemovesByName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("LoadWorkspaces: %v", err)
 	}
-	if len(workspaces) != 0 {
-		t.Fatalf("expected empty workspaces after remove, got %+v", workspaces)
+	if len(workspaces) != 1 || workspaces[0].Path != "/tmp/internal/api" {
+		t.Fatalf("expected only the matching path to be removed, got %+v", workspaces)
 	}
 
-	removed, err = RemoveWorkspace("kitmux")
+	removed, err = RemoveWorkspace("/tmp/acme/api")
 	if err != nil {
 		t.Fatalf("RemoveWorkspace second: %v", err)
 	}
