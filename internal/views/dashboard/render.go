@@ -34,7 +34,7 @@ func (m Model) viewNormal() string {
 	if m.mode == modeFiltering {
 		b.WriteString(" " + m.filter.View())
 	} else {
-		b.WriteString(theme.HelpStyle.Render(" Projects"))
+		b.WriteString(theme.HelpStyle.Render(" Workspaces"))
 	}
 	b.WriteString("\n")
 	b.WriteString(mainSep)
@@ -44,7 +44,7 @@ func (m Model) viewNormal() string {
 		if m.mode == modeFiltering {
 			b.WriteString(theme.HelpStyle.Render(" No matches"))
 		} else {
-			b.WriteString(theme.HelpStyle.Render(" No projects"))
+			b.WriteString(theme.HelpStyle.Render(" No workspaces"))
 		}
 		b.WriteString("\n")
 		return m.padAndFooter(&b, sepW)

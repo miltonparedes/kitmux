@@ -8,7 +8,7 @@ Every operation is a command that can be triggered from the palette, bound to a 
 
 - **Command palette** (`palette`) — fuzzy-search and run any command
 - **Session tree** (`sessions`) — browse, switch, rename, and kill tmux sessions
-- **Project picker** (`projects`) — open zoxide-indexed projects as tmux sessions
+- **Workspace dashboard** (`workspaces`) — browse registered repos, open or switch tmux sessions, inspect worktrees, and hide repos from the dashboard
 - **Window list** (`windows`) — switch windows in the current session
 - **Worktree manager** (`worktrees`) — list, create, switch, and remove git worktrees
 - **Agent launcher** (`agents`) — launch AI coding agents (Claude, Gemini, Codex, etc.)
@@ -26,7 +26,7 @@ Views:
   palette  (p)    Command palette
   worktrees (wt)  Worktree manager
   agents   (a)    Agent launcher
-  projects (o)    Open a project
+  workspaces (o)  Workspace dashboard
   windows  (w)    Window list for current session
 
 Execute:
@@ -52,8 +52,8 @@ bind-key p display-popup -E -w 60% -h 80% "kitmux palette"
 # Session tree
 bind-key s display-popup -E -w 40% -h 80% "kitmux sessions"
 
-# Open project
-bind-key o display-popup -E -w 60% -h 80% "kitmux projects"
+# Workspace dashboard
+bind-key o display-popup -E -w 60% -h 80% "kitmux workspaces"
 
 # Window list
 bind-key w display-popup -E -w 40% -h 60% "kitmux windows"
@@ -80,6 +80,15 @@ bind-key g display-popup -E "kitmux tool_lazygit"
 >
 > Popup commands like `kitmux palette` will now run via `/bin/sh -c` (instant),
 > while new panes and windows still start your preferred shell.
+
+## Workspace Dashboard
+
+`workspaces` is the repo-level dashboard for kitmux:
+
+- shows registered repositories and their active tmux sessions
+- lets you add repos from zoxide and open them directly
+- lets you inspect project worktrees before opening or creating a session
+- `d` only hides a workspace from the dashboard; it does not delete branches, worktrees, or other repo state
 
 ## Open in Local Editor (coming soon)
 
@@ -120,9 +129,9 @@ kitmux bridge serve
 
 | Dependency | Used by | Required? |
 |------------|---------|-----------|
-| [zoxide](https://github.com/ajeetdsouza/zoxide) | `projects` — indexes project directories | Yes, for project picker |
-| [git](https://git-scm.com/) | `sessions`, `projects` — detects repos and worktrees | Yes, for git-aware features |
-| [worktrunk](https://github.com/max-sixty/worktrunk) (`wt`) | `worktrees` — manages git worktrees | Yes, for worktree manager |
+| [zoxide](https://github.com/ajeetdsouza/zoxide) | `workspaces` — discovers project directories | Yes, for workspace discovery |
+| [git](https://git-scm.com/) | `sessions`, `workspaces` — detects repos, branches, and worktrees | Yes, for git-aware features |
+| [worktrunk](https://github.com/max-sixty/worktrunk) (`wt`) | `workspaces`, `worktrees` — lists, creates, switches, and removes git worktrees | Yes, for worktree features |
 | [lazygit](https://github.com/jesseduffield/lazygit) | `tool_lazygit` palette command | Optional |
 | [claude](https://docs.anthropic.com/en/docs/claude-code) | `agents` — Claude Code | Optional |
 | [gemini](https://github.com/google-gemini/gemini-cli) | `agents` — Gemini CLI | Optional |

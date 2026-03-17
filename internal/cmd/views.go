@@ -30,11 +30,12 @@ func addViewCommands(parent *cobra.Command) {
 		parent.AddCommand(viewCmd(v))
 	}
 	parent.AddCommand(&cobra.Command{
-		Use:     "projects",
+		Use:     "workspaces",
 		Aliases: []string{"o"},
-		Short:   "Project dashboard",
+		Short:   "Workspace dashboard",
+		Long:    "Browse registered workspaces, open or switch tmux sessions, inspect worktrees, and hide workspaces from the dashboard without changing the repository.",
 		RunE: func(_ *cobra.Command, _ []string) error {
-			return runProjectsDashboard()
+			return runWorkspacesDashboard()
 		},
 	})
 }
@@ -56,11 +57,11 @@ func runTUI(mode app.Mode, opts ...app.Option) error {
 	return err
 }
 
-func runProjectsDashboard() error {
+func runWorkspacesDashboard() error {
 	m := dashboard.New()
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
-		return fmt.Errorf("projects dashboard: %w", err)
+		return fmt.Errorf("workspaces dashboard: %w", err)
 	}
 	return nil
 }
