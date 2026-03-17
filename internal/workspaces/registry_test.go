@@ -1,4 +1,4 @@
-package projects
+package workspaces
 
 import (
 	"encoding/json"
@@ -16,8 +16,8 @@ func TestLoadRegistry_ImportsLegacyJSON(t *testing.T) {
 		t.Fatalf("mkdir legacy path: %v", err)
 	}
 	data, err := json.Marshal(struct {
-		Projects []Project `json:"projects"`
-	}{Projects: []Project{{Name: "kitmux", Path: "/tmp/kitmux", AddedAt: 42}}})
+		Workspaces []Workspace `json:"projects"`
+	}{Workspaces: []Workspace{{Name: "kitmux", Path: "/tmp/kitmux", AddedAt: 42}}})
 	if err != nil {
 		t.Fatalf("marshal legacy registry: %v", err)
 	}
@@ -27,10 +27,10 @@ func TestLoadRegistry_ImportsLegacyJSON(t *testing.T) {
 
 	loaded := LoadRegistry()
 	if len(loaded) != 1 {
-		t.Fatalf("expected 1 project, got %d", len(loaded))
+		t.Fatalf("expected 1 workspace, got %d", len(loaded))
 	}
 	if loaded[0].Name != "kitmux" || loaded[0].Path != "/tmp/kitmux" {
-		t.Fatalf("unexpected project: %+v", loaded[0])
+		t.Fatalf("unexpected workspace: %+v", loaded[0])
 	}
 	if loaded[0].AddedAt != 42 {
 		t.Fatalf("expected AddedAt=42, got %d", loaded[0].AddedAt)
@@ -42,29 +42,29 @@ func TestLoadRegistry_ImportsLegacyJSON(t *testing.T) {
 
 	loaded = LoadRegistry()
 	if len(loaded) != 1 {
-		t.Fatalf("expected sqlite-backed project after legacy removal, got %d", len(loaded))
+		t.Fatalf("expected sqlite-backed workspace after legacy removal, got %d", len(loaded))
 	}
 	if loaded[0].Name != "kitmux" || loaded[0].Path != "/tmp/kitmux" {
-		t.Fatalf("unexpected sqlite-backed project: %+v", loaded[0])
+		t.Fatalf("unexpected sqlite-backed workspace: %+v", loaded[0])
 	}
 }
 
-func TestAddProject_DedupesByPath(t *testing.T) {
+func TestAddWorkspace_DedupesByPath(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 
-	if !AddProject("kitmux", "/tmp/kitmux") {
+	if !AddWorkspace("kitmux", "/tmp/kitmux") {
 		t.Fatal("expected first add to succeed")
 	}
-	if AddProject("kitmux-copy", "/tmp/kitmux") {
+	if AddWorkspace("kitmux-copy", "/tmp/kitmux") {
 		t.Fatal("expected duplicate path add to be ignored")
 	}
 
 	loaded := LoadRegistry()
 	if len(loaded) != 1 {
-		t.Fatalf("expected 1 project after dedupe, got %d", len(loaded))
+		t.Fatalf("expected 1 workspace after dedupe, got %d", len(loaded))
 	}
 	if loaded[0].Name != "kitmux" {
-		t.Fatalf("expected original project to remain, got %+v", loaded[0])
+		t.Fatalf("expected original workspace to remain, got %+v", loaded[0])
 	}
 }

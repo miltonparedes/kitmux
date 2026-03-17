@@ -13,9 +13,9 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sahilm/fuzzy"
 
-	"github.com/miltonparedes/kitmux/internal/projects"
 	"github.com/miltonparedes/kitmux/internal/tmux"
 	"github.com/miltonparedes/kitmux/internal/views/sessions"
+	"github.com/miltonparedes/kitmux/internal/workspaces"
 	"github.com/miltonparedes/kitmux/internal/worktree"
 )
 
@@ -163,15 +163,15 @@ func loadTree() tea.Msg {
 			continue
 		}
 		name := filepath.Base(root)
-		projects.AddProject(name, root)
+		workspaces.AddWorkspace(name, root)
 	}
 
-	projs := projects.LoadRegistry()
+	projs := workspaces.LoadRegistry()
 	roots := buildProjectTree(projs, sess, repoRoots)
 	return treeLoadedMsg{roots: roots}
 }
 
-func buildProjectTree(projs []projects.Project, sess []tmux.Session, repoRoots map[string]string) []*sessions.TreeNode {
+func buildProjectTree(projs []workspaces.Workspace, sess []tmux.Session, repoRoots map[string]string) []*sessions.TreeNode {
 	activePaths := make(map[string]int64)
 	for _, s := range sess {
 		if root, ok := repoRoots[s.Name]; ok {
@@ -181,7 +181,7 @@ func buildProjectTree(projs []projects.Project, sess []tmux.Session, repoRoots m
 		}
 	}
 
-	projects.SortProjects(projs, activePaths)
+	workspaces.SortWorkspaces(projs, activePaths)
 
 	roots := make([]*sessions.TreeNode, 0, len(projs))
 	for _, proj := range projs {
@@ -248,7 +248,7 @@ func isMainBranch(name string) bool {
 		strings.HasSuffix(n, "-main") || strings.HasSuffix(n, "-master")
 }
 
-func loadStats(projs []projects.Project) tea.Cmd {
+func loadStats(projs []workspaces.Workspace) tea.Cmd {
 	return func() tea.Msg {
 		sess, _ := tmux.ListSessions()
 		pathToName := make(map[string]string, len(sess))
@@ -443,7 +443,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyCollapsedState()
 		m.rebuildVisible()
 		m.clampCursor()
-		projs := projects.LoadRegistry()
+		projs := workspaces.LoadRegistry()
 		return m, loadStats(projs)
 
 	case statsLoadedMsg:
@@ -668,7 +668,7 @@ func (m Model) handleProjectSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if sel := m.zoxide.selected(); sel != nil {
 			path := sel.Path
 			name := filepath.Base(path)
-			projects.AddProject(name, path)
+			workspaces.AddWorkspace(name, path)
 			m.mode = modeNormal
 			return m, tea.Batch(loadTree, m.enterWorktreePicker(name))
 		}
@@ -751,7 +751,7 @@ func (m Model) handleConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "y":
 		m.mode = modeNormal
 		if node := m.selected(); node != nil && node.Depth == 0 {
-			projects.RemoveProject(node.Name)
+			workspaces.RemoveWorkspace(node.Name)
 			return m, loadTree
 		}
 		return m, nil
@@ -764,7 +764,7 @@ func (m Model) handleConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // Actions
 
 func (m Model) enterWorktreePicker(projectName string) tea.Cmd {
-	projs := projects.LoadRegistry()
+	projs := workspaces.LoadRegistry()
 	for _, p := range projs {
 		if p.Name == projectName {
 			return loadWorktrees(projectName, p.Path)
