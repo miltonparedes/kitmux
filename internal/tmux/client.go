@@ -112,6 +112,11 @@ func NewSessionInDir(name, dir string) error {
 	return exec.Command("tmux", "new-session", "-d", "-s", name, "-c", dir).Run()
 }
 
+// NewSessionDetached creates a detached session with the given name.
+func NewSessionDetached(name string) error {
+	return exec.Command("tmux", "new-session", "-d", "-s", name).Run()
+}
+
 // SendKeys sends keystrokes to a tmux target pane.
 func SendKeys(target, keys string) error {
 	return exec.Command("tmux", "send-keys", "-t", target, keys, "Enter").Run()

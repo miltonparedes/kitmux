@@ -25,6 +25,7 @@ const (
 type TreeNode struct {
 	Kind        NodeKind
 	Name        string // display name (suffix for children, full for root)
+	Path        string
 	SessionName string // raw tmux session name (empty for virtual headers)
 	Windows     int
 	Attached    bool

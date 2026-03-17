@@ -37,3 +37,23 @@ install:
 # Clean build artifacts
 clean:
     rm -f kitmux
+
+# --- Database dev tools ---
+
+db_path := env("HOME") / ".config/kitmux/state.db"
+
+# Delete the state DB (re-created on next run)
+db-reset:
+    rm -f {{db_path}} && echo "Removed {{db_path}}"
+
+# Show current schema version
+db-version:
+    sqlite3 {{db_path}} "PRAGMA user_version;"
+
+# Open an interactive SQLite shell
+db-shell:
+    sqlite3 {{db_path}}
+
+# Dump the database schema (DDL)
+db-schema:
+    sqlite3 {{db_path}} ".schema"

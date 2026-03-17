@@ -30,7 +30,6 @@ const (
 	ModePalette               // Command palette-only mode
 	ModeWorktrees             // Worktrees view
 	ModeAgents                // Agents view
-	ModeProjects              // Project picker (direct access)
 	ModeWindows               // Windows for current session
 	ModeRun                   // Execute a palette command directly
 )
@@ -85,9 +84,6 @@ func New(mode Mode, opts ...Option) Model {
 		m.view = viewWorktrees
 	case ModeAgents:
 		m.view = viewAgents
-	case ModeProjects:
-		m.view = viewSessions
-		m.sessions.SetPickingMode()
 	case ModeWindows:
 		m.view = viewWindows
 	}
@@ -111,8 +107,6 @@ func (m Model) Init() tea.Cmd {
 		return func() tea.Msg {
 			return messages.ExecuteCommandMsg{ID: id}
 		}
-	case ModeProjects:
-		return m.sessions.ProjectPickerCmds()
 	case ModeWindows:
 		return m.initCurrentSessionWindows()
 	default:
@@ -357,9 +351,6 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			}, true
 		default:
 			if m.sessions.IsEditing() {
-				if m.mode == ModeProjects {
-					return m, tea.Quit, true
-				}
 				// esc in sessions editing → falls through to sessions.Update
 			} else {
 				return m, tea.Quit, true
@@ -429,7 +420,7 @@ func (m Model) View() string {
 // Must be called on the m being returned (value receiver — mutations stay local).
 func (m *Model) returnToPalette() tea.Cmd {
 	m.paletteReturn = false
-	if m.mode == ModePalette || m.mode == ModeRun || m.mode == ModeProjects {
+	if m.mode == ModePalette || m.mode == ModeRun {
 		return tea.Quit
 	}
 	m.paletteActive = true
