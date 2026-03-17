@@ -2,6 +2,7 @@ package store
 
 import (
 	"database/sql"
+	"fmt"
 	"os"
 	"testing"
 )
@@ -38,8 +39,8 @@ func TestOpen_RunsMigrations(t *testing.T) {
 	if err := db.QueryRow("PRAGMA user_version;").Scan(&version); err != nil {
 		t.Fatalf("query user_version: %v", err)
 	}
-	if version != schemaVersion {
-		t.Fatalf("expected schema version %d, got %d", schemaVersion, version)
+	if version != schemaVersion() {
+		t.Fatalf("expected schema version %d, got %d", schemaVersion(), version)
 	}
 }
 
@@ -62,8 +63,33 @@ func TestOpen_IsIdempotent(t *testing.T) {
 	if err := db2.QueryRow("PRAGMA user_version;").Scan(&version); err != nil {
 		t.Fatalf("query user_version: %v", err)
 	}
-	if version != schemaVersion {
-		t.Fatalf("expected schema version %d, got %d", schemaVersion, version)
+	if version != schemaVersion() {
+		t.Fatalf("expected schema version %d, got %d", schemaVersion(), version)
+	}
+}
+
+func TestMigrate_RejectsNewerVersion(t *testing.T) {
+	useTempHome(t)
+
+	// Create a DB and set user_version higher than supported.
+	db, err := open()
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	future := schemaVersion() + 1
+	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d;", future)); err != nil {
+		t.Fatalf("set user_version: %v", err)
+	}
+	_ = db.Close()
+
+	// Re-opening should fail.
+	_, err = open()
+	if err == nil {
+		t.Fatal("expected error opening DB with newer schema version")
+	}
+	want := fmt.Sprintf("sqlite schema version %d is newer than supported version %d", future, schemaVersion())
+	if err.Error() != want {
+		t.Fatalf("unexpected error:\n got: %s\nwant: %s", err.Error(), want)
 	}
 }
 
