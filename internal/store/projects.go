@@ -13,10 +13,10 @@ const legacyProjectsFile = "projects.json"
 
 // Project is the persisted project record.
 type Project struct {
-	Name       string
-	Path       string
-	AddedAt    int64
-	LastSeenAt int64
+	Name       string `json:"name"`
+	Path       string `json:"path"`
+	AddedAt    int64  `json:"added_at"`
+	LastSeenAt int64  `json:"last_seen_at"`
 }
 
 func LoadProjects() ([]Project, error) {

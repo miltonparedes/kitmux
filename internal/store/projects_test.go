@@ -38,6 +38,9 @@ func TestLoadProjects_ImportsLegacyJSONOnce(t *testing.T) {
 	if len(projects) != 1 {
 		t.Fatalf("expected 1 imported project, got %d", len(projects))
 	}
+	if projects[0].AddedAt != 42 {
+		t.Fatalf("expected AddedAt=42, got %d", projects[0].AddedAt)
+	}
 
 	if err := os.Remove(legacyProjectsJSONPath(home)); err != nil {
 		t.Fatalf("remove legacy projects json: %v", err)

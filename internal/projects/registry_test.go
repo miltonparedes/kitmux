@@ -32,6 +32,9 @@ func TestLoadRegistry_ImportsLegacyJSON(t *testing.T) {
 	if loaded[0].Name != "kitmux" || loaded[0].Path != "/tmp/kitmux" {
 		t.Fatalf("unexpected project: %+v", loaded[0])
 	}
+	if loaded[0].AddedAt != 42 {
+		t.Fatalf("expected AddedAt=42, got %d", loaded[0].AddedAt)
+	}
 
 	if err := os.Remove(legacyPath); err != nil {
 		t.Fatalf("remove legacy registry: %v", err)
