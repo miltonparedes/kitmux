@@ -15,7 +15,7 @@ func TestLoadTree_DoesNotReaddHiddenWorkspaceFromActiveSession(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())
 
 	repo := filepath.Join(t.TempDir(), "api")
-	if err := os.MkdirAll(repo, 0o755); err != nil {
+	if err := os.MkdirAll(repo, 0o750); err != nil {
 		t.Fatalf("mkdir repo: %v", err)
 	}
 
@@ -66,7 +66,7 @@ func TestHandleConfirm_RemovesSelectedWorkspaceByPath(t *testing.T) {
 	first := filepath.Join(t.TempDir(), "acme", "api")
 	second := filepath.Join(t.TempDir(), "internal", "api")
 	for _, dir := range []string{first, second} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			t.Fatalf("mkdir %s: %v", dir, err)
 		}
 	}
@@ -102,7 +102,7 @@ func TestEnterWorktreePicker_UsesWorkspacePath(t *testing.T) {
 	first := filepath.Join(t.TempDir(), "acme", "api")
 	second := filepath.Join(t.TempDir(), "internal", "api")
 	for _, dir := range []string{first, second} {
-		if err := os.MkdirAll(dir, 0o755); err != nil {
+		if err := os.MkdirAll(dir, 0o750); err != nil {
 			t.Fatalf("mkdir %s: %v", dir, err)
 		}
 	}
@@ -168,7 +168,7 @@ func prependPath(t *testing.T, dir string) {
 func writeExecutable(t *testing.T, dir, name, contents string) {
 	t.Helper()
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, []byte(contents), 0o755); err != nil {
+	if err := os.WriteFile(path, []byte(contents), 0o755); err != nil { //nolint:gosec // test helper needs executable scripts
 		t.Fatalf("write %s: %v", path, err)
 	}
 }
