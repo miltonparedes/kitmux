@@ -292,12 +292,12 @@ func (m Model) statusLine() string {
 		if node := m.selected(); node != nil {
 			name = node.Name
 		}
-		return theme.AttachedBadge.Render(fmt.Sprintf(" remove '%s'? y/n", name))
+		return theme.AttachedBadge.Render(fmt.Sprintf(" delete '%s'? y/n (hide only; no repo changes)", name))
 	}
 	if m.mode == modeFiltering {
 		return theme.HelpStyle.Render(" arrows navigate  enter accept  esc clear")
 	}
-	return theme.HelpStyle.Render(" enter open  / filter  n add  d remove  r refresh")
+	return theme.HelpStyle.Render(" enter open  / filter  n add  d delete  r refresh")
 }
 
 func (m Model) renderNode(node *sessions.TreeNode, selected bool) string {
