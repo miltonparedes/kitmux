@@ -13,10 +13,17 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sahilm/fuzzy"
 
+	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/tmux"
-	"github.com/miltonparedes/kitmux/internal/views/sessions"
 	wsreg "github.com/miltonparedes/kitmux/internal/workspaces"
 	"github.com/miltonparedes/kitmux/internal/worktree"
+)
+
+type column int
+
+const (
+	colProjects column = iota
+	colDetail
 )
 
 type dashMode int
@@ -25,27 +32,72 @@ const (
 	modeNormal dashMode = iota
 	modeFiltering
 	modeProjectSearch
-	modeWorktreePicker
 	modeNewBranch
 	modeConfirm
+	modeAgentPicker
 )
 
 const keyEnter = "enter"
+
+// projectEntry represents a workspace in the left column.
+type projectEntry struct {
+	Name     string
+	Path     string
+	Active   bool
+	Activity int64
+}
+
+// branchEntry represents a session or worktree in the right column.
+type branchEntry struct {
+	Name        string
+	SessionName string
+	Path        string
+	Windows     int
+	Attached    bool
+	IsSession   bool
+	DiffAdded   int
+	DiffDel     int
+}
+
+// agentEntry represents a detected running agent or the launch action.
+type agentEntry struct {
+	Name        string
+	AgentID     string
+	SessionName string
+	WindowIndex int
+	PaneIndex   int
+	IsLauncher  bool // "+ launch agent..." action
+}
 
 type Model struct {
 	width  int
 	height int
 
-	mode dashMode
+	focus column
+	mode  dashMode
 
-	// Main tree
-	roots     []*sessions.TreeNode
-	visible   []*sessions.TreeNode
-	allFlat   []*sessions.TreeNode // unfiltered flat list
-	collapsed map[string]bool
-	stats     map[string]sessionStats
-	cursor    int
-	scroll    int
+	// Left column — projects
+	projects   []projectEntry
+	projCursor int
+	projScroll int
+
+	// Right column — detail for selected project
+	branches     []branchEntry
+	agentEntries []agentEntry
+	detailItems  int // len(branches) + len(agentEntries)
+	detCursor    int
+	detScroll    int
+
+	// Diff stats cache
+	stats map[string]sessionStats
+
+	// All panes for agent detection
+	panes []tmux.Pane
+
+	// Session data for building detail
+	sessions  []tmux.Session
+	repoRoots map[string]string
+	wtByPath  map[string][]worktree.Worktree
 
 	// Filter (/)
 	filter textinput.Model
@@ -53,11 +105,16 @@ type Model struct {
 	// Project search (n) — zoxide
 	zoxide zoxidePicker
 
-	// Worktree picker
-	wtPicker wtPicker
-
 	// New branch input
-	newBranch textinput.Model
+	newBranch     textinput.Model
+	newBranchProj projectEntry
+
+	// Agent picker
+	agentPicker agentPickerState
+
+	// Confirm delete
+	confirmName string
+	confirmPath string
 }
 
 type sessionStats struct {
@@ -79,22 +136,10 @@ type zoxidePicker struct {
 	scroll   int
 }
 
-type wtEntry struct {
-	Branch    string
-	Path      string
-	IsMain    bool
-	HasSess   bool
-	SessName  string
-	Attached  bool
-	DiffAdded int
-	DiffDel   int
-}
-
-type wtPicker struct {
-	project  string
-	projPath string
-	entries  []wtEntry
-	cursor   int
+type agentPickerState struct {
+	agents    []agents.Agent
+	cursor    int
+	modeIndex []int
 }
 
 func New() Model {
@@ -113,23 +158,31 @@ func New() Model {
 	bi.Placeholder = "new-feature"
 	bi.CharLimit = 128
 
+	agentList := agents.DefaultAgents()
 	return Model{
-		collapsed: make(map[string]bool),
 		stats:     make(map[string]sessionStats),
 		filter:    fi,
 		zoxide:    zoxidePicker{input: zi},
 		newBranch: bi,
+		agentPicker: agentPickerState{
+			agents:    agentList,
+			modeIndex: make([]int, len(agentList)),
+		},
 	}
 }
 
 func (m Model) Init() tea.Cmd {
-	return loadTree
+	return loadData
 }
 
 // Messages
 
-type treeLoadedMsg struct {
-	roots []*sessions.TreeNode
+type dataLoadedMsg struct {
+	projects  []projectEntry
+	sessions  []tmux.Session
+	repoRoots map[string]string
+	wtByPath  map[string][]worktree.Worktree
+	panes     []tmux.Pane
 }
 
 type statsLoadedMsg struct {
@@ -140,12 +193,6 @@ type zoxideLoadedMsg struct {
 	entries []zoxideEntry
 }
 
-type wtLoadedMsg struct {
-	project  string
-	projPath string
-	entries  []wtEntry
-}
-
 type (
 	actionDoneMsg struct{}
 	switchDoneMsg struct{}
@@ -153,18 +200,46 @@ type (
 
 // Data loading
 
-func loadTree() tea.Msg {
+func loadData() tea.Msg {
 	sess, _ := tmux.ListSessions()
+	panes, _ := tmux.ListPanes()
+	projs := wsreg.LoadRegistry()
+
 	repoRoots := resolveRepoRoots(sess)
 
-	projs := wsreg.LoadRegistry()
+	activePaths := make(map[string]int64)
+	for _, s := range sess {
+		if root, ok := repoRoots[s.Name]; ok {
+			if s.Activity > activePaths[root] {
+				activePaths[root] = s.Activity
+			}
+		}
+	}
+
+	wsreg.SortWorkspaces(projs, activePaths)
+
 	wtByPath := loadAllWorktrees(projs)
-	roots := buildProjectTree(projs, sess, repoRoots, wtByPath)
-	return treeLoadedMsg{roots: roots}
+
+	entries := make([]projectEntry, len(projs))
+	for i, p := range projs {
+		act := activePaths[p.Path]
+		entries[i] = projectEntry{
+			Name:     p.Name,
+			Path:     p.Path,
+			Active:   act > 0,
+			Activity: act,
+		}
+	}
+
+	return dataLoadedMsg{
+		projects:  entries,
+		sessions:  sess,
+		repoRoots: repoRoots,
+		wtByPath:  wtByPath,
+		panes:     panes,
+	}
 }
 
-// loadAllWorktrees loads worktree branches for each workspace.
-// Falls back to resolveGitBranch for repos without wt support.
 func loadAllWorktrees(projs []wsreg.Workspace) map[string][]worktree.Worktree {
 	result := make(map[string][]worktree.Worktree, len(projs))
 	for _, p := range projs {
@@ -182,113 +257,6 @@ func loadAllWorktrees(projs []wsreg.Workspace) map[string][]worktree.Worktree {
 	return result
 }
 
-func buildProjectTree(projs []wsreg.Workspace, sess []tmux.Session, repoRoots map[string]string, wtByPath map[string][]worktree.Worktree) []*sessions.TreeNode {
-	activePaths := make(map[string]int64)
-	for _, s := range sess {
-		if root, ok := repoRoots[s.Name]; ok {
-			if s.Activity > activePaths[root] {
-				activePaths[root] = s.Activity
-			}
-		}
-	}
-
-	wsreg.SortWorkspaces(projs, activePaths)
-
-	roots := make([]*sessions.TreeNode, 0, len(projs))
-	for _, proj := range projs {
-		group := &sessions.TreeNode{
-			Kind:     sessions.KindGroupHeader,
-			Name:     proj.Name,
-			Path:     proj.Path,
-			Expanded: true,
-			Depth:    0,
-		}
-
-		// Collect active sessions for this workspace
-		var activeChildren []*sessions.TreeNode
-		sessionPaths := make(map[string]bool)
-		for _, s := range sess {
-			root := repoRoots[s.Name]
-			if root != proj.Path {
-				continue
-			}
-			childName := trimPrefix(s.Name, proj.Name)
-			if s.Path == proj.Path {
-				if branch := resolveGitBranch(s.Path); branch != "" {
-					childName = branch
-				}
-			}
-			activeChildren = append(activeChildren, &sessions.TreeNode{
-				Kind:        sessions.KindSession,
-				Name:        childName,
-				SessionName: s.Name,
-				Windows:     s.Windows,
-				Attached:    s.Attached,
-				Activity:    s.Activity,
-				Depth:       1,
-			})
-			if s.Activity > group.Activity {
-				group.Activity = s.Activity
-			}
-			sessionPaths[s.Path] = true
-		}
-
-		sort.SliceStable(activeChildren, func(i, j int) bool {
-			mi := isMainBranch(activeChildren[i].Name)
-			mj := isMainBranch(activeChildren[j].Name)
-			if mi != mj {
-				return mi
-			}
-			return activeChildren[i].Activity > activeChildren[j].Activity
-		})
-
-		// Add inactive worktree branches that don't have a running session
-		var inactiveChildren []*sessions.TreeNode
-		for _, wt := range wtByPath[proj.Path] {
-			if sessionPaths[wt.Path] {
-				continue
-			}
-			inactiveChildren = append(inactiveChildren, &sessions.TreeNode{
-				Kind:  sessions.KindWorktree,
-				Name:  wt.Branch,
-				Path:  wt.Path,
-				Depth: 1,
-			})
-		}
-
-		sort.SliceStable(inactiveChildren, func(i, j int) bool {
-			mi := isMainBranch(inactiveChildren[i].Name)
-			mj := isMainBranch(inactiveChildren[j].Name)
-			if mi != mj {
-				return mi
-			}
-			return inactiveChildren[i].Name < inactiveChildren[j].Name
-		})
-
-		children := make([]*sessions.TreeNode, 0, len(activeChildren)+len(inactiveChildren))
-		children = append(children, activeChildren...)
-		children = append(children, inactiveChildren...)
-		group.Children = children
-		roots = append(roots, group)
-	}
-	return roots
-}
-
-func trimPrefix(sessionName, projectName string) string {
-	norm := normalize(sessionName)
-	normProj := normalize(projectName)
-	if strings.HasPrefix(norm, normProj+"-") {
-		return sessionName[len(normProj)+1:]
-	}
-	return sessionName
-}
-
-func isMainBranch(name string) bool {
-	n := normalize(name)
-	return n == "main" || n == "master" ||
-		strings.HasSuffix(n, "-main") || strings.HasSuffix(n, "-master")
-}
-
 func loadStats(projs []wsreg.Workspace) tea.Cmd {
 	return func() tea.Msg {
 		sess, _ := tmux.ListSessions()
@@ -298,7 +266,6 @@ func loadStats(projs []wsreg.Workspace) tea.Cmd {
 				pathToName[s.Path] = s.Name
 			}
 		}
-
 		stats := make(map[string]sessionStats)
 		for _, proj := range projs {
 			wts, err := worktree.ListInDir(proj.Path)
@@ -332,7 +299,6 @@ func queryZoxide() ([]zoxideEntry, error) {
 	if err != nil {
 		return nil, err
 	}
-
 	home, _ := os.UserHomeDir()
 	var entries []zoxideEntry
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
@@ -347,7 +313,6 @@ func queryZoxide() ([]zoxideEntry, error) {
 		scoreStr := line[:idx]
 		path := strings.TrimSpace(line[idx+1:])
 		score, _ := strconv.ParseFloat(scoreStr, 64)
-
 		short := path
 		if home != "" && strings.HasPrefix(path, home) {
 			short = "~" + path[len(home):]
@@ -357,48 +322,127 @@ func queryZoxide() ([]zoxideEntry, error) {
 	return entries, nil
 }
 
-func loadWorktrees(project, projPath string) tea.Cmd {
-	return func() tea.Msg {
-		wts, err := worktree.ListInDir(projPath)
-		if err != nil || len(wts) == 0 {
-			return wtLoadedMsg{project: project, projPath: projPath}
-		}
+// Agent detection
 
-		sess, _ := tmux.ListSessions()
-		sessMap := make(map[string]tmux.Session, len(sess))
-		for _, s := range sess {
-			if s.Path != "" {
-				sessMap[s.Path] = s
-			}
-		}
-
-		entries := make([]wtEntry, 0, len(wts))
-		for _, wt := range wts {
-			e := wtEntry{
-				Branch:    wt.Branch,
-				Path:      wt.Path,
-				IsMain:    wt.IsMain,
-				DiffAdded: wt.WorkingTree.Diff.Added,
-				DiffDel:   wt.WorkingTree.Diff.Deleted,
-			}
-			if s, ok := sessMap[wt.Path]; ok {
-				e.HasSess = true
-				e.SessName = s.Name
-				e.Attached = s.Attached
-			}
-			entries = append(entries, e)
-		}
-
-		// Main worktree first
-		sort.SliceStable(entries, func(i, j int) bool {
-			if entries[i].IsMain != entries[j].IsMain {
-				return entries[i].IsMain
-			}
-			return false
-		})
-
-		return wtLoadedMsg{project: project, projPath: projPath, entries: entries}
+func detectAgents(panes []tmux.Pane, projectPath string, repoRoots map[string]string, sessions []tmux.Session) []agentEntry {
+	agentCommands := make(map[string]agents.Agent)
+	for _, a := range agents.DefaultAgents() {
+		agentCommands[a.Command] = a
 	}
+
+	sessPathMap := make(map[string]string, len(sessions))
+	for _, s := range sessions {
+		if root, ok := repoRoots[s.Name]; ok {
+			sessPathMap[s.Name] = root
+		}
+	}
+
+	var detected []agentEntry
+	for _, p := range panes {
+		root := sessPathMap[p.SessionName]
+		if root != projectPath {
+			continue
+		}
+		a, ok := agentCommands[p.Command]
+		if !ok {
+			continue
+		}
+		detected = append(detected, agentEntry{
+			Name:        a.Name,
+			AgentID:     a.ID,
+			SessionName: p.SessionName,
+			WindowIndex: p.WindowIndex,
+			PaneIndex:   p.PaneIndex,
+		})
+	}
+
+	detected = append(detected, agentEntry{
+		Name:       "+ launch agent...",
+		IsLauncher: true,
+	})
+	return detected
+}
+
+// Build detail for selected project
+
+func (m *Model) rebuildDetail() {
+	if len(m.projects) == 0 {
+		m.branches = nil
+		m.agentEntries = nil
+		m.detailItems = 0
+		return
+	}
+
+	proj := m.projects[m.projCursor]
+	m.branches = m.buildBranches(proj)
+	m.agentEntries = detectAgents(m.panes, proj.Path, m.repoRoots, m.sessions)
+	m.detailItems = len(m.branches) + len(m.agentEntries)
+	m.detCursor = 0
+	m.detScroll = 0
+}
+
+func (m *Model) buildBranches(proj projectEntry) []branchEntry {
+	var active []branchEntry
+	sessionPaths := make(map[string]bool)
+
+	for _, s := range m.sessions {
+		root := m.repoRoots[s.Name]
+		if root != proj.Path {
+			continue
+		}
+		childName := trimPrefix(s.Name, proj.Name)
+		if s.Path == proj.Path {
+			if branch := resolveGitBranch(s.Path); branch != "" {
+				childName = branch
+			}
+		}
+		st := m.stats[s.Name]
+		active = append(active, branchEntry{
+			Name:        childName,
+			SessionName: s.Name,
+			Path:        s.Path,
+			Windows:     s.Windows,
+			Attached:    s.Attached,
+			IsSession:   true,
+			DiffAdded:   st.Added,
+			DiffDel:     st.Deleted,
+		})
+		sessionPaths[s.Path] = true
+	}
+
+	sort.SliceStable(active, func(i, j int) bool {
+		mi := isMainBranch(active[i].Name)
+		mj := isMainBranch(active[j].Name)
+		if mi != mj {
+			return mi
+		}
+		return false
+	})
+
+	var inactive []branchEntry
+	for _, wt := range m.wtByPath[proj.Path] {
+		if sessionPaths[wt.Path] {
+			continue
+		}
+		inactive = append(inactive, branchEntry{
+			Name: wt.Branch,
+			Path: wt.Path,
+		})
+	}
+
+	sort.SliceStable(inactive, func(i, j int) bool {
+		mi := isMainBranch(inactive[i].Name)
+		mj := isMainBranch(inactive[j].Name)
+		if mi != mj {
+			return mi
+		}
+		return inactive[i].Name < inactive[j].Name
+	})
+
+	result := make([]branchEntry, 0, len(active)+len(inactive))
+	result = append(result, active...)
+	result = append(result, inactive...)
+	return result
 }
 
 // Model methods
@@ -406,68 +450,6 @@ func loadWorktrees(project, projPath string) tea.Cmd {
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
-}
-
-func (m *Model) applyCollapsedState() {
-	for _, r := range m.roots {
-		if m.collapsed[nodeKey(r)] {
-			r.Expanded = false
-		}
-	}
-}
-
-func (m *Model) rebuildVisible() {
-	m.allFlat = sessions.Flatten(m.roots)
-	m.applyFilter()
-}
-
-func (m *Model) applyFilter() {
-	if m.mode != modeFiltering || m.filter.Value() == "" {
-		m.visible = m.allFlat
-		return
-	}
-
-	query := m.filter.Value()
-	names := make([]string, len(m.allFlat))
-	for i, n := range m.allFlat {
-		if n.SessionName != "" {
-			names[i] = n.Name + " " + n.SessionName
-		} else {
-			names[i] = n.Name
-		}
-	}
-	matches := fuzzy.Find(query, names)
-	matched := make(map[int]bool, len(matches))
-	for _, m := range matches {
-		matched[m.Index] = true
-	}
-
-	// Include matched nodes and their parent groups
-	parentOf := make(map[int]int, len(m.allFlat))
-	lastGroup := -1
-	for i, n := range m.allFlat {
-		if n.Depth == 0 {
-			lastGroup = i
-		} else {
-			parentOf[i] = lastGroup
-		}
-	}
-
-	include := make(map[int]bool, len(m.allFlat))
-	for idx := range matched {
-		include[idx] = true
-		if p, ok := parentOf[idx]; ok {
-			include[p] = true
-		}
-	}
-
-	filtered := make([]*sessions.TreeNode, 0, len(include))
-	for i, n := range m.allFlat {
-		if include[i] {
-			filtered = append(filtered, n)
-		}
-	}
-	m.visible = filtered
 }
 
 // Update
@@ -479,41 +461,33 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.height = msg.Height
 		return m, nil
 
-	case treeLoadedMsg:
-		m.roots = msg.roots
-		m.applyCollapsedState()
-		m.rebuildVisible()
-		m.clampCursor()
+	case dataLoadedMsg:
+		m.projects = msg.projects
+		m.sessions = msg.sessions
+		m.repoRoots = msg.repoRoots
+		m.wtByPath = msg.wtByPath
+		m.panes = msg.panes
+		m.clampProjCursor()
+		m.rebuildDetail()
 		projs := wsreg.LoadRegistry()
 		return m, loadStats(projs)
 
 	case statsLoadedMsg:
 		m.stats = msg.stats
+		m.rebuildDetail()
 		return m, nil
 
 	case switchDoneMsg:
 		return m, tea.Quit
 
 	case actionDoneMsg:
-		return m, loadTree
+		return m, loadData
 
 	case zoxideLoadedMsg:
 		m.zoxide.all = msg.entries
 		m.zoxide.filtered = msg.entries
 		m.zoxide.cursor = 0
 		m.zoxide.scroll = 0
-		return m, nil
-
-	case wtLoadedMsg:
-		m.wtPicker.project = msg.project
-		m.wtPicker.projPath = msg.projPath
-		m.wtPicker.entries = msg.entries
-		m.wtPicker.cursor = 0
-		if len(msg.entries) == 0 {
-			// No worktrees — open project directly
-			return m, m.openProjectDirect(msg.project, msg.projPath)
-		}
-		m.mode = modeWorktreePicker
 		return m, nil
 
 	case tea.MouseMsg:
@@ -527,10 +501,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m.handleFilter(msg)
 		case modeProjectSearch:
 			return m.handleProjectSearch(msg)
-		case modeWorktreePicker:
-			return m.handleWorktreePicker(msg)
 		case modeNewBranch:
 			return m.handleNewBranch(msg)
+		case modeAgentPicker:
+			return m.handleAgentPicker(msg)
 		default:
 			return m.handleKey(msg)
 		}
@@ -544,111 +518,105 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 	}
 	switch msg.Button {
 	case tea.MouseButtonWheelUp:
-		m.cursor--
-		m.clampCursor()
-		m.ensureVisible()
+		if m.focus == colProjects {
+			m.projCursor--
+			m.clampProjCursor()
+			m.ensureProjVisible()
+			m.rebuildDetail()
+		} else {
+			m.detCursor--
+			m.clampDetCursor()
+			m.ensureDetVisible()
+		}
 		return m, nil
 	case tea.MouseButtonWheelDown:
-		m.cursor++
-		m.clampCursor()
-		m.ensureVisible()
+		if m.focus == colProjects {
+			m.projCursor++
+			m.clampProjCursor()
+			m.ensureProjVisible()
+			m.rebuildDetail()
+		} else {
+			m.detCursor++
+			m.clampDetCursor()
+			m.ensureDetVisible()
+		}
 		return m, nil
-	case tea.MouseButtonLeft:
-		if msg.Action != tea.MouseActionRelease {
-			return m, nil
-		}
-		row := msg.Y
-		if row <= 4 {
-			return m, nil
-		}
-		idx := m.rowToIndex(row - 5)
-		if idx < 0 || idx >= len(m.visible) {
-			return m, nil
-		}
-		m.cursor = idx
-		return m.activateNode(m.visible[idx])
 	}
 	return m, nil
-}
-
-func (m Model) activateNode(node *sessions.TreeNode) (tea.Model, tea.Cmd) {
-	if node.Depth == 0 {
-		if len(node.Children) > 0 {
-			node.Expanded = !node.Expanded
-			m.collapsed[nodeKey(node)] = !node.Expanded
-			m.rebuildVisible()
-			m.clampCursor()
-			return m, nil
-		}
-		// Inactive project — load worktrees
-		return m, m.enterWorktreePicker(node.Path)
-	}
-	if node.Kind == sessions.KindSession && node.SessionName != "" {
-		return m, m.switchTo(node.SessionName)
-	}
-	if node.Kind == sessions.KindWorktree {
-		if parent := m.parentGroup(m.cursor); parent != nil {
-			return m, m.openWorktreeSession(parent.Name, wtEntry{
-				Branch: node.Name,
-				Path:   node.Path,
-			})
-		}
-	}
-	return m, nil
-}
-
-func (m Model) parentGroup(idx int) *sessions.TreeNode {
-	for i := idx - 1; i >= 0; i-- {
-		if m.visible[i].Depth == 0 {
-			return m.visible[i]
-		}
-	}
-	return nil
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "j", "down":
-		m.cursor++
-		m.clampCursor()
-		m.ensureVisible()
-		return m, nil
-	case "k", "up":
-		m.cursor--
-		m.clampCursor()
-		m.ensureVisible()
-		return m, nil
-	case "J":
-		m.jumpGroup(1)
-		m.ensureVisible()
-		return m, nil
-	case "K":
-		m.jumpGroup(-1)
-		m.ensureVisible()
-		return m, nil
-	case "g", "home":
-		m.cursor = 0
-		m.scroll = 0
-		return m, nil
-	case "G", "end":
-		m.cursor = len(m.visible) - 1
-		m.ensureVisible()
+		if m.focus == colProjects {
+			m.projCursor++
+			m.clampProjCursor()
+			m.ensureProjVisible()
+			m.rebuildDetail()
+		} else {
+			m.detCursor++
+			m.clampDetCursor()
+			m.ensureDetVisible()
+		}
 		return m, nil
 
-	case " ":
-		if node := m.selected(); node != nil && len(node.Children) > 0 {
-			node.Expanded = !node.Expanded
-			m.collapsed[nodeKey(node)] = !node.Expanded
-			m.rebuildVisible()
-			m.clampCursor()
+	case "k", "up":
+		if m.focus == colProjects {
+			m.projCursor--
+			m.clampProjCursor()
+			m.ensureProjVisible()
+			m.rebuildDetail()
+		} else {
+			m.detCursor--
+			m.clampDetCursor()
+			m.ensureDetVisible()
+		}
+		return m, nil
+
+	case "g", "home":
+		if m.focus == colProjects {
+			m.projCursor = 0
+			m.projScroll = 0
+			m.rebuildDetail()
+		} else {
+			m.detCursor = 0
+			m.detScroll = 0
+		}
+		return m, nil
+
+	case "G", "end":
+		if m.focus == colProjects {
+			m.projCursor = len(m.projects) - 1
+			m.clampProjCursor()
+			m.ensureProjVisible()
+			m.rebuildDetail()
+		} else {
+			m.detCursor = m.detailItems - 1
+			m.clampDetCursor()
+			m.ensureDetVisible()
+		}
+		return m, nil
+
+	case "l", "right":
+		if m.focus == colProjects && m.detailItems > 0 {
+			m.focus = colDetail
+		}
+		return m, nil
+
+	case "h", "left":
+		if m.focus == colDetail {
+			m.focus = colProjects
 		}
 		return m, nil
 
 	case keyEnter:
-		if node := m.selected(); node != nil {
-			return m.activateNode(node)
+		if m.focus == colProjects {
+			if m.detailItems > 0 {
+				m.focus = colDetail
+			}
+			return m, nil
 		}
-		return m, nil
+		return m.activateDetailItem()
 
 	case "/":
 		m.mode = modeFiltering
@@ -657,26 +625,73 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m, textinput.Blink
 
 	case "n":
-		m.mode = modeProjectSearch
-		m.zoxide.input.SetValue("")
-		m.zoxide.input.Focus()
-		m.zoxide.all = nil
-		m.zoxide.filtered = nil
-		m.zoxide.cursor = 0
-		m.zoxide.scroll = 0
-		return m, tea.Batch(textinput.Blink, loadZoxide())
+		if m.focus == colProjects {
+			m.mode = modeProjectSearch
+			m.zoxide.input.SetValue("")
+			m.zoxide.input.Focus()
+			m.zoxide.all = nil
+			m.zoxide.filtered = nil
+			m.zoxide.cursor = 0
+			m.zoxide.scroll = 0
+			return m, tea.Batch(textinput.Blink, loadZoxide())
+		}
+		return m, nil
 
 	case "d":
-		if node := m.selected(); node != nil && node.Depth == 0 {
+		if m.focus == colProjects && len(m.projects) > 0 {
+			p := m.projects[m.projCursor]
+			m.confirmName = p.Name
+			m.confirmPath = p.Path
 			m.mode = modeConfirm
 		}
 		return m, nil
 
-	case "r":
-		return m, loadTree
+	case "c":
+		if m.focus == colDetail && len(m.projects) > 0 {
+			m.newBranchProj = m.projects[m.projCursor]
+			m.mode = modeNewBranch
+			m.newBranch.SetValue("")
+			m.newBranch.Focus()
+			return m, textinput.Blink
+		}
+		return m, nil
 
-	case "q", "esc", "ctrl+c":
+	case "r":
+		return m, loadData
+
+	case "q", "esc":
+		if m.focus == colDetail {
+			m.focus = colProjects
+			return m, nil
+		}
 		return m, tea.Quit
+	}
+	return m, nil
+}
+
+func (m Model) activateDetailItem() (tea.Model, tea.Cmd) {
+	if m.detCursor < len(m.branches) {
+		b := m.branches[m.detCursor]
+		if b.IsSession && b.SessionName != "" {
+			return m, m.switchTo(b.SessionName)
+		}
+		if len(m.projects) > 0 {
+			proj := m.projects[m.projCursor]
+			return m, m.openWorktreeSession(proj.Name, b)
+		}
+		return m, nil
+	}
+
+	agentIdx := m.detCursor - len(m.branches)
+	if agentIdx >= 0 && agentIdx < len(m.agentEntries) {
+		ae := m.agentEntries[agentIdx]
+		if ae.IsLauncher {
+			m.mode = modeAgentPicker
+			m.agentPicker.cursor = 0
+			return m, nil
+		}
+		target := fmt.Sprintf("%s:%d.%d", ae.SessionName, ae.WindowIndex, ae.PaneIndex)
+		return m, m.switchTo(target)
 	}
 	return m, nil
 }
@@ -688,30 +703,14 @@ func (m Model) handleFilter(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "esc":
 		m.mode = modeNormal
 		m.filter.SetValue("")
-		m.visible = m.allFlat
-		m.clampCursor()
 		return m, nil
 	case keyEnter:
 		m.mode = modeNormal
 		m.filter.Blur()
-		m.clampCursor()
-		return m, nil
-	case "up":
-		m.cursor--
-		m.clampCursor()
-		m.ensureVisible()
-		return m, nil
-	case "down":
-		m.cursor++
-		m.clampCursor()
-		m.ensureVisible()
 		return m, nil
 	}
 	var cmd tea.Cmd
 	m.filter, cmd = m.filter.Update(msg)
-	m.applyFilter()
-	m.cursor = 0
-	m.scroll = 0
 	return m, cmd
 }
 
@@ -728,7 +727,7 @@ func (m Model) handleProjectSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			name := filepath.Base(path)
 			wsreg.AddWorkspace(name, path)
 			m.mode = modeNormal
-			return m, tea.Batch(loadTree, m.enterWorktreePicker(path))
+			return m, loadData
 		}
 		return m, nil
 	case "up", "ctrl+k":
@@ -748,54 +747,19 @@ func (m Model) handleProjectSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return m, cmd
 }
 
-// Worktree picker mode
-
-func (m Model) handleWorktreePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
-	switch msg.String() {
-	case "esc", "q":
-		m.mode = modeNormal
-		return m, nil
-	case "j", "down":
-		if m.wtPicker.cursor < len(m.wtPicker.entries)-1 {
-			m.wtPicker.cursor++
-		}
-		return m, nil
-	case "k", "up":
-		if m.wtPicker.cursor > 0 {
-			m.wtPicker.cursor--
-		}
-		return m, nil
-	case keyEnter:
-		if len(m.wtPicker.entries) == 0 {
-			return m, nil
-		}
-		e := m.wtPicker.entries[m.wtPicker.cursor]
-		if e.HasSess {
-			return m, m.switchTo(e.SessName)
-		}
-		return m, m.openWorktreeSession(m.wtPicker.project, e)
-	case "c":
-		m.mode = modeNewBranch
-		m.newBranch.SetValue("")
-		m.newBranch.Focus()
-		return m, textinput.Blink
-	}
-	return m, nil
-}
-
 // New branch mode
 
 func (m Model) handleNewBranch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc":
-		m.mode = modeWorktreePicker
+		m.mode = modeNormal
 		return m, nil
 	case keyEnter:
 		branch := m.newBranch.Value()
 		if branch == "" {
 			return m, nil
 		}
-		return m, m.createWorktreeAndOpen(m.wtPicker.project, m.wtPicker.projPath, branch)
+		return m, m.createWorktreeAndOpen(m.newBranchProj.Name, m.newBranchProj.Path, branch)
 	}
 	var cmd tea.Cmd
 	m.newBranch, cmd = m.newBranch.Update(msg)
@@ -808,47 +772,81 @@ func (m Model) handleConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y":
 		m.mode = modeNormal
-		if node := m.selected(); node != nil && node.Depth == 0 {
-			wsreg.RemoveWorkspace(node.Path)
-			return m, loadTree
-		}
-		return m, nil
+		wsreg.RemoveWorkspace(m.confirmPath)
+		return m, loadData
 	default:
 		m.mode = modeNormal
 		return m, nil
 	}
 }
 
-// Actions
+// Agent picker mode
 
-func (m Model) enterWorktreePicker(projectPath string) tea.Cmd {
-	projs := wsreg.LoadRegistry()
-	for _, p := range projs {
-		if p.Path == projectPath {
-			return loadWorktrees(p.Name, p.Path)
+func (m Model) handleAgentPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		m.mode = modeNormal
+		return m, nil
+	case "j", "down":
+		if m.agentPicker.cursor < len(m.agentPicker.agents)-1 {
+			m.agentPicker.cursor++
 		}
+		return m, nil
+	case "k", "up":
+		if m.agentPicker.cursor > 0 {
+			m.agentPicker.cursor--
+		}
+		return m, nil
+	case "tab":
+		if len(m.agentPicker.agents) > 0 {
+			c := m.agentPicker.cursor
+			a := m.agentPicker.agents[c]
+			m.agentPicker.modeIndex[c] = (m.agentPicker.modeIndex[c] + 1) % len(a.Modes)
+		}
+		return m, nil
+	case keyEnter:
+		return m, m.launchSelectedAgent()
 	}
-	return nil
+	return m, nil
 }
 
-func (m Model) openProjectDirect(name, path string) tea.Cmd {
+func (m Model) launchSelectedAgent() tea.Cmd {
+	if len(m.agentPicker.agents) == 0 || len(m.projects) == 0 {
+		return nil
+	}
+	a := m.agentPicker.agents[m.agentPicker.cursor]
+	mode := a.Modes[m.agentPicker.modeIndex[m.agentPicker.cursor]]
+	proj := m.projects[m.projCursor]
+	command := a.FullCommand(mode)
+
 	return func() tea.Msg {
-		sessName := name
-		if isGitRepo(path) {
-			sessName = name + "-main"
-		}
+		sessName := proj.Name + "-" + a.ID
 		sessName = uniqueSessName(sessName)
-		_ = tmux.NewSessionInDir(sessName, path)
+		_ = tmux.NewSessionInDir(sessName, proj.Path)
+		_ = tmux.SendKeys(sessName, command)
 		_ = tmux.SwitchClient(sessName)
 		return switchDoneMsg{}
 	}
 }
 
-func (m Model) openWorktreeSession(project string, e wtEntry) tea.Cmd {
+// Actions
+
+func (m Model) switchTo(name string) tea.Cmd {
 	return func() tea.Msg {
-		sessName := project + "-" + e.Branch
+		_ = tmux.SwitchClient(name)
+		return switchDoneMsg{}
+	}
+}
+
+func (m Model) openWorktreeSession(project string, b branchEntry) tea.Cmd {
+	return func() tea.Msg {
+		sessName := project + "-" + b.Name
 		sessName = uniqueSessName(sessName)
-		_ = tmux.NewSessionInDir(sessName, e.Path)
+		path := b.Path
+		if path == "" {
+			return actionDoneMsg{}
+		}
+		_ = tmux.NewSessionInDir(sessName, path)
 		_ = tmux.SwitchClient(sessName)
 		return switchDoneMsg{}
 	}
@@ -861,7 +859,6 @@ func (m Model) createWorktreeAndOpen(project, projPath, branch string) tea.Cmd {
 		if err := cmd.Run(); err != nil {
 			return actionDoneMsg{}
 		}
-
 		wts, err := worktree.ListInDir(projPath)
 		if err != nil {
 			return actionDoneMsg{}
@@ -878,13 +875,6 @@ func (m Model) createWorktreeAndOpen(project, projPath, branch string) tea.Cmd {
 	}
 }
 
-func (m Model) switchTo(name string) tea.Cmd {
-	return func() tea.Msg {
-		_ = tmux.SwitchClient(name)
-		return switchDoneMsg{}
-	}
-}
-
 func uniqueSessName(name string) string {
 	if !tmux.HasSession(name) {
 		return name
@@ -898,102 +888,80 @@ func uniqueSessName(name string) string {
 	return name
 }
 
-func isGitRepo(dir string) bool {
-	return exec.Command("git", "-C", dir, "rev-parse", "--git-dir").Run() == nil
+func isMainBranch(name string) bool {
+	n := normalize(name)
+	return n == "main" || n == "master" ||
+		strings.HasSuffix(n, "-main") || strings.HasSuffix(n, "-master")
 }
 
-func nodeKey(node *sessions.TreeNode) string {
-	if node == nil {
-		return ""
+func trimPrefix(sessionName, projectName string) string {
+	norm := normalize(sessionName)
+	normProj := normalize(projectName)
+	if strings.HasPrefix(norm, normProj+"-") {
+		return sessionName[len(normProj)+1:]
 	}
-	if node.Path != "" {
-		return node.Path
-	}
-	if node.SessionName != "" {
-		return node.SessionName
-	}
-	return node.Name
+	return sessionName
 }
 
-func (m Model) selected() *sessions.TreeNode {
-	if m.cursor >= 0 && m.cursor < len(m.visible) {
-		return m.visible[m.cursor]
-	}
-	return nil
-}
+// Cursor helpers
 
-func (m *Model) jumpGroup(dir int) {
-	if len(m.visible) == 0 {
-		return
+func (m *Model) clampProjCursor() {
+	if m.projCursor < 0 {
+		m.projCursor = 0
 	}
-	i := m.cursor + dir
-	for i >= 0 && i < len(m.visible) {
-		if m.visible[i].Depth == 0 {
-			m.cursor = i
-			return
-		}
-		i += dir
+	if m.projCursor >= len(m.projects) {
+		m.projCursor = len(m.projects) - 1
+	}
+	if m.projCursor < 0 {
+		m.projCursor = 0
 	}
 }
 
-func (m *Model) clampCursor() {
-	if m.cursor < 0 {
-		m.cursor = 0
+func (m *Model) clampDetCursor() {
+	if m.detCursor < 0 {
+		m.detCursor = 0
 	}
-	if m.cursor >= len(m.visible) {
-		m.cursor = len(m.visible) - 1
+	if m.detCursor >= m.detailItems {
+		m.detCursor = m.detailItems - 1
 	}
-	if m.cursor < 0 {
-		m.cursor = 0
+	if m.detCursor < 0 {
+		m.detCursor = 0
 	}
 }
 
-func (m *Model) ensureVisible() {
-	avail := m.height - 7
+func (m *Model) ensureProjVisible() {
+	avail := m.contentHeight()
 	if avail < 1 {
 		avail = 1
 	}
-	if m.cursor < m.scroll {
-		m.scroll = m.cursor
+	if m.projCursor < m.projScroll {
+		m.projScroll = m.projCursor
 	}
-	for {
-		lines := m.linesFromScroll(m.cursor)
-		if lines <= avail {
-			break
-		}
-		m.scroll++
+	if m.projCursor >= m.projScroll+avail {
+		m.projScroll = m.projCursor - avail + 1
 	}
 }
 
-func (m Model) linesFromScroll(idx int) int {
-	if idx < m.scroll {
-		return 0
+func (m *Model) ensureDetVisible() {
+	avail := m.contentHeight()
+	if avail < 1 {
+		avail = 1
 	}
-	lines := 0
-	for i := m.scroll; i <= idx && i < len(m.visible); i++ {
-		if i > m.scroll && m.visible[i].Depth == 0 {
-			lines++
-		}
-		lines++
+	if m.detCursor < m.detScroll {
+		m.detScroll = m.detCursor
 	}
-	return lines
+	if m.detCursor >= m.detScroll+avail {
+		m.detScroll = m.detCursor - avail + 1
+	}
 }
 
-func (m Model) rowToIndex(treeRow int) int {
-	y := 0
-	for i := m.scroll; i < len(m.visible); i++ {
-		if i > m.scroll && m.visible[i].Depth == 0 {
-			if treeRow == y {
-				return -1
-			}
-			y++
-		}
-		if treeRow == y {
-			return i
-		}
-		y++
+func (m Model) contentHeight() int {
+	// Height minus top border, bottom border, footer line
+	h := m.height - 4
+	if h < 1 {
+		h = 1
 	}
-	return -1
+	return h
 }
 
 // Zoxide picker helpers
@@ -1047,4 +1015,11 @@ func (z *zoxidePicker) ensureVisible(maxVisible int) {
 	if z.cursor >= z.scroll+maxVisible {
 		z.scroll = z.cursor - maxVisible + 1
 	}
+}
+
+func (m Model) selectedProject() *projectEntry {
+	if m.projCursor >= 0 && m.projCursor < len(m.projects) {
+		return &m.projects[m.projCursor]
+	}
+	return nil
 }

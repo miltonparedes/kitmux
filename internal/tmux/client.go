@@ -169,6 +169,44 @@ func SelectLayout(target, layout string) error {
 	return exec.Command("tmux", "select-layout", "-t", target, layout).Run()
 }
 
+// ListPanes returns all panes across all sessions with their running commands.
+func ListPanes() ([]Pane, error) {
+	out, err := exec.Command("tmux", "list-panes", "-a", "-F",
+		"#{session_name}\t#{window_index}\t#{pane_index}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}").Output()
+	if err != nil {
+		return nil, fmt.Errorf("list-panes: %w", err)
+	}
+	var panes []Pane
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 6)
+		if len(parts) < 4 {
+			continue
+		}
+		winIdx, _ := strconv.Atoi(parts[1])
+		paneIdx, _ := strconv.Atoi(parts[2])
+		var pid int
+		if len(parts) >= 5 {
+			pid, _ = strconv.Atoi(parts[4])
+		}
+		var path string
+		if len(parts) >= 6 {
+			path = parts[5]
+		}
+		panes = append(panes, Pane{
+			SessionName: parts[0],
+			WindowIndex: winIdx,
+			PaneIndex:   paneIdx,
+			Command:     parts[3],
+			PID:         pid,
+			Path:        path,
+		})
+	}
+	return panes, nil
+}
+
 // DisplayPopup opens a tmux popup running the given command.
 func DisplayPopup(command, width, height string) error {
 	return exec.Command("tmux", "display-popup",

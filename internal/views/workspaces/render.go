@@ -6,83 +6,125 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 	"github.com/miltonparedes/kitmux/internal/theme"
-	"github.com/miltonparedes/kitmux/internal/views/sessions"
 )
 
 func (m Model) View() string {
 	switch m.mode {
 	case modeProjectSearch:
 		return m.viewProjectSearch()
-	case modeWorktreePicker, modeNewBranch:
-		return m.viewWorktreePicker()
+	case modeAgentPicker:
+		return m.viewAgentPicker()
 	default:
-		return m.viewNormal()
+		return m.viewColumns()
 	}
 }
 
-func (m Model) viewNormal() string {
+func (m Model) viewColumns() string {
+	leftW := m.leftWidth()
+	rightW := m.rightWidth()
+	avail := m.contentHeight()
+
+	leftContent := m.renderLeftColumn(leftW, avail)
+	rightContent := m.renderRightColumn(rightW, avail)
+
+	leftTitle := "Projects"
+	rightTitle := ""
+	if p := m.selectedProject(); p != nil {
+		rightTitle = p.Name
+	}
+
+	var leftPanel, rightPanel lipgloss.Style
+	if m.focus == colProjects {
+		leftPanel = theme.PanelActive.Width(leftW)
+		rightPanel = theme.PanelInactive.Width(rightW)
+	} else {
+		leftPanel = theme.PanelInactive.Width(leftW)
+		rightPanel = theme.PanelActive.Width(rightW)
+	}
+
+	leftBox := leftPanel.Render(leftContent)
+	rightBox := rightPanel.Render(rightContent)
+
+	// Inject titles into top border
+	leftBox = injectTitle(leftBox, leftTitle, m.focus == colProjects)
+	rightBox = injectTitle(rightBox, rightTitle, m.focus == colDetail)
+
+	columns := lipgloss.JoinHorizontal(lipgloss.Top, leftBox, rightBox)
+
+	footer := m.footer()
+
+	return columns + "\n" + footer
+}
+
+func injectTitle(box, title string, active bool) string {
+	if title == "" {
+		return box
+	}
+	var styled string
+	if active {
+		styled = theme.PanelTitle.Render(title)
+	} else {
+		styled = theme.PanelTitleInactive.Render(title)
+	}
+	lines := strings.SplitN(box, "\n", 2)
+	if len(lines) < 2 {
+		return box
+	}
+	topLine := lines[0]
+	titleW := lipgloss.Width(styled)
+	topW := lipgloss.Width(topLine)
+	if titleW+4 > topW {
+		return box
+	}
+	// Place title after first 2 chars of border
+	runes := []rune(topLine)
+	insertPos := 3
+	if insertPos+titleW > len(runes) {
+		return box
+	}
+	newTop := string(runes[:insertPos]) + styled + string(runes[insertPos+titleW:])
+	return newTop + "\n" + lines[1]
+}
+
+func (m Model) renderLeftColumn(width, avail int) string {
+	if m.mode == modeFiltering && m.focus == colProjects {
+		return m.renderFilteredLeft(width, avail)
+	}
+
 	var b strings.Builder
 
-	sepW := m.width - 2
-	if sepW < 1 {
-		sepW = 1
-	}
-	mainSep := " " + theme.TreeConnector.Render(strings.Repeat("─", sepW))
-	itemSep := " " + theme.TreeMeta.Render(strings.Repeat("─", sepW))
-
-	// Header
-	if m.mode == modeFiltering {
-		b.WriteString(" " + m.filter.View())
-	} else {
-		b.WriteString(theme.HelpStyle.Render(" Workspaces"))
-	}
-	b.WriteString("\n")
-	b.WriteString(mainSep)
-	b.WriteString("\n")
-
-	if len(m.visible) == 0 {
-		if m.mode == modeFiltering {
-			b.WriteString(theme.HelpStyle.Render(" No matches"))
-		} else {
-			b.WriteString(theme.HelpStyle.Render(" No workspaces"))
-		}
+	if len(m.projects) == 0 {
+		b.WriteString(theme.HelpStyle.Render("No workspaces"))
 		b.WriteString("\n")
-		return m.padAndFooter(&b, sepW)
+		b.WriteString(theme.HelpStyle.Render("n to add"))
+		for i := 2; i < avail; i++ {
+			b.WriteString("\n")
+		}
+		return b.String()
 	}
 
-	b.WriteString("\n")
-
-	avail := m.height - 5
-	if avail < 1 {
-		avail = 1
-	}
-
-	start := m.scroll
-	end := start
-	linesNeeded := 0
-	for i := start; i < len(m.visible); i++ {
-		extra := 0
-		if i > start && m.visible[i].Depth == 0 {
-			extra = 1
-		}
-		if linesNeeded+extra+1 > avail {
-			break
-		}
-		linesNeeded += extra + 1
-		end = i + 1
+	end := m.projScroll + avail
+	if end > len(m.projects) {
+		end = len(m.projects)
 	}
 
 	linesUsed := 0
-	for i := start; i < end; i++ {
-		if i > start && m.visible[i].Depth == 0 {
-			b.WriteString(itemSep)
-			b.WriteString("\n")
-			linesUsed++
+	for i := m.projScroll; i < end; i++ {
+		p := m.projects[i]
+		selected := i == m.projCursor && m.focus == colProjects
+
+		name := p.Name
+		if selected {
+			name = theme.TreeNodeSelected.Render("▸ " + name)
+		} else {
+			name = "  " + theme.TreeNodeNormal.Render(name)
 		}
 
-		node := m.visible[i]
-		selected := i == m.cursor
-		b.WriteString(m.renderNode(node, selected))
+		if p.Active {
+			name += " " + theme.AttachedBadge.Render("●")
+		}
+
+		b.WriteString(name)
 		b.WriteString("\n")
 		linesUsed++
 	}
@@ -92,7 +134,196 @@ func (m Model) viewNormal() string {
 		linesUsed++
 	}
 
-	return m.padFooterOnly(&b, sepW)
+	return b.String()
+}
+
+func (m Model) renderFilteredLeft(_, avail int) string {
+	var b strings.Builder
+	b.WriteString(m.filter.View())
+	b.WriteString("\n")
+	avail--
+	linesUsed := 0
+	for i, p := range m.projects {
+		if linesUsed >= avail {
+			break
+		}
+		selected := i == m.projCursor
+		name := p.Name
+		if selected {
+			name = theme.TreeNodeSelected.Render("▸ " + name)
+		} else {
+			name = "  " + theme.TreeNodeNormal.Render(name)
+		}
+		if p.Active {
+			name += " " + theme.AttachedBadge.Render("●")
+		}
+		b.WriteString(name)
+		b.WriteString("\n")
+		linesUsed++
+	}
+	for linesUsed < avail {
+		b.WriteString("\n")
+		linesUsed++
+	}
+	return b.String()
+}
+
+func (m Model) renderRightColumn(width, avail int) string {
+	if m.mode == modeNewBranch {
+		return m.renderNewBranchOverlay(avail)
+	}
+
+	var b strings.Builder
+
+	if len(m.projects) == 0 || m.detailItems == 0 {
+		b.WriteString(theme.HelpStyle.Render("Select a project"))
+		for i := 1; i < avail; i++ {
+			b.WriteString("\n")
+		}
+		return b.String()
+	}
+
+	// Render branches section header
+	b.WriteString(theme.TreeGroupHeader.Render("Branches"))
+	b.WriteString("\n")
+	avail--
+	linesUsed := 0
+
+	// Render branch items
+	branchStart := m.detScroll
+	if branchStart > len(m.branches) {
+		branchStart = len(m.branches)
+	}
+	for i := branchStart; i < len(m.branches) && linesUsed < avail-2; i++ {
+		br := m.branches[i]
+		selected := i == m.detCursor && m.focus == colDetail
+		b.WriteString(m.renderBranch(br, selected, width))
+		b.WriteString("\n")
+		linesUsed++
+	}
+
+	if len(m.branches) == 0 {
+		b.WriteString(theme.HelpStyle.Render("  no branches"))
+		b.WriteString("\n")
+		linesUsed++
+	}
+
+	// Separator + agents header
+	if linesUsed < avail-1 {
+		b.WriteString("\n")
+		linesUsed++
+		b.WriteString(theme.TreeGroupHeader.Render("Agents"))
+		b.WriteString("\n")
+		linesUsed++
+	}
+
+	// Render agent items
+	for i, ae := range m.agentEntries {
+		if linesUsed >= avail {
+			break
+		}
+		detIdx := len(m.branches) + i
+		selected := detIdx == m.detCursor && m.focus == colDetail
+		b.WriteString(m.renderAgentEntry(ae, selected))
+		b.WriteString("\n")
+		linesUsed++
+	}
+
+	for linesUsed < avail {
+		b.WriteString("\n")
+		linesUsed++
+	}
+
+	return b.String()
+}
+
+func (m Model) renderNewBranchOverlay(avail int) string {
+	var b strings.Builder
+	b.WriteString(theme.TreeGroupHeader.Render("New branch"))
+	b.WriteString("\n")
+	b.WriteString(m.newBranch.View())
+	for i := 2; i < avail; i++ {
+		b.WriteString("\n")
+	}
+	return b.String()
+}
+
+func (m Model) renderBranch(br branchEntry, selected bool, width int) string {
+	connector := theme.TreeConnector.Render("┊ ")
+
+	var left string
+	if br.IsSession {
+		meta := fmt.Sprintf("%dw", br.Windows)
+		if br.Attached {
+			meta += " " + theme.AttachedBadge.Render("*")
+		}
+		metaStr := theme.TreeMeta.Render(meta)
+		if selected {
+			left = fmt.Sprintf("%s%s  %s", connector, theme.TreeNodeSelected.Render(br.Name), metaStr)
+		} else {
+			left = fmt.Sprintf("%s%s  %s", connector, theme.TreeNodeNormal.Render(br.Name), metaStr)
+		}
+	} else {
+		if selected {
+			left = fmt.Sprintf("%s%s", connector, theme.TreeNodeSelected.Render(br.Name))
+		} else {
+			left = fmt.Sprintf("%s%s", connector, theme.HelpStyle.Render(br.Name))
+		}
+	}
+
+	right := branchDiffStats(br)
+	if right != "" && width > 0 {
+		leftW := lipgloss.Width(left)
+		rightW := lipgloss.Width(right)
+		gap := width - leftW - rightW - 1
+		if gap >= 2 {
+			return left + strings.Repeat(" ", gap) + right
+		}
+	}
+	return left
+}
+
+func branchDiffStats(br branchEntry) string {
+	var parts []string
+	if br.DiffAdded > 0 {
+		parts = append(parts, theme.DiffAdded.Render(fmt.Sprintf("+%d", br.DiffAdded)))
+	}
+	if br.DiffDel > 0 {
+		parts = append(parts, theme.DiffRemoved.Render(fmt.Sprintf("-%d", br.DiffDel)))
+	}
+	return strings.Join(parts, " ")
+}
+
+func (m Model) renderAgentEntry(ae agentEntry, selected bool) string {
+	connector := theme.TreeConnector.Render("┊ ")
+	if ae.IsLauncher {
+		label := "+ launch agent..."
+		if selected {
+			return connector + theme.TreeNodeSelected.Render(label)
+		}
+		return connector + theme.HelpStyle.Render(label)
+	}
+	label := ae.Name
+	meta := theme.TreeMeta.Render(fmt.Sprintf("(%s:%d.%d)", ae.SessionName, ae.WindowIndex, ae.PaneIndex))
+	if selected {
+		return fmt.Sprintf("%s%s  %s", connector, theme.TreeNodeSelected.Render(label), meta)
+	}
+	return fmt.Sprintf("%s%s  %s", connector, theme.TreeNodeNormal.Render(label), meta)
+}
+
+func (m Model) footer() string {
+	switch m.mode {
+	case modeConfirm:
+		return theme.AttachedBadge.Render(fmt.Sprintf(" remove '%s'? y/n", m.confirmName))
+	case modeFiltering:
+		return theme.HelpStyle.Render(" enter accept  esc clear")
+	case modeNewBranch:
+		return theme.HelpStyle.Render(" enter create  esc back")
+	}
+	if m.focus == colDetail {
+		return theme.HelpStyle.Render(" h back  j/k nav  enter open  c new branch  / filter")
+	}
+	return theme.HelpStyle.Render(" l/enter open  j/k nav  n add  d remove  / filter  r refresh  q quit")
 }
 
 func (m Model) viewProjectSearch() string {
@@ -121,7 +352,6 @@ func (m Model) viewProjectSearch() string {
 			b.WriteString(theme.HelpStyle.Render(" No matches"))
 		}
 		b.WriteString("\n")
-		return m.padAndFooter(&b, sepW)
 	}
 
 	end := m.zoxide.scroll + avail
@@ -154,7 +384,7 @@ func (m Model) viewProjectSearch() string {
 	return b.String()
 }
 
-func (m Model) viewWorktreePicker() string {
+func (m Model) viewAgentPicker() string {
 	var b strings.Builder
 
 	sepW := m.width - 2
@@ -163,12 +393,7 @@ func (m Model) viewWorktreePicker() string {
 	}
 	mainSep := " " + theme.TreeConnector.Render(strings.Repeat("─", sepW))
 
-	// Header
-	if m.mode == modeNewBranch {
-		b.WriteString(" " + m.newBranch.View())
-	} else {
-		b.WriteString(" " + theme.TreeGroupHeader.Render(m.wtPicker.project) + theme.HelpStyle.Render(" worktrees"))
-	}
+	b.WriteString(" " + theme.TreeGroupHeader.Render("Launch Agent"))
 	b.WriteString("\n")
 	b.WriteString(mainSep)
 	b.WriteString("\n")
@@ -178,60 +403,22 @@ func (m Model) viewWorktreePicker() string {
 		avail = 1
 	}
 
-	if len(m.wtPicker.entries) == 0 {
-		b.WriteString(theme.HelpStyle.Render(" No worktrees"))
-		b.WriteString("\n")
-		return m.padAndFooter(&b, sepW)
-	}
-
 	linesUsed := 0
-	for i, e := range m.wtPicker.entries {
+	for i, a := range m.agentPicker.agents {
 		if linesUsed >= avail {
 			break
 		}
-		sel := i == m.wtPicker.cursor
-
-		var label string
-		if e.IsMain {
-			label = e.Branch + " (main)"
+		selected := i == m.agentPicker.cursor
+		modeName := a.Modes[m.agentPicker.modeIndex[i]].Name
+		if selected {
+			name := theme.TreeNodeSelected.Render("▸ " + a.Name)
+			mode := theme.AgentModeSelected.Render(modeName)
+			fmt.Fprintf(&b, " %s  %s", name, mode)
 		} else {
-			label = e.Branch
+			name := theme.TreeNodeNormal.Render("  " + a.Name)
+			mode := theme.AgentMode.Render(modeName)
+			fmt.Fprintf(&b, " %s  %s", name, mode)
 		}
-
-		var left string
-		switch {
-		case sel:
-			left = " " + theme.TreeNodeSelected.Render(label)
-		case e.HasSess:
-			left = " " + theme.TreeNodeNormal.Render(label)
-		default:
-			left = " " + theme.HelpStyle.Render(label)
-		}
-
-		// Badges
-		var badges []string
-		if e.Attached {
-			badges = append(badges, theme.AttachedBadge.Render("*"))
-		} else if e.HasSess {
-			badges = append(badges, theme.TreeMeta.Render("running"))
-		}
-
-		if len(badges) > 0 {
-			left += "  " + strings.Join(badges, " ")
-		}
-
-		// Diff stats right-aligned
-		right := wtDiffStats(e)
-		if right != "" && m.width > 0 {
-			leftW := lipgloss.Width(left)
-			rightW := lipgloss.Width(right)
-			gap := m.width - 1 - leftW - rightW
-			if gap >= 2 {
-				left += strings.Repeat(" ", gap) + right
-			}
-		}
-
-		b.WriteString(left)
 		b.WriteString("\n")
 		linesUsed++
 	}
@@ -244,136 +431,26 @@ func (m Model) viewWorktreePicker() string {
 	footerSep := " " + theme.TreeConnector.Render(strings.Repeat("─", sepW))
 	b.WriteString(footerSep)
 	b.WriteString("\n")
-	if m.mode == modeNewBranch {
-		b.WriteString(theme.HelpStyle.Render(" enter create  esc back"))
-	} else {
-		b.WriteString(theme.HelpStyle.Render(" enter open  c new branch  esc back"))
-	}
+	b.WriteString(theme.HelpStyle.Render(" enter launch  tab mode  esc back"))
 	return b.String()
 }
 
-func wtDiffStats(e wtEntry) string {
-	var parts []string
-	if e.DiffAdded > 0 {
-		parts = append(parts, theme.DiffAdded.Render(fmt.Sprintf("+%d", e.DiffAdded)))
+// Column widths
+
+func (m Model) leftWidth() int {
+	w := m.width*30/100 - 2
+	if w < 10 {
+		w = 10
 	}
-	if e.DiffDel > 0 {
-		parts = append(parts, theme.DiffRemoved.Render(fmt.Sprintf("-%d", e.DiffDel)))
-	}
-	return strings.Join(parts, " ")
+	return w
 }
 
-// Shared helpers
-
-func (m Model) padAndFooter(b *strings.Builder, sepW int) string {
-	lines := strings.Count(b.String(), "\n")
-	for lines < m.height-2 {
-		b.WriteString("\n")
-		lines++
+func (m Model) rightWidth() int {
+	total := m.width - 2
+	left := m.leftWidth() + 2
+	w := total - left
+	if w < 10 {
+		w = 10
 	}
-	footerSep := " " + theme.TreeConnector.Render(strings.Repeat("─", sepW))
-	b.WriteString(footerSep)
-	b.WriteString("\n")
-	b.WriteString(m.statusLine())
-	return b.String()
-}
-
-func (m Model) padFooterOnly(b *strings.Builder, sepW int) string {
-	footerSep := " " + theme.TreeConnector.Render(strings.Repeat("─", sepW))
-	b.WriteString(footerSep)
-	b.WriteString("\n")
-	b.WriteString(m.statusLine())
-	return b.String()
-}
-
-func (m Model) statusLine() string {
-	if m.mode == modeConfirm {
-		name := ""
-		if node := m.selected(); node != nil {
-			name = node.Name
-		}
-		return theme.AttachedBadge.Render(fmt.Sprintf(" delete '%s'? y/n (hide only; no repo changes)", name))
-	}
-	if m.mode == modeFiltering {
-		return theme.HelpStyle.Render(" arrows navigate  enter accept  esc clear")
-	}
-	return theme.HelpStyle.Render(" enter open  / filter  n add  d delete  r refresh")
-}
-
-func (m Model) renderNode(node *sessions.TreeNode, selected bool) string {
-	inactive := node.Depth == 0 && len(node.Children) == 0
-
-	if node.Depth == 0 {
-		indicator := "▾"
-		if !node.Expanded || inactive {
-			indicator = "▸"
-		}
-		name := fmt.Sprintf("%s %s", indicator, node.Name)
-		if inactive {
-			if selected {
-				return " " + theme.TreeNodeSelected.Render(name)
-			}
-			return " " + theme.HelpStyle.Render(name)
-		}
-		if selected {
-			return " " + theme.TreeNodeSelected.Render(name)
-		}
-		return " " + theme.TreeGroupHeader.Render(name)
-	}
-
-	connector := theme.TreeConnector.Render("| ")
-
-	// Inactive worktree branch
-	if node.Kind == sessions.KindWorktree {
-		var left string
-		if selected {
-			left = fmt.Sprintf(" %s%s", connector, theme.TreeNodeSelected.Render(node.Name))
-		} else {
-			left = fmt.Sprintf(" %s%s", connector, theme.HelpStyle.Render(node.Name))
-		}
-		return left
-	}
-
-	// Session child
-	meta := fmt.Sprintf("%dw", node.Windows)
-	if node.Attached {
-		meta += " " + theme.AttachedBadge.Render("*")
-	}
-	metaStr := theme.TreeMeta.Render(meta)
-
-	var left string
-	if selected {
-		left = fmt.Sprintf(" %s%s  %s", connector, theme.TreeNodeSelected.Render(node.Name), metaStr)
-	} else {
-		left = fmt.Sprintf(" %s%s  %s", connector, theme.TreeNodeNormal.Render(node.Name), metaStr)
-	}
-
-	right := m.diffStatsFor(node)
-	if right != "" && m.width > 0 {
-		leftW := lipgloss.Width(left)
-		rightW := lipgloss.Width(right)
-		gap := m.width - 1 - leftW - rightW
-		if gap >= 2 {
-			return left + strings.Repeat(" ", gap) + right
-		}
-	}
-	return left
-}
-
-func (m Model) diffStatsFor(node *sessions.TreeNode) string {
-	if node.Kind != sessions.KindSession || node.SessionName == "" {
-		return ""
-	}
-	st, ok := m.stats[node.SessionName]
-	if !ok {
-		return ""
-	}
-	var parts []string
-	if st.Added > 0 {
-		parts = append(parts, theme.DiffAdded.Render(fmt.Sprintf("+%d", st.Added)))
-	}
-	if st.Deleted > 0 {
-		parts = append(parts, theme.DiffRemoved.Render(fmt.Sprintf("-%d", st.Deleted)))
-	}
-	return strings.Join(parts, " ")
+	return w
 }
