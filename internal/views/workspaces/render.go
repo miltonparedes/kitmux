@@ -1,4 +1,4 @@
-package dashboard
+package workspaces
 
 import (
 	"fmt"
@@ -321,6 +321,19 @@ func (m Model) renderNode(node *sessions.TreeNode, selected bool) string {
 		return " " + theme.TreeGroupHeader.Render(name)
 	}
 
+	connector := theme.TreeConnector.Render("| ")
+
+	// Inactive worktree branch
+	if node.Kind == sessions.KindWorktree {
+		var left string
+		if selected {
+			left = fmt.Sprintf(" %s%s", connector, theme.TreeNodeSelected.Render(node.Name))
+		} else {
+			left = fmt.Sprintf(" %s%s", connector, theme.HelpStyle.Render(node.Name))
+		}
+		return left
+	}
+
 	// Session child
 	meta := fmt.Sprintf("%dw", node.Windows)
 	if node.Attached {
@@ -328,7 +341,6 @@ func (m Model) renderNode(node *sessions.TreeNode, selected bool) string {
 	}
 	metaStr := theme.TreeMeta.Render(meta)
 
-	connector := theme.TreeConnector.Render("| ")
 	var left string
 	if selected {
 		left = fmt.Sprintf(" %s%s  %s", connector, theme.TreeNodeSelected.Render(node.Name), metaStr)

@@ -1,4 +1,4 @@
-package dashboard
+package workspaces
 
 import (
 	"fmt"
@@ -8,7 +8,10 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
-	"github.com/miltonparedes/kitmux/internal/workspaces"
+	"github.com/miltonparedes/kitmux/internal/tmux"
+	"github.com/miltonparedes/kitmux/internal/views/sessions"
+	wsreg "github.com/miltonparedes/kitmux/internal/workspaces"
+	"github.com/miltonparedes/kitmux/internal/worktree"
 )
 
 func TestLoadTree_DoesNotReaddHiddenWorkspaceFromActiveSession(t *testing.T) {
@@ -42,7 +45,7 @@ exit 1
 `)
 	prependPath(t, fakeBin)
 
-	if err := workspaces.SaveRegistry(nil); err != nil {
+	if err := wsreg.SaveRegistry(nil); err != nil {
 		t.Fatalf("SaveRegistry: %v", err)
 	}
 
@@ -54,7 +57,7 @@ exit 1
 		t.Fatalf("expected hidden workspace to stay hidden, got %d roots", len(msg.roots))
 	}
 
-	loaded := workspaces.LoadRegistry()
+	loaded := wsreg.LoadRegistry()
 	if len(loaded) != 0 {
 		t.Fatalf("expected hidden workspace not to be re-added, got %+v", loaded)
 	}
@@ -71,7 +74,7 @@ func TestHandleConfirm_RemovesSelectedWorkspaceByPath(t *testing.T) {
 		}
 	}
 
-	if err := workspaces.SaveRegistry([]workspaces.Workspace{
+	if err := wsreg.SaveRegistry([]wsreg.Workspace{
 		{Name: "api", Path: first, AddedAt: 1, LastSeenAt: 1},
 		{Name: "api", Path: second, AddedAt: 2, LastSeenAt: 2},
 	}); err != nil {
@@ -79,10 +82,10 @@ func TestHandleConfirm_RemovesSelectedWorkspaceByPath(t *testing.T) {
 	}
 
 	m := New()
-	m.roots = buildProjectTree([]workspaces.Workspace{
+	m.roots = buildProjectTree([]wsreg.Workspace{
 		{Name: "api", Path: first, AddedAt: 1, LastSeenAt: 1},
 		{Name: "api", Path: second, AddedAt: 2, LastSeenAt: 2},
-	}, nil, nil)
+	}, nil, nil, nil)
 	m.rebuildVisible()
 	m.cursor = 1
 
@@ -90,7 +93,7 @@ func TestHandleConfirm_RemovesSelectedWorkspaceByPath(t *testing.T) {
 		t.Fatal("expected reload command after confirmation")
 	}
 
-	loaded := workspaces.LoadRegistry()
+	loaded := wsreg.LoadRegistry()
 	if len(loaded) != 1 || loaded[0].Path != first {
 		t.Fatalf("expected only selected workspace to be removed, got %+v", loaded)
 	}
@@ -107,7 +110,7 @@ func TestEnterWorktreePicker_UsesWorkspacePath(t *testing.T) {
 		}
 	}
 
-	if err := workspaces.SaveRegistry([]workspaces.Workspace{
+	if err := wsreg.SaveRegistry([]wsreg.Workspace{
 		{Name: "api", Path: first, AddedAt: 1, LastSeenAt: 1},
 		{Name: "api", Path: second, AddedAt: 2, LastSeenAt: 2},
 	}); err != nil {
@@ -156,6 +159,99 @@ exit 1
 	}
 	if len(loaded.entries) != 1 || loaded.entries[0].Path != second {
 		t.Fatalf("expected worktrees from selected path, got %+v", loaded.entries)
+	}
+}
+
+func TestBuildProjectTree_ShowsInactiveWorktrees(t *testing.T) {
+	projs := []wsreg.Workspace{
+		{Name: "myapp", Path: "/home/user/myapp"},
+	}
+	wtByPath := map[string][]worktree.Worktree{
+		"/home/user/myapp": {
+			{Branch: "main", Path: "/home/user/myapp", IsMain: true},
+			{Branch: "feature-x", Path: "/home/user/myapp-feature-x"},
+		},
+	}
+
+	roots := buildProjectTree(projs, nil, nil, wtByPath)
+	if len(roots) != 1 {
+		t.Fatalf("expected 1 root, got %d", len(roots))
+	}
+	if len(roots[0].Children) != 2 {
+		t.Fatalf("expected 2 children (worktrees), got %d", len(roots[0].Children))
+	}
+	for _, c := range roots[0].Children {
+		if c.Kind != sessions.KindWorktree {
+			t.Errorf("expected KindWorktree, got %d for %q", c.Kind, c.Name)
+		}
+	}
+	if roots[0].Children[0].Name != "main" {
+		t.Errorf("expected main first, got %q", roots[0].Children[0].Name)
+	}
+}
+
+func TestBuildProjectTree_ActiveSessionNotDuplicated(t *testing.T) {
+	projs := []wsreg.Workspace{
+		{Name: "myapp", Path: "/home/user/myapp"},
+	}
+	sess := []tmux.Session{
+		{Name: "myapp-main", Path: "/home/user/myapp", Windows: 3, Activity: 100},
+	}
+	repoRoots := map[string]string{
+		"myapp-main": "/home/user/myapp",
+	}
+	wtByPath := map[string][]worktree.Worktree{
+		"/home/user/myapp": {
+			{Branch: "main", Path: "/home/user/myapp", IsMain: true},
+			{Branch: "feature-x", Path: "/home/user/myapp-feature-x"},
+		},
+	}
+
+	roots := buildProjectTree(projs, sess, repoRoots, wtByPath)
+	if len(roots) != 1 {
+		t.Fatalf("expected 1 root, got %d", len(roots))
+	}
+	children := roots[0].Children
+	if len(children) != 2 {
+		t.Fatalf("expected 2 children (1 session + 1 worktree), got %d", len(children))
+	}
+	if children[0].Kind != sessions.KindSession {
+		t.Errorf("expected first child to be KindSession, got %d", children[0].Kind)
+	}
+	if children[1].Kind != sessions.KindWorktree {
+		t.Errorf("expected second child to be KindWorktree, got %d", children[1].Kind)
+	}
+	if children[1].Name != "feature-x" {
+		t.Errorf("expected inactive worktree feature-x, got %q", children[1].Name)
+	}
+}
+
+func TestBuildProjectTree_FallbackBranchForSimpleRepo(t *testing.T) {
+	projs := []wsreg.Workspace{
+		{Name: "simple", Path: "/home/user/simple"},
+	}
+	wtByPath := map[string][]worktree.Worktree{
+		"/home/user/simple": {
+			{Branch: "develop", Path: "/home/user/simple", IsMain: false},
+		},
+	}
+
+	roots := buildProjectTree(projs, nil, nil, wtByPath)
+	if len(roots) != 1 {
+		t.Fatalf("expected 1 root, got %d", len(roots))
+	}
+	if len(roots[0].Children) != 1 {
+		t.Fatalf("expected 1 child (fallback branch), got %d", len(roots[0].Children))
+	}
+	c := roots[0].Children[0]
+	if c.Kind != sessions.KindWorktree {
+		t.Errorf("expected KindWorktree, got %d", c.Kind)
+	}
+	if c.Name != "develop" {
+		t.Errorf("expected branch develop, got %q", c.Name)
+	}
+	if c.Path != "/home/user/simple" {
+		t.Errorf("expected path /home/user/simple, got %q", c.Path)
 	}
 }
 

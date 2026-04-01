@@ -7,7 +7,7 @@ import (
 	"github.com/spf13/cobra"
 
 	"github.com/miltonparedes/kitmux/internal/app"
-	"github.com/miltonparedes/kitmux/internal/views/dashboard"
+	wsview "github.com/miltonparedes/kitmux/internal/views/workspaces"
 )
 
 type viewDef struct {
@@ -32,8 +32,8 @@ func addViewCommands(parent *cobra.Command) {
 	parent.AddCommand(&cobra.Command{
 		Use:     "workspaces",
 		Aliases: []string{"o"},
-		Short:   "Workspace dashboard",
-		Long:    "Browse registered workspaces, open or switch tmux sessions, inspect worktrees, and hide workspaces from the dashboard without changing the repository.",
+		Short:   "Workspace manager",
+		Long:    "Browse registered workspaces, open or switch tmux sessions, inspect worktrees, and hide workspaces without changing the repository.",
 		RunE: func(_ *cobra.Command, _ []string) error {
 			return runWorkspacesDashboard()
 		},
@@ -58,10 +58,10 @@ func runTUI(mode app.Mode, opts ...app.Option) error {
 }
 
 func runWorkspacesDashboard() error {
-	m := dashboard.New()
+	m := wsview.New()
 	p := tea.NewProgram(m, tea.WithAltScreen(), tea.WithMouseCellMotion())
 	if _, err := p.Run(); err != nil {
-		return fmt.Errorf("workspaces dashboard: %w", err)
+		return fmt.Errorf("workspaces: %w", err)
 	}
 	return nil
 }

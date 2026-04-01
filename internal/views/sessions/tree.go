@@ -19,6 +19,7 @@ type NodeKind int
 const (
 	KindSession     NodeKind = iota
 	KindGroupHeader          // virtual group (no real session)
+	KindWorktree             // inactive worktree branch (no running session)
 )
 
 // TreeNode represents one entry in the session tree.

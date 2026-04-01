@@ -1,4 +1,4 @@
-package dashboard
+package workspaces
 
 import (
 	"os/exec"

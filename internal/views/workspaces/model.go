@@ -1,4 +1,4 @@
-package dashboard
+package workspaces
 
 import (
 	"fmt"
@@ -15,7 +15,7 @@ import (
 
 	"github.com/miltonparedes/kitmux/internal/tmux"
 	"github.com/miltonparedes/kitmux/internal/views/sessions"
-	"github.com/miltonparedes/kitmux/internal/workspaces"
+	wsreg "github.com/miltonparedes/kitmux/internal/workspaces"
 	"github.com/miltonparedes/kitmux/internal/worktree"
 )
 
@@ -157,12 +157,32 @@ func loadTree() tea.Msg {
 	sess, _ := tmux.ListSessions()
 	repoRoots := resolveRepoRoots(sess)
 
-	projs := workspaces.LoadRegistry()
-	roots := buildProjectTree(projs, sess, repoRoots)
+	projs := wsreg.LoadRegistry()
+	wtByPath := loadAllWorktrees(projs)
+	roots := buildProjectTree(projs, sess, repoRoots, wtByPath)
 	return treeLoadedMsg{roots: roots}
 }
 
-func buildProjectTree(projs []workspaces.Workspace, sess []tmux.Session, repoRoots map[string]string) []*sessions.TreeNode {
+// loadAllWorktrees loads worktree branches for each workspace.
+// Falls back to resolveGitBranch for repos without wt support.
+func loadAllWorktrees(projs []wsreg.Workspace) map[string][]worktree.Worktree {
+	result := make(map[string][]worktree.Worktree, len(projs))
+	for _, p := range projs {
+		wts, err := worktree.ListInDir(p.Path)
+		if err == nil && len(wts) > 0 {
+			result[p.Path] = wts
+			continue
+		}
+		if branch := resolveGitBranch(p.Path); branch != "" {
+			result[p.Path] = []worktree.Worktree{
+				{Branch: branch, Path: p.Path, IsMain: isMainBranch(branch)},
+			}
+		}
+	}
+	return result
+}
+
+func buildProjectTree(projs []wsreg.Workspace, sess []tmux.Session, repoRoots map[string]string, wtByPath map[string][]worktree.Worktree) []*sessions.TreeNode {
 	activePaths := make(map[string]int64)
 	for _, s := range sess {
 		if root, ok := repoRoots[s.Name]; ok {
@@ -172,7 +192,7 @@ func buildProjectTree(projs []workspaces.Workspace, sess []tmux.Session, repoRoo
 		}
 	}
 
-	workspaces.SortWorkspaces(projs, activePaths)
+	wsreg.SortWorkspaces(projs, activePaths)
 
 	roots := make([]*sessions.TreeNode, 0, len(projs))
 	for _, proj := range projs {
@@ -184,7 +204,9 @@ func buildProjectTree(projs []workspaces.Workspace, sess []tmux.Session, repoRoo
 			Depth:    0,
 		}
 
-		var children []*sessions.TreeNode
+		// Collect active sessions for this workspace
+		var activeChildren []*sessions.TreeNode
+		sessionPaths := make(map[string]bool)
 		for _, s := range sess {
 			root := repoRoots[s.Name]
 			if root != proj.Path {
@@ -196,7 +218,7 @@ func buildProjectTree(projs []workspaces.Workspace, sess []tmux.Session, repoRoo
 					childName = branch
 				}
 			}
-			children = append(children, &sessions.TreeNode{
+			activeChildren = append(activeChildren, &sessions.TreeNode{
 				Kind:        sessions.KindSession,
 				Name:        childName,
 				SessionName: s.Name,
@@ -208,17 +230,44 @@ func buildProjectTree(projs []workspaces.Workspace, sess []tmux.Session, repoRoo
 			if s.Activity > group.Activity {
 				group.Activity = s.Activity
 			}
+			sessionPaths[s.Path] = true
 		}
 
-		sort.SliceStable(children, func(i, j int) bool {
-			mi := isMainBranch(children[i].Name)
-			mj := isMainBranch(children[j].Name)
+		sort.SliceStable(activeChildren, func(i, j int) bool {
+			mi := isMainBranch(activeChildren[i].Name)
+			mj := isMainBranch(activeChildren[j].Name)
 			if mi != mj {
 				return mi
 			}
-			return children[i].Activity > children[j].Activity
+			return activeChildren[i].Activity > activeChildren[j].Activity
 		})
 
+		// Add inactive worktree branches that don't have a running session
+		var inactiveChildren []*sessions.TreeNode
+		for _, wt := range wtByPath[proj.Path] {
+			if sessionPaths[wt.Path] {
+				continue
+			}
+			inactiveChildren = append(inactiveChildren, &sessions.TreeNode{
+				Kind:  sessions.KindWorktree,
+				Name:  wt.Branch,
+				Path:  wt.Path,
+				Depth: 1,
+			})
+		}
+
+		sort.SliceStable(inactiveChildren, func(i, j int) bool {
+			mi := isMainBranch(inactiveChildren[i].Name)
+			mj := isMainBranch(inactiveChildren[j].Name)
+			if mi != mj {
+				return mi
+			}
+			return inactiveChildren[i].Name < inactiveChildren[j].Name
+		})
+
+		children := make([]*sessions.TreeNode, 0, len(activeChildren)+len(inactiveChildren))
+		children = append(children, activeChildren...)
+		children = append(children, inactiveChildren...)
 		group.Children = children
 		roots = append(roots, group)
 	}
@@ -240,7 +289,7 @@ func isMainBranch(name string) bool {
 		strings.HasSuffix(n, "-main") || strings.HasSuffix(n, "-master")
 }
 
-func loadStats(projs []workspaces.Workspace) tea.Cmd {
+func loadStats(projs []wsreg.Workspace) tea.Cmd {
 	return func() tea.Msg {
 		sess, _ := tmux.ListSessions()
 		pathToName := make(map[string]string, len(sess))
@@ -435,7 +484,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.applyCollapsedState()
 		m.rebuildVisible()
 		m.clampCursor()
-		projs := workspaces.LoadRegistry()
+		projs := wsreg.LoadRegistry()
 		return m, loadStats(projs)
 
 	case statsLoadedMsg:
@@ -537,7 +586,24 @@ func (m Model) activateNode(node *sessions.TreeNode) (tea.Model, tea.Cmd) {
 	if node.Kind == sessions.KindSession && node.SessionName != "" {
 		return m, m.switchTo(node.SessionName)
 	}
+	if node.Kind == sessions.KindWorktree {
+		if parent := m.parentGroup(m.cursor); parent != nil {
+			return m, m.openWorktreeSession(parent.Name, wtEntry{
+				Branch: node.Name,
+				Path:   node.Path,
+			})
+		}
+	}
 	return m, nil
+}
+
+func (m Model) parentGroup(idx int) *sessions.TreeNode {
+	for i := idx - 1; i >= 0; i-- {
+		if m.visible[i].Depth == 0 {
+			return m.visible[i]
+		}
+	}
+	return nil
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -660,7 +726,7 @@ func (m Model) handleProjectSearch(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		if sel := m.zoxide.selected(); sel != nil {
 			path := sel.Path
 			name := filepath.Base(path)
-			workspaces.AddWorkspace(name, path)
+			wsreg.AddWorkspace(name, path)
 			m.mode = modeNormal
 			return m, tea.Batch(loadTree, m.enterWorktreePicker(path))
 		}
@@ -743,7 +809,7 @@ func (m Model) handleConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "y":
 		m.mode = modeNormal
 		if node := m.selected(); node != nil && node.Depth == 0 {
-			workspaces.RemoveWorkspace(node.Path)
+			wsreg.RemoveWorkspace(node.Path)
 			return m, loadTree
 		}
 		return m, nil
@@ -756,7 +822,7 @@ func (m Model) handleConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // Actions
 
 func (m Model) enterWorktreePicker(projectPath string) tea.Cmd {
-	projs := workspaces.LoadRegistry()
+	projs := wsreg.LoadRegistry()
 	for _, p := range projs {
 		if p.Path == projectPath {
 			return loadWorktrees(p.Name, p.Path)
