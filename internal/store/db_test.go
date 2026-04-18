@@ -35,6 +35,7 @@ func TestOpen_RunsMigrations(t *testing.T) {
 		"worktree_stats",
 		"workspace_stats",
 		"workspace_meta",
+		"workspace_repo_roots",
 	}
 	for _, table := range tables {
 		assertTableExists(t, db, table)

@@ -5,9 +5,10 @@ import (
 	"time"
 )
 
-// PathRepoRoot is a path→repo_root mapping backed by the repo_roots table.
-// We repurpose the session_name column as a stable path key so we don't need
-// yet another table; the column already has a PK, which is what we want.
+// PathRepoRoot is a path→repo_root mapping persisted in the
+// workspace_repo_roots table. Used by the workspaces dashboard so that
+// resolving repo roots for cached workspaces costs zero git calls when
+// nothing has changed.
 type PathRepoRoot struct {
 	Path        string
 	RepoRoot    string
@@ -21,9 +22,9 @@ func LoadRepoRootCache() (map[string]PathRepoRoot, error) {
 		return nil, err
 	}
 
-	rows, err := db.Query(`SELECT session_name, repo_root, refreshed_at FROM repo_roots`)
+	rows, err := db.Query(`SELECT path, repo_root, refreshed_at FROM workspace_repo_roots`)
 	if err != nil {
-		return nil, fmt.Errorf("query repo_root cache: %w", err)
+		return nil, fmt.Errorf("query workspace_repo_roots: %w", err)
 	}
 	defer func() { _ = rows.Close() }()
 
@@ -32,7 +33,7 @@ func LoadRepoRootCache() (map[string]PathRepoRoot, error) {
 		var path, root string
 		var refreshed int64
 		if err := rows.Scan(&path, &root, &refreshed); err != nil {
-			return nil, fmt.Errorf("scan repo_root cache: %w", err)
+			return nil, fmt.Errorf("scan workspace_repo_roots: %w", err)
 		}
 		entry := PathRepoRoot{Path: path, RepoRoot: root}
 		if refreshed > 0 {
@@ -41,7 +42,7 @@ func LoadRepoRootCache() (map[string]PathRepoRoot, error) {
 		out[path] = entry
 	}
 	if err := rows.Err(); err != nil {
-		return nil, fmt.Errorf("iterate repo_root cache: %w", err)
+		return nil, fmt.Errorf("iterate workspace_repo_roots: %w", err)
 	}
 	return out, nil
 }
@@ -59,17 +60,17 @@ func SaveRepoRoots(mappings map[string]string, at time.Time) error {
 
 	tx, err := db.Begin()
 	if err != nil {
-		return fmt.Errorf("begin save repo_roots: %w", err)
+		return fmt.Errorf("begin save workspace_repo_roots: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
-	stmt, err := tx.Prepare(`INSERT INTO repo_roots(session_name, repo_root, refreshed_at)
+	stmt, err := tx.Prepare(`INSERT INTO workspace_repo_roots(path, repo_root, refreshed_at)
 		VALUES(?, ?, ?)
-		ON CONFLICT(session_name) DO UPDATE SET
+		ON CONFLICT(path) DO UPDATE SET
 			repo_root = excluded.repo_root,
 			refreshed_at = excluded.refreshed_at`)
 	if err != nil {
-		return fmt.Errorf("prepare upsert repo_root: %w", err)
+		return fmt.Errorf("prepare upsert workspace_repo_roots: %w", err)
 	}
 	defer func() { _ = stmt.Close() }()
 
@@ -79,7 +80,7 @@ func SaveRepoRoots(mappings map[string]string, at time.Time) error {
 			continue
 		}
 		if _, err := stmt.Exec(path, root, ts); err != nil {
-			return fmt.Errorf("upsert repo_root %q: %w", path, err)
+			return fmt.Errorf("upsert workspace_repo_roots %q: %w", path, err)
 		}
 	}
 	return tx.Commit()

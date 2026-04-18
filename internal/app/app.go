@@ -345,6 +345,28 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			return m, nil, true
 		}
 	case "esc":
+		// The workspaces view owns its own esc semantics (detail→projects
+		// back-nav, then quit). Let it consume the key first before the
+		// paletteReturn / view-switch / quit guards below, so that internal
+		// navigation keeps working even when the dashboard was opened from
+		// the palette (paletteReturn=true).
+		if m.view == viewWorkspaces && !m.workspacesView.IsEditing() {
+			model, cmd := m.workspacesView.Update(msg)
+			m.workspacesView = model.(workspacesview.Model)
+			if cmd == nil {
+				// View consumed esc internally (collapsed detail→projects).
+				return m, nil, true
+			}
+			// View returned tea.Quit → user pressed esc from projects column.
+			if m.paletteReturn {
+				return m, m.returnToPalette(), true
+			}
+			if m.mode == ModeWorkspaces {
+				return m, cmd, true
+			}
+			m.view = viewSessions
+			return m, nil, true
+		}
 		if m.paletteReturn && !isEditing {
 			return m, m.returnToPalette(), true
 		}
@@ -371,21 +393,6 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			return m, func() tea.Msg {
 				return messages.BackFromAgentABMsg{}
 			}, true
-		case viewWorkspaces:
-			if m.workspacesView.IsEditing() {
-				// let workspacesView handle esc internally
-				return m, nil, false
-			}
-			model, cmd := m.workspacesView.Update(msg)
-			m.workspacesView = model.(workspacesview.Model)
-			if cmd == nil {
-				return m, nil, true
-			}
-			if m.mode == ModeWorkspaces {
-				return m, cmd, true
-			}
-			m.view = viewSessions
-			return m, nil, true
 		default:
 			if m.sessions.IsEditing() {
 				// esc in sessions editing → falls through to sessions.Update

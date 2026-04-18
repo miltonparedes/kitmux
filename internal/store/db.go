@@ -21,7 +21,7 @@ type migration func(tx *sql.Tx) error
 
 // migrations is the ordered list of schema migrations.
 // The schema version equals len(migrations) — adding a new entry auto-bumps it.
-var migrations = []migration{migrateV1, migrateV2, migrateV3}
+var migrations = []migration{migrateV1, migrateV2, migrateV3, migrateV4}
 
 func schemaVersion() int { return len(migrations) }
 
@@ -175,6 +175,28 @@ func migrateV2(tx *sql.Tx) error {
 	for _, stmt := range stmts {
 		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("v2: %w", err)
+		}
+	}
+	return nil
+}
+
+// migrateV4 introduces a dedicated table for the workspace dashboard's
+// path→repo_root cache. Previously this cache was stored in the `repo_roots`
+// table by repurposing its session_name column as a path key, which meant
+// SaveSessionCache's blanket DELETE wiped the workspace entries alongside
+// its own session-name-keyed rows.
+func migrateV4(tx *sql.Tx) error {
+	stmts := []string{
+		`CREATE TABLE workspace_repo_roots (
+			path TEXT PRIMARY KEY,
+			repo_root TEXT NOT NULL,
+			refreshed_at INTEGER NOT NULL
+		);`,
+		`CREATE INDEX idx_workspace_repo_roots_repo_root ON workspace_repo_roots(repo_root);`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("v4: %w", err)
 		}
 	}
 	return nil
