@@ -10,11 +10,9 @@ import (
 func TestOpen_CreatesStateDB(t *testing.T) {
 	home := useTempHome(t)
 
-	db, err := open()
-	if err != nil {
+	if _, err := open(); err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer func() { _ = db.Close() }()
 
 	if _, err := os.Stat(stateDBPath(home)); err != nil {
 		t.Fatalf("stat state db: %v", err)
@@ -28,9 +26,16 @@ func TestOpen_RunsMigrations(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer func() { _ = db.Close() }()
 
-	tables := []string{"metadata", "workspaces", "session_snapshots", "repo_roots", "worktree_stats"}
+	tables := []string{
+		"metadata",
+		"workspaces",
+		"session_snapshots",
+		"repo_roots",
+		"worktree_stats",
+		"workspace_stats",
+		"workspace_meta",
+	}
 	for _, table := range tables {
 		assertTableExists(t, db, table)
 	}
@@ -51,13 +56,13 @@ func TestOpen_IsIdempotent(t *testing.T) {
 	if err != nil {
 		t.Fatalf("first open: %v", err)
 	}
-	_ = db1.Close()
-
 	db2, err := open()
 	if err != nil {
 		t.Fatalf("second open: %v", err)
 	}
-	defer func() { _ = db2.Close() }()
+	if db1 != db2 {
+		t.Fatal("expected singleton to return the same *sql.DB instance")
+	}
 
 	var version int
 	if err := db2.QueryRow("PRAGMA user_version;").Scan(&version); err != nil {
@@ -80,7 +85,8 @@ func TestMigrate_RejectsNewerVersion(t *testing.T) {
 	if _, err := db.Exec(fmt.Sprintf("PRAGMA user_version = %d;", future)); err != nil {
 		t.Fatalf("set user_version: %v", err)
 	}
-	_ = db.Close()
+	// Drop the cached connection so the next open() re-runs migrations.
+	ResetForTests()
 
 	// Re-opening should fail.
 	_, err = open()

@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/charmbracelet/lipgloss"
+
 	"github.com/miltonparedes/kitmux/internal/theme"
 )
 
@@ -76,7 +77,6 @@ func injectTitle(box, title string, active bool) string {
 	if titleW+4 > topW {
 		return box
 	}
-	// Place title after first 2 chars of border
 	runes := []rune(topLine)
 	insertPos := 3
 	if insertPos+titleW > len(runes) {
@@ -112,19 +112,7 @@ func (m Model) renderLeftColumn(width, avail int) string {
 	for i := m.projScroll; i < end; i++ {
 		p := m.projects[i]
 		selected := i == m.projCursor && m.focus == colProjects
-
-		name := p.Name
-		if selected {
-			name = theme.TreeNodeSelected.Render("▸ " + name)
-		} else {
-			name = "  " + theme.TreeNodeNormal.Render(name)
-		}
-
-		if p.Active {
-			name += " " + theme.AttachedBadge.Render("●")
-		}
-
-		b.WriteString(name)
+		b.WriteString(m.renderProjectLine(p, selected, width))
 		b.WriteString("\n")
 		linesUsed++
 	}
@@ -137,27 +125,26 @@ func (m Model) renderLeftColumn(width, avail int) string {
 	return b.String()
 }
 
-func (m Model) renderFilteredLeft(_, avail int) string {
+func (m Model) renderFilteredLeft(width, avail int) string {
 	var b strings.Builder
 	b.WriteString(m.filter.View())
 	b.WriteString("\n")
 	avail--
+
+	idxs := filteredProjectIndices(m.projects, m.filter.Value())
 	linesUsed := 0
-	for i, p := range m.projects {
+	for _, idx := range idxs {
 		if linesUsed >= avail {
 			break
 		}
-		selected := i == m.projCursor
-		name := p.Name
-		if selected {
-			name = theme.TreeNodeSelected.Render("▸ " + name)
-		} else {
-			name = "  " + theme.TreeNodeNormal.Render(name)
-		}
-		if p.Active {
-			name += " " + theme.AttachedBadge.Render("●")
-		}
-		b.WriteString(name)
+		p := m.projects[idx]
+		selected := idx == m.projCursor
+		b.WriteString(m.renderProjectLine(p, selected, width))
+		b.WriteString("\n")
+		linesUsed++
+	}
+	if len(idxs) == 0 {
+		b.WriteString(theme.HelpStyle.Render("  no matches"))
 		b.WriteString("\n")
 		linesUsed++
 	}
@@ -166,6 +153,40 @@ func (m Model) renderFilteredLeft(_, avail int) string {
 		linesUsed++
 	}
 	return b.String()
+}
+
+func (m Model) renderProjectLine(p projectEntry, selected bool, width int) string {
+	name := p.Name
+	if selected {
+		name = theme.TreeNodeSelected.Render("▸ " + name)
+	} else {
+		name = "  " + theme.TreeNodeNormal.Render(name)
+	}
+	if p.Active {
+		name += " " + theme.AttachedBadge.Render("●")
+	}
+	summary := projectDiffSummary(p)
+	if summary == "" || width <= 0 {
+		return name
+	}
+	leftW := lipgloss.Width(name)
+	rightW := lipgloss.Width(summary)
+	gap := width - leftW - rightW - 1
+	if gap < 1 {
+		return name
+	}
+	return name + strings.Repeat(" ", gap) + summary
+}
+
+func projectDiffSummary(p projectEntry) string {
+	var parts []string
+	if p.Added > 0 {
+		parts = append(parts, theme.DiffAdded.Render(fmt.Sprintf("+%d", p.Added)))
+	}
+	if p.Deleted > 0 {
+		parts = append(parts, theme.DiffRemoved.Render(fmt.Sprintf("-%d", p.Deleted)))
+	}
+	return strings.Join(parts, " ")
 }
 
 func (m Model) renderRightColumn(width, avail int) string {
@@ -183,13 +204,11 @@ func (m Model) renderRightColumn(width, avail int) string {
 		return b.String()
 	}
 
-	// Render branches section header
 	b.WriteString(theme.TreeGroupHeader.Render("Branches"))
 	b.WriteString("\n")
 	avail--
 	linesUsed := 0
 
-	// Render branch items
 	branchStart := m.detScroll
 	if branchStart > len(m.branches) {
 		branchStart = len(m.branches)
@@ -208,7 +227,6 @@ func (m Model) renderRightColumn(width, avail int) string {
 		linesUsed++
 	}
 
-	// Separator + agents header
 	if linesUsed < avail-1 {
 		b.WriteString("\n")
 		linesUsed++
@@ -217,7 +235,6 @@ func (m Model) renderRightColumn(width, avail int) string {
 		linesUsed++
 	}
 
-	// Render agent items
 	for i, ae := range m.agentEntries {
 		if linesUsed >= avail {
 			break
@@ -256,6 +273,12 @@ func (m Model) renderBranch(br branchEntry, selected bool, width int) string {
 		meta := fmt.Sprintf("%dw", br.Windows)
 		if br.Attached {
 			meta += " " + theme.AttachedBadge.Render("*")
+		}
+		if br.Ahead > 0 {
+			meta += " " + theme.TreeMeta.Render(fmt.Sprintf("↑%d", br.Ahead))
+		}
+		if br.Behind > 0 {
+			meta += " " + theme.TreeMeta.Render(fmt.Sprintf("↓%d", br.Behind))
 		}
 		metaStr := theme.TreeMeta.Render(meta)
 		if selected {
@@ -312,18 +335,34 @@ func (m Model) renderAgentEntry(ae agentEntry, selected bool) string {
 }
 
 func (m Model) footer() string {
+	if m.toast != "" {
+		return m.renderToast()
+	}
 	switch m.mode {
 	case modeConfirm:
 		return theme.AttachedBadge.Render(fmt.Sprintf(" remove '%s'? y/n", m.confirmName))
 	case modeFiltering:
-		return theme.HelpStyle.Render(" enter accept  esc clear")
+		return theme.HelpStyle.Render(" type to filter  enter select  esc cancel")
 	case modeNewBranch:
 		return theme.HelpStyle.Render(" enter create  esc back")
 	}
 	if m.focus == colDetail {
-		return theme.HelpStyle.Render(" h back  j/k nav  enter open  c new branch  / filter")
+		return theme.HelpStyle.Render(" h back  j/k nav  enter open  c new branch  a agent  / filter")
 	}
-	return theme.HelpStyle.Render(" l/enter open  j/k nav  n add  d remove  / filter  r refresh  q quit")
+	return theme.HelpStyle.Render(" l/enter open  j/k nav  n add  f find  d remove  a agent  / filter  r refresh  q quit")
+}
+
+func (m Model) renderToast() string {
+	var style lipgloss.Style
+	switch m.toastLvl {
+	case toastError:
+		style = theme.DiffRemoved
+	case toastWarn:
+		style = theme.DirtyBadge
+	default:
+		style = theme.HelpStyle
+	}
+	return style.Render(" " + m.toast)
 }
 
 func (m Model) viewProjectSearch() string {

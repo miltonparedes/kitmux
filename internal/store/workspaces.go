@@ -24,7 +24,6 @@ func LoadWorkspaces() ([]Workspace, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = db.Close() }()
 
 	if err := importLegacyWorkspaces(db); err != nil {
 		return nil, err
@@ -56,7 +55,6 @@ func SaveWorkspaces(workspaces []Workspace) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = db.Close() }()
 
 	tx, err := db.Begin()
 	if err != nil {
@@ -95,7 +93,6 @@ func AddWorkspace(name, path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer func() { _ = db.Close() }()
 
 	if err := importLegacyWorkspaces(db); err != nil {
 		return false, err
@@ -121,7 +118,6 @@ func RemoveWorkspace(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer func() { _ = db.Close() }()
 
 	if err := importLegacyWorkspaces(db); err != nil {
 		return false, err
@@ -143,7 +139,6 @@ func HasWorkspacePath(path string) (bool, error) {
 	if err != nil {
 		return false, err
 	}
-	defer func() { _ = db.Close() }()
 
 	if err := importLegacyWorkspaces(db); err != nil {
 		return false, err

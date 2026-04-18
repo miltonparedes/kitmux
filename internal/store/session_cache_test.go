@@ -168,7 +168,6 @@ func TestInsertWorktreeStats_FillsRepoRootFromRepoRoots(t *testing.T) {
 	if err != nil {
 		t.Fatalf("open: %v", err)
 	}
-	defer func() { _ = db.Close() }()
 
 	tx, err := db.Begin()
 	if err != nil {

@@ -55,7 +55,6 @@ func LoadSessionCache() (*SessionCache, error) {
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = db.Close() }()
 
 	if err := importLegacySessionCache(db); err != nil {
 		return nil, err
@@ -73,7 +72,6 @@ func SaveSessionCache(snap *SessionCache) error {
 	if err != nil {
 		return err
 	}
-	defer func() { _ = db.Close() }()
 
 	tx, err := db.Begin()
 	if err != nil {

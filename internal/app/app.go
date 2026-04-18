@@ -18,6 +18,7 @@ import (
 	"github.com/miltonparedes/kitmux/internal/views/palette"
 	"github.com/miltonparedes/kitmux/internal/views/sessions"
 	"github.com/miltonparedes/kitmux/internal/views/windows"
+	workspacesview "github.com/miltonparedes/kitmux/internal/views/workspaces"
 	"github.com/miltonparedes/kitmux/internal/views/worktrees"
 	"github.com/miltonparedes/kitmux/internal/worktree"
 )
@@ -26,52 +27,56 @@ import (
 type Mode int
 
 const (
-	ModeSessions  Mode = iota // Session tree view
-	ModePalette               // Command palette-only mode
-	ModeWorktrees             // Worktrees view
-	ModeAgents                // Agents view
-	ModeWindows               // Windows for current session
-	ModeRun                   // Execute a palette command directly
+	ModeSessions   Mode = iota // Session tree view
+	ModePalette                // Command palette-only mode
+	ModeWorktrees              // Worktrees view
+	ModeAgents                 // Agents view
+	ModeWindows                // Windows for current session
+	ModeRun                    // Execute a palette command directly
+	ModeWorkspaces             // Workspaces dashboard
 )
 
 type activeView int
 
 const (
-	viewSessions  activeView = iota
-	viewWindows              // Windows drill-down
-	viewWorktrees            // Worktree list
-	viewAgents               // Agent launcher
-	viewAgentAB              // A/B launcher form
+	viewSessions   activeView = iota
+	viewWindows               // Windows drill-down
+	viewWorktrees             // Worktree list
+	viewAgents                // Agent launcher
+	viewAgentAB               // A/B launcher form
+	viewWorkspaces            // Workspaces dashboard
 )
 
 type Model struct {
-	mode          Mode
-	view          activeView
-	sessions      sessions.Model
-	windows       windows.Model
-	worktreeView  worktrees.Model
-	agentsView    agentsview.Model
-	agentABView   agentabview.Model
-	palette       palette.Model
-	paletteActive bool
-	paletteReturn bool        // return to palette after sub-action completes
-	returnView    activeView  // view to return to from transient forms
-	pendingKey    *tea.KeyMsg // key to inject after sessions load
-	width         int
-	height        int
-	runCommandID  string // for ModeRun: the command to execute
+	mode           Mode
+	view           activeView
+	sessions       sessions.Model
+	windows        windows.Model
+	worktreeView   worktrees.Model
+	agentsView     agentsview.Model
+	agentABView    agentabview.Model
+	workspacesView workspacesview.Model
+	palette        palette.Model
+	paletteActive  bool
+	paletteReturn  bool        // return to palette after sub-action completes
+	returnView     activeView  // view to return to from transient forms
+	pendingKey     *tea.KeyMsg // key to inject after sessions load
+	width          int
+	height         int
+	runCommandID   string // for ModeRun: the command to execute
 }
 
 func New(mode Mode, opts ...Option) Model {
 	m := Model{
-		mode:         mode,
-		view:         viewSessions,
-		sessions:     sessions.New(),
-		windows:      windows.New(),
-		worktreeView: worktrees.New(),
-		agentsView:   agentsview.New(),
-		agentABView:  agentabview.New(),
-		palette:      palette.New(),
+		mode:           mode,
+		view:           viewSessions,
+		sessions:       sessions.New(),
+		windows:        windows.New(),
+		worktreeView:   worktrees.New(),
+		agentsView:     agentsview.New(),
+		agentABView:    agentabview.New(),
+		workspacesView: workspacesview.New(),
+		palette:        palette.New(),
 	}
 	for _, opt := range opts {
 		opt(&m)
@@ -86,6 +91,8 @@ func New(mode Mode, opts ...Option) Model {
 		m.view = viewAgents
 	case ModeWindows:
 		m.view = viewWindows
+	case ModeWorkspaces:
+		m.view = viewWorkspaces
 	}
 	return m
 }
@@ -117,6 +124,8 @@ func (m Model) Init() tea.Cmd {
 			return m.agentsView.Init()
 		case viewAgentAB:
 			return m.agentABView.Init()
+		case viewWorkspaces:
+			return m.workspacesView.Init()
 		default:
 			return m.sessions.Init()
 		}
@@ -143,6 +152,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.worktreeView.SetSize(m.width, m.height-1)
 		m.agentsView.SetSize(m.width, m.height-1)
 		m.agentABView.SetSize(m.width, m.height-1)
+		m.workspacesView.SetSize(m.width, m.height-1)
 		m.palette.SetSize(m.width, m.height)
 		return m, nil
 
@@ -262,6 +272,15 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		_ = tmux.DisplayPopup(msg.Command, msg.Width, msg.Height)
 		return m, tea.Quit
 
+	case messages.OpenWorkspacesMsg:
+		m.view = viewWorkspaces
+		m.workspacesView = workspacesview.New()
+		m.workspacesView.SetSize(m.width, m.height-1)
+		if msg.AddMode {
+			return m, m.workspacesView.InitAddMode()
+		}
+		return m, m.workspacesView.Init()
+
 	case messages.OpenLocalEditorMsg:
 		if msg.Err != nil {
 			_ = tmux.DisplayMessage(fmt.Sprintf("open_local_editor error: %v", msg.Err))
@@ -298,7 +317,7 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, cmd, true
 	}
 
-	isEditing := m.sessions.IsEditing() || m.worktreeView.IsEditing() || (m.view == viewAgentAB && m.agentABView.IsEditing())
+	isEditing := m.sessions.IsEditing() || m.worktreeView.IsEditing() || (m.view == viewAgentAB && m.agentABView.IsEditing()) || (m.view == viewWorkspaces && m.workspacesView.IsEditing())
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit, true
@@ -349,6 +368,16 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			return m, func() tea.Msg {
 				return messages.BackFromAgentABMsg{}
 			}, true
+		case viewWorkspaces:
+			if m.workspacesView.IsEditing() {
+				// let workspacesView handle esc internally
+				return m, nil, false
+			}
+			if m.mode == ModeWorkspaces {
+				return m, tea.Quit, true
+			}
+			m.view = viewSessions
+			return m, nil, true
 		default:
 			if m.sessions.IsEditing() {
 				// esc in sessions editing → falls through to sessions.Update
@@ -393,6 +422,10 @@ func (m Model) routeToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.agentsView, cmd = m.agentsView.Update(msg)
 	case viewAgentAB:
 		m.agentABView, cmd = m.agentABView.Update(msg)
+	case viewWorkspaces:
+		var model tea.Model
+		model, cmd = m.workspacesView.Update(msg)
+		m.workspacesView = model.(workspacesview.Model)
 	}
 	return m, cmd
 }
@@ -411,6 +444,8 @@ func (m Model) View() string {
 		return m.agentsView.View()
 	case viewAgentAB:
 		return m.agentABView.View()
+	case viewWorkspaces:
+		return m.workspacesView.View()
 	default:
 		return m.sessions.View()
 	}
@@ -439,8 +474,13 @@ func (m Model) executeCommand(id string) (tea.Model, tea.Cmd) {
 		m.view = viewSessions
 		return m, m.sessions.Reload()
 	case "open_project":
-		m.view = viewSessions
-		return m, m.sessions.InitProjectPicker()
+		return m, func() tea.Msg {
+			return messages.OpenWorkspacesMsg{}
+		}
+	case "add_workspace":
+		return m, func() tea.Msg {
+			return messages.OpenWorkspacesMsg{AddMode: true}
+		}
 	case "kill_session":
 		m.view = viewSessions
 		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}

@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sync"
 
 	// Register the pure-Go SQLite driver.
 	_ "modernc.org/sqlite"
@@ -20,7 +21,7 @@ type migration func(tx *sql.Tx) error
 
 // migrations is the ordered list of schema migrations.
 // The schema version equals len(migrations) — adding a new entry auto-bumps it.
-var migrations = []migration{migrateV1, migrateV2}
+var migrations = []migration{migrateV1, migrateV2, migrateV3}
 
 func schemaVersion() int { return len(migrations) }
 
@@ -33,7 +34,63 @@ func DBPath() (string, error) {
 	return filepath.Join(home, configDir, databaseFile), nil
 }
 
+// Cached singleton connection. Opening SQLite + running migrations costs
+// tens of ms on the hot path, so we reuse a single *sql.DB for the process.
+// The home directory is baked into the first-open key; if tests switch HOME
+// between runs they reset the singleton via ResetForTests.
+var (
+	dbMu      sync.Mutex
+	dbInst    *sql.DB
+	dbHome    string
+	errOpenDB error
+)
+
+// ResetForTests clears the cached connection. Only call from tests that
+// change HOME mid-process.
+func ResetForTests() {
+	dbMu.Lock()
+	defer dbMu.Unlock()
+	if dbInst != nil {
+		_ = dbInst.Close()
+	}
+	dbInst = nil
+	dbHome = ""
+	errOpenDB = nil
+}
+
 func open() (*sql.DB, error) {
+	dbMu.Lock()
+	defer dbMu.Unlock()
+
+	home, err := os.UserHomeDir()
+	if err != nil {
+		return nil, fmt.Errorf("user home dir: %w", err)
+	}
+	// If HOME changed (tests), drop the cached connection and reopen.
+	if dbInst != nil && dbHome != home {
+		_ = dbInst.Close()
+		dbInst = nil
+		dbHome = ""
+		errOpenDB = nil
+	}
+	if dbInst != nil {
+		return dbInst, nil
+	}
+	if errOpenDB != nil {
+		return nil, errOpenDB
+	}
+
+	db, err := openDB()
+	if err != nil {
+		errOpenDB = err
+		return nil, err
+	}
+	dbInst = db
+	dbHome = home
+	return db, nil
+}
+
+func openDB() (*sql.DB, error) {
 	path, err := DBPath()
 	if err != nil {
 		return nil, err
@@ -118,6 +175,40 @@ func migrateV2(tx *sql.Tx) error {
 	for _, stmt := range stmts {
 		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("v2: %w", err)
+		}
+	}
+	return nil
+}
+
+func migrateV3(tx *sql.Tx) error {
+	stmts := []string{
+		`CREATE TABLE workspace_stats (
+			workspace_path TEXT NOT NULL,
+			branch TEXT NOT NULL,
+			worktree_path TEXT NOT NULL,
+			added INTEGER NOT NULL DEFAULT 0,
+			deleted INTEGER NOT NULL DEFAULT 0,
+			staged INTEGER NOT NULL DEFAULT 0,
+			modified INTEGER NOT NULL DEFAULT 0,
+			untracked INTEGER NOT NULL DEFAULT 0,
+			ahead INTEGER NOT NULL DEFAULT 0,
+			behind INTEGER NOT NULL DEFAULT 0,
+			is_main INTEGER NOT NULL DEFAULT 0,
+			commit_sha TEXT NOT NULL DEFAULT '',
+			commit_ts INTEGER NOT NULL DEFAULT 0,
+			updated_at INTEGER NOT NULL,
+			PRIMARY KEY (workspace_path, worktree_path)
+		);`,
+		`CREATE INDEX idx_workspace_stats_path ON workspace_stats(workspace_path);`,
+		`CREATE TABLE workspace_meta (
+			workspace_path TEXT PRIMARY KEY,
+			last_stats_refresh INTEGER NOT NULL DEFAULT 0,
+			last_opened_at INTEGER NOT NULL DEFAULT 0
+		);`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("v3: %w", err)
 		}
 	}
 	return nil

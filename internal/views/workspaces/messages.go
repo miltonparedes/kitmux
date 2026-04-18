@@ -1,0 +1,121 @@
+package workspaces
+
+import (
+	"time"
+
+	"github.com/miltonparedes/kitmux/internal/tmux"
+	"github.com/miltonparedes/kitmux/internal/workspaces/data"
+	"github.com/miltonparedes/kitmux/internal/worktree"
+)
+
+type column int
+
+const (
+	colProjects column = iota
+	colDetail
+)
+
+type dashMode int
+
+const (
+	modeNormal dashMode = iota
+	modeFiltering
+	modeProjectSearch
+	modeNewBranch
+	modeConfirm
+	modeAgentPicker
+)
+
+const keyEnter = "enter"
+
+// projectEntry represents a workspace in the left column.
+type projectEntry struct {
+	Name       string
+	Path       string
+	Active     bool
+	Activity   int64
+	Added      int
+	Deleted    int
+	Worktrees  int
+	DirtyCount int
+}
+
+// branchEntry represents a session or worktree in the right column.
+type branchEntry struct {
+	Name        string
+	SessionName string
+	Path        string
+	Windows     int
+	Attached    bool
+	IsSession   bool
+	DiffAdded   int
+	DiffDel     int
+	IsMain      bool
+	Staged      bool
+	Modified    bool
+	Untracked   bool
+	Ahead       int
+	Behind      int
+}
+
+// agentEntry represents a detected running agent or the launch action.
+type agentEntry struct {
+	Name        string
+	AgentID     string
+	SessionName string
+	WindowIndex int
+	PaneIndex   int
+	IsLauncher  bool // "+ launch agent..." action
+}
+
+// sessionStats is the legacy per-session diff view used by tests and renderers.
+type sessionStats struct {
+	Added   int
+	Deleted int
+}
+
+// dataLoadedMsg is dispatched when the initial snapshot finishes loading.
+type dataLoadedMsg struct {
+	projects  []projectEntry
+	sessions  []tmux.Session
+	repoRoots map[string]string
+	wtByPath  map[string][]worktree.Worktree
+	panes     []tmux.Pane
+}
+
+// statsLoadedMsg is dispatched when live worktree stats arrive from StatsService.
+type statsLoadedMsg struct {
+	stats    map[string]sessionStats
+	wsStats  map[string]data.WorkspaceStats
+	refresh  time.Time
+	workPath string // "" for full reload, else single-workspace delta
+}
+
+// zoxideLoadedMsg delivers zoxide query results to the project search.
+type zoxideLoadedMsg struct {
+	entries []zoxideEntry
+}
+
+// toastMsg is a transient status-line message.
+type toastMsg struct {
+	text  string
+	level toastLevel
+}
+
+type toastLevel int
+
+const (
+	toastInfo toastLevel = iota
+	toastWarn
+	toastError
+)
+
+// toastClearMsg clears any active toast after its timeout expires.
+type toastClearMsg struct {
+	seq int
+}
+
+type (
+	actionDoneMsg struct{}
+	switchDoneMsg struct{}
+)
