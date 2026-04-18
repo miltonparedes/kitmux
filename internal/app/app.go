@@ -323,6 +323,9 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, tea.Quit, true
 	case "q":
 		if !isEditing {
+			if m.view == viewWorkspaces {
+				return m, nil, false
+			}
 			return m, tea.Quit, true
 		}
 	case "ctrl+p":
@@ -332,12 +335,12 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			return m, nil, true
 		}
 	case "w":
-		if !isEditing && m.view != viewWorktrees {
+		if !isEditing && m.view != viewWorktrees && m.view != viewWorkspaces {
 			m.view = viewWorktrees
 			return m, m.worktreeView.Init(), true
 		}
 	case "a":
-		if !isEditing && m.view != viewAgents {
+		if !isEditing && m.view != viewAgents && m.view != viewWorkspaces {
 			m.view = viewAgents
 			return m, nil, true
 		}
@@ -373,8 +376,13 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 				// let workspacesView handle esc internally
 				return m, nil, false
 			}
+			model, cmd := m.workspacesView.Update(msg)
+			m.workspacesView = model.(workspacesview.Model)
+			if cmd == nil {
+				return m, nil, true
+			}
 			if m.mode == ModeWorkspaces {
-				return m, tea.Quit, true
+				return m, cmd, true
 			}
 			m.view = viewSessions
 			return m, nil, true
