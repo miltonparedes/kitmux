@@ -902,11 +902,14 @@ func TestViewColumns_InactiveWorktreeDimmed(t *testing.T) {
 	}
 }
 
-func TestViewColumns_BranchConnector(t *testing.T) {
+func TestViewColumns_HasColumnHeaders(t *testing.T) {
 	m := newSeededModel()
 	output := m.View()
-	if !strings.Contains(output, "┊") {
-		t.Error("expected branch connector character in output")
+	if !strings.Contains(output, "Projects") {
+		t.Error("expected 'Projects' header in output")
+	}
+	if !strings.Contains(output, "Branches") {
+		t.Error("expected 'Branches' section header in output")
 	}
 }
 
@@ -954,17 +957,17 @@ func TestWindowSizeMsg(t *testing.T) {
 
 func TestLeftWidthMinimum(t *testing.T) {
 	m := newSeededModel()
-	m.width = 20
-	if m.leftWidth() < 10 {
-		t.Errorf("expected minimum left width of 10, got %d", m.leftWidth())
+	m.width = 100
+	if got := m.leftWidth(); got < 18 {
+		t.Errorf("expected minimum left width of 18 at width=100, got %d", got)
 	}
 }
 
 func TestRightWidthMinimum(t *testing.T) {
 	m := newSeededModel()
-	m.width = 20
-	if m.rightWidth() < 10 {
-		t.Errorf("expected minimum right width of 10, got %d", m.rightWidth())
+	m.width = 100
+	if got := m.rightWidth(); got < 10 {
+		t.Errorf("expected right width to leave at least 10 cols at width=100, got %d", got)
 	}
 }
 
@@ -991,6 +994,57 @@ func TestMouseScrollInDetail(t *testing.T) {
 	m = updated.(Model)
 	if m.detCursor != 1 {
 		t.Errorf("expected detail cursor at 1, got %d", m.detCursor)
+	}
+}
+
+// --- Mouse left click ---
+
+func clickAt(x, y int) tea.MouseMsg {
+	return tea.MouseMsg{X: x, Y: y, Button: tea.MouseButtonLeft, Action: tea.MouseActionRelease}
+}
+
+func TestMouseClickProject_SelectsAndMovesCursor(t *testing.T) {
+	m := newSeededModel()
+	m.width = 120
+	m.height = 30
+	// Header + sep occupy rows 0,1; rows are 2 lines each (item + sep).
+	// Click on the second project (row index 1 -> y = 2 + 1*2 = 4).
+	updated, _ := m.Update(clickAt(2, 4))
+	m = updated.(Model)
+	if m.projCursor != 1 {
+		t.Errorf("expected cursor on project 1 after click, got %d", m.projCursor)
+	}
+	if m.focus != colProjects {
+		t.Errorf("expected focus on projects column, got %d", m.focus)
+	}
+}
+
+func TestMouseClickProject_TwiceMovesFocusToDetail(t *testing.T) {
+	m := newSeededModel()
+	m.width = 120
+	m.height = 30
+	// First click selects project 0 (already selected) and dives into detail.
+	updated, _ := m.Update(clickAt(2, 2))
+	m = updated.(Model)
+	if m.focus != colDetail {
+		t.Errorf("expected focus to move to detail on second click of selected project, got %d", m.focus)
+	}
+}
+
+func TestMouseClickDetail_SelectsBranch(t *testing.T) {
+	m := newSeededModel()
+	m.width = 120
+	m.height = 30
+	leftW := m.leftWidth()
+	rightStart := leftW + 3
+	// y=2 is the "Branches" header; y=4 is the first branch row.
+	updated, _ := m.Update(clickAt(rightStart+2, 4))
+	m = updated.(Model)
+	if m.focus != colDetail {
+		t.Errorf("expected focus to detail after right column click, got %d", m.focus)
+	}
+	if m.detCursor != 0 {
+		t.Errorf("expected detCursor=0 (first branch), got %d", m.detCursor)
 	}
 }
 

@@ -164,7 +164,121 @@ func (m Model) handleMouse(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
 			m.ensureDetVisible()
 		}
 		return m, nil
+	case tea.MouseButtonLeft:
+		if msg.Action != tea.MouseActionRelease {
+			return m, nil
+		}
+		return m.handleLeftClick(msg.X, msg.Y)
 	}
+	return m, nil
+}
+
+// handleLeftClick maps the (x, y) of a release event to either a project on
+// the left column or a branch/agent on the right column. Clicking on the
+// already-selected row "activates" it (moves focus to detail or opens it),
+// matching the Enter-key semantics. Clicking elsewhere just moves the cursor.
+func (m Model) handleLeftClick(x, y int) (tea.Model, tea.Cmd) {
+	left := m.leftWidth()
+	rightStart := left + 3 // gutter " │ "
+
+	// Headers + separator take 2 lines at the top of each column.
+	itemY := y - 2
+	if itemY < 0 {
+		return m, nil
+	}
+	// Each row takes 2 visual lines (item + hairline separator).
+	row := itemY / 2
+
+	switch {
+	case x < left:
+		return m.clickProject(row)
+	case x >= rightStart:
+		return m.clickDetail(row)
+	}
+	return m, nil
+}
+
+func (m Model) clickProject(row int) (tea.Model, tea.Cmd) {
+	if len(m.projects) == 0 {
+		return m, nil
+	}
+	idx := m.projScroll + row
+	if idx < 0 || idx >= len(m.projects) {
+		return m, nil
+	}
+	if idx == m.projCursor && m.focus == colProjects {
+		// Second click on the already-selected project: dive into detail.
+		if m.detailItems > 0 {
+			m.focus = colDetail
+		}
+		return m, nil
+	}
+	m.focus = colProjects
+	m.projCursor = idx
+	m.ensureProjVisible()
+	m.rebuildDetail()
+	if m.stats_svc != nil {
+		path := m.projects[m.projCursor].Path
+		return m, refreshStatsCmd(m.stats_svc, path)
+	}
+	return m, nil
+}
+
+// clickDetail resolves a (visual row index) within the right column to an
+// entry in m.branches or m.agentEntries, accounting for the section headers
+// between them. The right column lays rows out as:
+//
+//	row 0       : "Branches" header
+//	row 1..B    : branch rows
+//	(if agents) blank
+//	            : "Agents" header
+//	            : agent rows
+func (m Model) clickDetail(visualRow int) (tea.Model, tea.Cmd) {
+	if m.detailItems == 0 {
+		return m, nil
+	}
+	// First visible row of the right column is the "Branches" header.
+	row := visualRow - 1
+	if row < 0 {
+		// Click on the "Branches" header — treat as focus shift only.
+		m.focus = colDetail
+		return m, nil
+	}
+
+	branchVisible := len(m.branches) - m.detScroll
+	if branchVisible < 0 {
+		branchVisible = 0
+	}
+
+	var idx int
+	switch {
+	case row < branchVisible:
+		idx = m.detScroll + row
+	default:
+		// Past the branches list: account for the blank line + "Agents" header.
+		offset := row - branchVisible
+		// Need at least 2 lines of header padding before agents start.
+		if offset < 2 {
+			m.focus = colDetail
+			return m, nil
+		}
+		agentRow := offset - 2
+		if agentRow < 0 || agentRow >= len(m.agentEntries) {
+			return m, nil
+		}
+		idx = len(m.branches) + agentRow
+	}
+
+	if idx < 0 || idx >= m.detailItems {
+		return m, nil
+	}
+	if idx == m.detCursor && m.focus == colDetail {
+		// Second click on the same detail row: activate it.
+		return m.activateDetailItem()
+	}
+	m.focus = colDetail
+	m.detCursor = idx
+	m.ensureDetVisible()
 	return m, nil
 }
 
