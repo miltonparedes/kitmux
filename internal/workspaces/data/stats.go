@@ -76,6 +76,41 @@ func (s *StatsService) LoadAllCached() (map[string]WorkspaceStats, error) {
 	return out, nil
 }
 
+// LoadCachedByWorktreePath returns cached stats indexed by worktree path
+// (absolute). This powers views that identify a worktree by its working
+// directory — notably the sessions tree, which keys its rows by the tmux
+// session path rather than by the parent workspace.
+func (s *StatsService) LoadCachedByWorktreePath() (map[string]WorktreeStat, error) {
+	all, err := store.LoadAllWorkspaceStats()
+	if err != nil {
+		return nil, err
+	}
+	out := make(map[string]WorktreeStat)
+	for _, rows := range all {
+		for _, r := range rows {
+			if r.WorktreePath == "" {
+				continue
+			}
+			out[r.WorktreePath] = WorktreeStat{
+				Branch:       r.Branch,
+				WorktreePath: r.WorktreePath,
+				Added:        r.Added,
+				Deleted:      r.Deleted,
+				Staged:       r.Staged,
+				Modified:     r.Modified,
+				Untracked:    r.Untracked,
+				Ahead:        r.Ahead,
+				Behind:       r.Behind,
+				IsMain:       r.IsMain,
+				CommitSHA:    r.CommitSHA,
+				CommitTS:     r.CommitTS,
+				UpdatedAt:    r.UpdatedAt,
+			}
+		}
+	}
+	return out, nil
+}
+
 // Refresh runs the live fetch for a workspace, persists the result, and
 // returns it. Concurrent calls for the same workspace join the same flight.
 func (s *StatsService) Refresh(workspacePath string) RefreshResult {

@@ -1,6 +1,7 @@
 package sessions
 
 import (
+	"sync"
 	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
@@ -11,7 +12,7 @@ import (
 	"github.com/miltonparedes/kitmux/internal/cache"
 	"github.com/miltonparedes/kitmux/internal/config"
 	"github.com/miltonparedes/kitmux/internal/tmux"
-	"github.com/miltonparedes/kitmux/internal/worktree"
+	wsdata "github.com/miltonparedes/kitmux/internal/workspaces/data"
 )
 
 // Model is the sessions tree view.
@@ -93,8 +94,6 @@ type cachedSnapshotMsg struct {
 	stats     map[string]sessionStats
 }
 
-const statsTTL = 30 * time.Second
-
 func (m Model) loadSessions() tea.Msg {
 	sessions, err := tmux.ListSessions()
 	if err != nil {
@@ -120,8 +119,13 @@ func (m Model) loadSessionsCached() tea.Cmd {
 		return m.loadSessions
 	}
 
-	var cachedStats map[string]sessionStats
-	if snap.StatsValid() {
+	// Prefer the shared SQLite-backed workspace stats keyed by worktree
+	// path — that cache is kept fresh by both the dashboard and the
+	// background refresh below, and survives restart. Fall back to the
+	// session-name-keyed legacy snapshot only when the shared cache is
+	// empty (first run after upgrade).
+	cachedStats := sharedStatsForSessions(snap.Sessions)
+	if len(cachedStats) == 0 && snap.StatsValid() {
 		cachedStats = make(map[string]sessionStats, len(snap.Stats))
 		for k, v := range snap.Stats {
 			cachedStats[k] = sessionStats{Added: v.Added, Deleted: v.Deleted}
@@ -137,41 +141,95 @@ func (m Model) loadSessionsCached() tea.Cmd {
 	}
 }
 
-// resolveWorktreeStats collects diff stats from `wt list` for each unique repo root.
-func resolveWorktreeStats(sessions []tmux.Session, repoRoots map[string]string) map[string]sessionStats {
-	stats := make(map[string]sessionStats)
-
-	// Collect unique repo roots
-	roots := make(map[string]bool)
-	for _, root := range repoRoots {
-		roots[root] = true
+// sharedStatsForSessions maps each session name to its cached diff stats by
+// looking up the session's working directory in the shared workspace_stats
+// table. Returns a possibly-empty map on any error.
+func sharedStatsForSessions(sessions []tmux.Session) map[string]sessionStats {
+	if len(sessions) == 0 {
+		return nil
 	}
+	byPath, err := sharedStatsService().LoadCachedByWorktreePath()
+	if err != nil || len(byPath) == 0 {
+		return nil
+	}
+	out := make(map[string]sessionStats, len(sessions))
+	for _, s := range sessions {
+		if s.Path == "" {
+			continue
+		}
+		if wt, ok := byPath[s.Path]; ok && (wt.Added > 0 || wt.Deleted > 0) {
+			out[s.Name] = sessionStats{Added: wt.Added, Deleted: wt.Deleted}
+		}
+	}
+	return out
+}
 
-	// Build path→session name lookup
-	pathToName := make(map[string]string)
+// refreshWorktreeStats repopulates the shared workspace_stats cache for
+// every unique repo root backing the current sessions, running `wt list`
+// in parallel (single-flighted per path by the service). The returned map
+// is the per-session diff summary used by the sessions tree.
+func refreshWorktreeStats(sessions []tmux.Session, repoRoots map[string]string) map[string]sessionStats {
+	pathToName := make(map[string]string, len(sessions))
 	for _, s := range sessions {
 		if s.Path != "" {
 			pathToName[s.Path] = s.Name
 		}
 	}
 
-	for root := range roots {
-		wts, err := worktree.ListInDir(root)
-		if err != nil {
-			continue
-		}
-		for _, wt := range wts {
-			name, ok := pathToName[wt.Path]
-			if !ok {
-				continue
-			}
-			d := wt.WorkingTree.Diff
-			if d.Added > 0 || d.Deleted > 0 {
-				stats[name] = sessionStats{Added: d.Added, Deleted: d.Deleted}
-			}
+	uniqueRoots := make(map[string]struct{})
+	for _, root := range repoRoots {
+		if root != "" {
+			uniqueRoots[root] = struct{}{}
 		}
 	}
-	return stats
+	if len(uniqueRoots) == 0 {
+		return nil
+	}
+
+	svc := sharedStatsService()
+	var (
+		mu  sync.Mutex
+		wg  sync.WaitGroup
+		out = make(map[string]sessionStats)
+	)
+	for root := range uniqueRoots {
+		wg.Add(1)
+		go func(root string) {
+			defer wg.Done()
+			res := svc.Refresh(root)
+			if res.Err != nil {
+				return
+			}
+			mu.Lock()
+			defer mu.Unlock()
+			for _, wt := range res.Stats.Worktrees {
+				name, ok := pathToName[wt.WorktreePath]
+				if !ok {
+					continue
+				}
+				if wt.Added > 0 || wt.Deleted > 0 {
+					out[name] = sessionStats{Added: wt.Added, Deleted: wt.Deleted}
+				}
+			}
+		}(root)
+	}
+	wg.Wait()
+	return out
+}
+
+// sharedStatsService returns a process-wide StatsService so sessions and the
+// workspaces dashboard coalesce concurrent `wt list` invocations. Exported
+// hooks (e.g. tests) may override it.
+var (
+	statsSvcOnce sync.Once
+	statsSvc     *wsdata.StatsService
+)
+
+func sharedStatsService() *wsdata.StatsService {
+	statsSvcOnce.Do(func() {
+		statsSvc = wsdata.NewStatsService()
+	})
+	return statsSvc
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
@@ -188,18 +246,22 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 
 	case sessionsLoadedMsg:
 		m.roots = BuildTree(msg.sessions, msg.repoRoots)
+		// Paint the SQLite-backed cache immediately so the tree shows
+		// stats without waiting for the live refresh below.
+		if snapStats := sharedStatsForSessions(msg.sessions); len(snapStats) > 0 {
+			applyStats(m.roots, snapStats)
+		}
 		m.visible = Flatten(m.roots)
 		m.clampCursor()
 		m.justLoaded = true
 		sessions := msg.sessions
 		repoRoots := msg.repoRoots
 		return m, tea.Batch(m.emitCursorChange(), func() tea.Msg {
-			return statsLoadedMsg{stats: resolveWorktreeStats(sessions, repoRoots)}
+			return statsLoadedMsg{stats: refreshWorktreeStats(sessions, repoRoots)}
 		})
 
 	case statsLoadedMsg:
 		applyStats(m.roots, msg.stats)
-		saveStatsToCache(msg.stats)
 		return m, nil
 
 	case projectsLoadedMsg:
@@ -619,16 +681,6 @@ func (m Model) emitCursorChange() tea.Cmd {
 	return func() tea.Msg {
 		return messages.SessionCursorMsg{SessionName: name}
 	}
-}
-
-func saveStatsToCache(stats map[string]sessionStats) {
-	_ = cache.Update(func(snap *cache.Snapshot) {
-		snap.Stats = make(map[string]cache.DiffStat, len(stats))
-		for k, v := range stats {
-			snap.Stats[k] = cache.DiffStat{Added: v.Added, Deleted: v.Deleted}
-		}
-		snap.StatsTTL = time.Now().Add(statsTTL)
-	})
 }
 
 // Reload triggers a session reload from tmux.
