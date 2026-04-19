@@ -182,3 +182,55 @@ func TestHasWorkspacePath_ReflectsCurrentState(t *testing.T) {
 		t.Fatal("expected path to be present after insert")
 	}
 }
+
+func TestArchivedWorktrees_RoundTrip(t *testing.T) {
+	useTempHome(t)
+
+	if err := AddArchivedWorktree("/tmp/ws", "/tmp/ws-feature"); err != nil {
+		t.Fatalf("AddArchivedWorktree: %v", err)
+	}
+	if err := AddArchivedWorktree("/tmp/ws", "/tmp/ws-feature"); err != nil {
+		t.Fatalf("AddArchivedWorktree duplicate: %v", err)
+	}
+
+	all, err := LoadArchivedWorktrees()
+	if err != nil {
+		t.Fatalf("LoadArchivedWorktrees: %v", err)
+	}
+	if all["/tmp/ws"] == nil || !all["/tmp/ws"]["/tmp/ws-feature"] {
+		t.Fatalf("expected archived worktree in map, got %+v", all)
+	}
+
+	if err := RemoveArchivedWorktree("/tmp/ws", "/tmp/ws-feature"); err != nil {
+		t.Fatalf("RemoveArchivedWorktree: %v", err)
+	}
+	all, err = LoadArchivedWorktrees()
+	if err != nil {
+		t.Fatalf("LoadArchivedWorktrees after remove: %v", err)
+	}
+	if all["/tmp/ws"] != nil && all["/tmp/ws"]["/tmp/ws-feature"] {
+		t.Fatalf("expected worktree removed from archive map, got %+v", all)
+	}
+}
+
+func TestPurgeArchivedWorktreesForWorkspace(t *testing.T) {
+	useTempHome(t)
+
+	_ = AddArchivedWorktree("/tmp/ws-a", "/tmp/ws-a-f1")
+	_ = AddArchivedWorktree("/tmp/ws-a", "/tmp/ws-a-f2")
+	_ = AddArchivedWorktree("/tmp/ws-b", "/tmp/ws-b-f1")
+
+	if err := PurgeArchivedWorktreesForWorkspace("/tmp/ws-a"); err != nil {
+		t.Fatalf("PurgeArchivedWorktreesForWorkspace: %v", err)
+	}
+	all, err := LoadArchivedWorktrees()
+	if err != nil {
+		t.Fatalf("LoadArchivedWorktrees: %v", err)
+	}
+	if len(all["/tmp/ws-a"]) > 0 {
+		t.Fatalf("expected ws-a archived items purged, got %+v", all["/tmp/ws-a"])
+	}
+	if all["/tmp/ws-b"] == nil || !all["/tmp/ws-b"]["/tmp/ws-b-f1"] {
+		t.Fatalf("expected ws-b archive untouched, got %+v", all)
+	}
+}

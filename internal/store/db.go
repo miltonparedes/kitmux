@@ -21,7 +21,7 @@ type migration func(tx *sql.Tx) error
 
 // migrations is the ordered list of schema migrations.
 // The schema version equals len(migrations) — adding a new entry auto-bumps it.
-var migrations = []migration{migrateV1, migrateV2, migrateV3, migrateV4}
+var migrations = []migration{migrateV1, migrateV2, migrateV3, migrateV4, migrateV5}
 
 func schemaVersion() int { return len(migrations) }
 
@@ -197,6 +197,24 @@ func migrateV4(tx *sql.Tx) error {
 	for _, stmt := range stmts {
 		if _, err := tx.Exec(stmt); err != nil {
 			return fmt.Errorf("v4: %w", err)
+		}
+	}
+	return nil
+}
+
+func migrateV5(tx *sql.Tx) error {
+	stmts := []string{
+		`CREATE TABLE archived_worktrees (
+			workspace_path TEXT NOT NULL,
+			worktree_path TEXT NOT NULL,
+			archived_at INTEGER NOT NULL,
+			PRIMARY KEY (workspace_path, worktree_path)
+		);`,
+		`CREATE INDEX idx_archived_worktrees_workspace ON archived_worktrees(workspace_path);`,
+	}
+	for _, stmt := range stmts {
+		if _, err := tx.Exec(stmt); err != nil {
+			return fmt.Errorf("v5: %w", err)
 		}
 	}
 	return nil

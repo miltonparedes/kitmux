@@ -43,6 +43,9 @@ func (m *Model) buildBranches(wsEntry workspaceEntry) []branchEntry {
 		if root != wsEntry.Path {
 			continue
 		}
+		if m.archived != nil && m.archived[wsEntry.Path] != nil && m.archived[wsEntry.Path][s.Path] {
+			continue
+		}
 		childName := trimPrefix(s.Name, wsEntry.Name)
 		if s.Path == wsEntry.Path {
 			if branch := resolveGitBranch(s.Path); branch != "" {
@@ -94,6 +97,9 @@ func (m *Model) buildBranches(wsEntry workspaceEntry) []branchEntry {
 	var inactive []branchEntry
 	for _, wt := range m.wtByPath[wsEntry.Path] {
 		if sessionPaths[wt.Path] {
+			continue
+		}
+		if m.archived != nil && m.archived[wsEntry.Path] != nil && m.archived[wsEntry.Path][wt.Path] {
 			continue
 		}
 		entry := branchEntry{

@@ -29,6 +29,7 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.repoRoots = msg.repoRoots
 		m.wtByPath = msg.wtByPath
 		m.panes = msg.panes
+		m.archived = msg.archived
 		m.clampWorkspaceCursor()
 
 		// Seed from the persistent cache so the UI renders stats instantly.
@@ -95,6 +96,10 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch m.mode {
 		case modeConfirm:
 			return m.handleConfirm(msg)
+		case modeActionPicker:
+			return m.handleActionPicker(msg)
+		case modeHelp:
+			return m.handleHelp(msg)
 		case modeFiltering:
 			return m.handleFilter(msg)
 		case modeWorkspaceSearch:
@@ -377,37 +382,11 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "A":
 		return m.startAgentAttach(agentTargetSplit)
 
+	case "x":
+		return m.openActionPicker()
+
 	case "d":
-		if len(m.workspaces) == 0 {
-			return m, nil
-		}
-		if m.focus == colWorkspaces {
-			p := m.workspaces[m.wsCursor]
-			m.confirmAction = confirmActionRemoveWorkspace
-			m.confirmName = p.Name
-			m.confirmPath = p.Path
-			m.confirmBranch = ""
-			m.confirmWPath = ""
-			m.mode = modeConfirm
-			return m, nil
-		}
-		if m.detCursor >= 0 && m.detCursor < len(m.branches) {
-			br := m.branches[m.detCursor]
-			if br.IsMain || isMainBranch(br.Name) {
-				return m, m.pushToast("cannot remove main worktree", toastWarn)
-			}
-			if br.IsSession {
-				return m, m.pushToast("close session first to remove this worktree", toastWarn)
-			}
-			proj := m.workspaces[m.wsCursor]
-			m.confirmAction = confirmActionRemoveWorktree
-			m.confirmName = proj.Name
-			m.confirmPath = proj.Path
-			m.confirmBranch = br.Name
-			m.confirmWPath = br.Path
-			m.mode = modeConfirm
-		}
-		return m, nil
+		return m.openActionPicker()
 
 	case "c":
 		if len(m.workspaces) > 0 {
@@ -427,6 +406,10 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 		}
 		return m, loadDataCmd(m.stats_svc)
+
+	case "?":
+		m.mode = modeHelp
+		return m, nil
 
 	case "q", "esc":
 		if m.focus == colDetail {
@@ -709,6 +692,7 @@ func (m Model) handleConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if m.stats_svc != nil {
 				_ = m.stats_svc.Invalidate(m.confirmPath)
 			}
+			_ = wsreg.PurgeArchivedWorktreesForWorkspace(m.confirmPath)
 			m.confirmAction = confirmActionNone
 			m.confirmName = ""
 			m.confirmPath = ""
@@ -724,7 +708,7 @@ func (m Model) handleConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.confirmPath = ""
 			m.confirmBranch = ""
 			m.confirmWPath = ""
-			return m, m.removeWorktree(workspacePath, path, branch)
+			return m, m.deleteWorktree(workspacePath, path, branch)
 		}
 		return m, nil
 	default:
@@ -738,7 +722,7 @@ func (m Model) handleConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	}
 }
 
-func (m Model) removeWorktree(workspacePath, worktreePath, branch string) tea.Cmd {
+func (m Model) deleteWorktree(workspacePath, worktreePath, branch string) tea.Cmd {
 	svc := m.stats_svc
 	return func() tea.Msg {
 		if branch == "" {
@@ -747,13 +731,138 @@ func (m Model) removeWorktree(workspacePath, worktreePath, branch string) tea.Cm
 		if worktreePath == "" {
 			return toastMsg{text: "missing worktree path", level: toastWarn}
 		}
+		sessions, _ := tmux.ListSessions()
+		for _, s := range sessions {
+			if s.Path == worktreePath {
+				_ = tmux.KillSession(s.Name)
+			}
+		}
 		if err := worktree.RemoveInDir(workspacePath, branch); err != nil {
 			return toastMsg{text: "wt remove failed: " + err.Error(), level: toastError}
+		}
+		_ = wsreg.RemoveArchivedWorktree(workspacePath, worktreePath)
+		if svc != nil {
+			_ = svc.Invalidate(workspacePath)
+		}
+		return actionDoneMsg{}
+	}
+}
+
+func (m Model) archiveWorktree(workspacePath, worktreePath string) tea.Cmd {
+	svc := m.stats_svc
+	return func() tea.Msg {
+		if workspacePath == "" || worktreePath == "" {
+			return toastMsg{text: "missing worktree path", level: toastWarn}
+		}
+		if !wsreg.AddArchivedWorktree(workspacePath, worktreePath) {
+			return toastMsg{text: "archive failed", level: toastError}
 		}
 		if svc != nil {
 			_ = svc.Invalidate(workspacePath)
 		}
 		return actionDoneMsg{}
+	}
+}
+
+func (m Model) openActionPicker() (tea.Model, tea.Cmd) {
+	if len(m.workspaces) == 0 {
+		return m, nil
+	}
+	items := []actionMenuItem{}
+	if m.focus == colWorkspaces {
+		items = append(items, actionMenuItem{Label: "Remove workspace from list", Kind: actionKindRemoveWorkspace})
+	} else if m.detCursor >= 0 && m.detCursor < len(m.branches) {
+		br := m.branches[m.detCursor]
+		if !br.IsMain && !isMainBranch(br.Name) {
+			items = append(items,
+				actionMenuItem{Label: "Archive worktree (hide from view)", Kind: actionKindArchiveWorktree},
+				actionMenuItem{Label: "Delete worktree permanently", Kind: actionKindDeleteWorktree},
+			)
+		}
+	}
+	if len(items) == 0 {
+		return m, m.pushToast("no actions available for this selection", toastInfo)
+	}
+	m.actionItems = items
+	m.actionCursor = 0
+	m.mode = modeActionPicker
+	return m, nil
+}
+
+func (m Model) handleActionPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q":
+		m.mode = modeNormal
+		m.actionItems = nil
+		m.actionCursor = 0
+		return m, nil
+	case "j", "down":
+		if m.actionCursor < len(m.actionItems)-1 {
+			m.actionCursor++
+		}
+		return m, nil
+	case "k", "up":
+		if m.actionCursor > 0 {
+			m.actionCursor--
+		}
+		return m, nil
+	case keyEnter:
+		if m.actionCursor < 0 || m.actionCursor >= len(m.actionItems) || len(m.workspaces) == 0 {
+			return m, nil
+		}
+		selected := m.actionItems[m.actionCursor]
+		m.mode = modeNormal
+		m.actionItems = nil
+		m.actionCursor = 0
+
+		switch selected.Kind {
+		case actionKindRemoveWorkspace:
+			p := m.workspaces[m.wsCursor]
+			m.confirmAction = confirmActionRemoveWorkspace
+			m.confirmName = p.Name
+			m.confirmPath = p.Path
+			m.confirmBranch = ""
+			m.confirmWPath = ""
+			m.mode = modeConfirm
+			return m, nil
+		case actionKindArchiveWorktree:
+			if m.detCursor < 0 || m.detCursor >= len(m.branches) {
+				return m, nil
+			}
+			br := m.branches[m.detCursor]
+			if br.Path == "" {
+				return m, m.pushToast("missing worktree path", toastWarn)
+			}
+			p := m.workspaces[m.wsCursor]
+			return m, m.archiveWorktree(p.Path, br.Path)
+		case actionKindDeleteWorktree:
+			if m.detCursor < 0 || m.detCursor >= len(m.branches) {
+				return m, nil
+			}
+			br := m.branches[m.detCursor]
+			if br.Path == "" {
+				return m, m.pushToast("missing worktree path", toastWarn)
+			}
+			p := m.workspaces[m.wsCursor]
+			m.confirmAction = confirmActionRemoveWorktree
+			m.confirmName = p.Name
+			m.confirmPath = p.Path
+			m.confirmBranch = br.Name
+			m.confirmWPath = br.Path
+			m.mode = modeConfirm
+			return m, nil
+		}
+	}
+	return m, nil
+}
+
+func (m Model) handleHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc", "q", "?":
+		m.mode = modeNormal
+		return m, nil
+	default:
+		return m, nil
 	}
 }
 

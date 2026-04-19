@@ -18,6 +18,10 @@ func (m Model) View() string {
 	switch m.mode {
 	case modeWorkspaceSearch:
 		return m.viewProjectSearch()
+	case modeActionPicker:
+		return m.viewActionPicker()
+	case modeHelp:
+		return m.viewHelp()
 	case modeAgentPicker, modeNewBranchAgent:
 		return m.viewAgentPicker()
 	case modeAgentAttachChoice:
@@ -424,9 +428,9 @@ func (m Model) footer() string {
 		return theme.HelpStyle.Render(" ⏎ select branch  j/k nav  esc back")
 	}
 	if m.focus == colDetail {
-		return theme.HelpStyle.Render(" h back  j/k nav  ⏎ open  c new worktree  d remove  a agent  A split  / filter")
+		return theme.HelpStyle.Render(" x actions  ? help")
 	}
-	return theme.HelpStyle.Render(" l/⏎ open  j/k nav  n add  c new worktree  f find  d remove  a agent  / filter  r refresh  q quit")
+	return theme.HelpStyle.Render(" x actions  ? help")
 }
 
 func (m Model) renderToast() string {
@@ -674,6 +678,79 @@ func (m Model) viewAttachBranchPicker() string {
 	b.WriteString(footerSep)
 	b.WriteString("\n")
 	b.WriteString(theme.HelpStyle.Render(" ⏎ select branch  j/k nav  esc back"))
+	return b.String()
+}
+
+func (m Model) viewActionPicker() string {
+	var b strings.Builder
+	innerW := m.innerWidth()
+	b.WriteString(" " + theme.TreeGroupHeader.Render("Actions"))
+	b.WriteString("\n")
+	mainSep := " " + theme.TreeConnector.Render(strings.Repeat("─", innerW))
+	itemSep := " " + theme.TreeMeta.Render(strings.Repeat("─", innerW))
+	b.WriteString(mainSep)
+	b.WriteString("\n")
+
+	avail := m.height - 4
+	if avail < 1 {
+		avail = 1
+	}
+	used := 0
+	for i, it := range m.actionItems {
+		selected := i == m.actionCursor
+		if selected {
+			b.WriteString(" " + theme.PaletteItemSelected.Render("▸") + " " + theme.TreeNodeSelected.Render(it.Label))
+		} else {
+			b.WriteString("   " + theme.TreeNodeNormal.Render(it.Label))
+		}
+		b.WriteString("\n")
+		used++
+		if i < len(m.actionItems)-1 && used < avail-1 {
+			b.WriteString(itemSep)
+			b.WriteString("\n")
+			used++
+		}
+	}
+
+	padTo(&b, used, avail)
+	footerSep := " " + theme.TreeConnector.Render(strings.Repeat("─", innerW))
+	b.WriteString(footerSep)
+	b.WriteString("\n")
+	b.WriteString(theme.HelpStyle.Render(" ⏎ choose  j/k nav  esc back"))
+	return b.String()
+}
+
+func (m Model) viewHelp() string {
+	var b strings.Builder
+	innerW := m.innerWidth()
+
+	b.WriteString(" " + theme.TreeGroupHeader.Render("Workspaces shortcuts"))
+	b.WriteString("\n")
+	mainSep := " " + theme.TreeConnector.Render(strings.Repeat("─", innerW))
+	b.WriteString(mainSep)
+	b.WriteString("\n")
+
+	lines := []string{
+		"j/k or ↑/↓  move",
+		"l/enter      open detail",
+		"h/esc        back",
+		"c            new worktree",
+		"x            actions (archive/delete/remove workspace)",
+		"a / A        launch agent (window/split)",
+		"/            filter workspaces",
+		"n / f        add/find workspace",
+		"r            refresh",
+		"?            this help",
+	}
+	for _, line := range lines {
+		b.WriteString(" " + theme.TreeNodeNormal.Render(line))
+		b.WriteString("\n")
+	}
+
+	footerSep := " " + theme.TreeConnector.Render(strings.Repeat("─", innerW))
+	b.WriteString(footerSep)
+	b.WriteString("\n")
+	b.WriteString(theme.HelpStyle.Render(" ?/esc/q close"))
 	return b.String()
 }
 

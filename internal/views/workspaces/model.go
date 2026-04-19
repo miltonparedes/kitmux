@@ -44,6 +44,8 @@ type Model struct {
 
 	// Cached workspace-level stats keyed by workspace path.
 	wsStats map[string]wsdata.WorkspaceStats
+	// Archived worktrees hidden from the detail view.
+	archived map[string]map[string]bool
 
 	// All panes for agent detection
 	panes []tmux.Pane
@@ -84,6 +86,10 @@ type Model struct {
 	confirmPath   string
 	confirmBranch string
 	confirmWPath  string
+
+	// Action picker (? / x)
+	actionItems  []actionMenuItem
+	actionCursor int
 
 	// Transient status line (errors, hints).
 	toast    string
@@ -183,7 +189,7 @@ func (m Model) IsEditing() bool {
 	case modeFiltering, modeWorkspaceSearch,
 		modeNewBranch, modeNewBranchAgent,
 		modeAgentAttachChoice, modeAttachBranchPicker,
-		modeConfirm, modeAgentPicker:
+		modeConfirm, modeAgentPicker, modeActionPicker, modeHelp:
 		return true
 	default:
 		return false

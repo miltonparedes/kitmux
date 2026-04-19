@@ -59,6 +59,41 @@ func HasPath(path string) bool {
 	return err == nil && hasPath
 }
 
+func AddArchivedWorktree(workspacePath, worktreePath string) bool {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+
+	err := store.AddArchivedWorktree(workspacePath, worktreePath)
+	return err == nil
+}
+
+func RemoveArchivedWorktree(workspacePath, worktreePath string) bool {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+
+	err := store.RemoveArchivedWorktree(workspacePath, worktreePath)
+	return err == nil
+}
+
+func LoadArchivedWorktrees() map[string]map[string]bool {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+
+	archived, err := store.LoadArchivedWorktrees()
+	if err != nil {
+		return nil
+	}
+	return archived
+}
+
+func PurgeArchivedWorktreesForWorkspace(workspacePath string) bool {
+	registryMu.Lock()
+	defer registryMu.Unlock()
+
+	err := store.PurgeArchivedWorktreesForWorkspace(workspacePath)
+	return err == nil
+}
+
 // SortWorkspaces sorts active workspaces first (by activity desc), then inactive alphabetically.
 func SortWorkspaces(workspaces []Workspace, activePaths map[string]int64) {
 	sort.SliceStable(workspaces, func(i, j int) bool {

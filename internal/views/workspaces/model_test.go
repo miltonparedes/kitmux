@@ -509,14 +509,11 @@ func TestDEntersConfirmMode(t *testing.T) {
 	m := newSeededModel()
 	updated, _ := m.Update(keyMsg("d"))
 	m = updated.(Model)
-	if m.mode != modeConfirm {
-		t.Errorf("expected modeConfirm, got %d", m.mode)
+	if m.mode != modeActionPicker {
+		t.Errorf("expected modeActionPicker, got %d", m.mode)
 	}
-	if m.confirmAction != confirmActionRemoveWorkspace {
-		t.Errorf("expected workspace confirm action, got %d", m.confirmAction)
-	}
-	if m.confirmName != "kitmux" {
-		t.Errorf("expected confirm name 'kitmux', got %q", m.confirmName)
+	if len(m.actionItems) == 0 {
+		t.Fatal("expected at least one action item")
 	}
 }
 
@@ -524,13 +521,10 @@ func TestConfirmNoCancels(t *testing.T) {
 	m := newSeededModel()
 	updated, _ := m.Update(keyMsg("d"))
 	m = updated.(Model)
-	updated, _ = m.Update(keyMsg("n"))
+	updated, _ = m.Update(keyMsg("esc"))
 	m = updated.(Model)
 	if m.mode != modeNormal {
 		t.Errorf("expected modeNormal after cancel, got %d", m.mode)
-	}
-	if m.confirmAction != confirmActionNone {
-		t.Errorf("expected confirmActionNone after cancel, got %d", m.confirmAction)
 	}
 }
 
@@ -555,11 +549,18 @@ func TestConfirmYesRemoves(t *testing.T) {
 
 	updated, _ := m.Update(keyMsg("d"))
 	m = updated.(Model)
-	updated, cmd := m.Update(keyMsg("y"))
+	updated, _ = m.Update(keyMsg("enter"))
+	m = updated.(Model)
+
+	if m.mode != modeConfirm {
+		t.Errorf("expected modeConfirm after choosing action, got %d", m.mode)
+	}
+	var cmd tea.Cmd
+	updated, cmd = m.Update(keyMsg("y"))
 	m = updated.(Model)
 
 	if m.mode != modeNormal {
-		t.Errorf("expected modeNormal after confirm, got %d", m.mode)
+		t.Errorf("expected modeNormal after final confirm, got %d", m.mode)
 	}
 	if cmd == nil {
 		t.Error("expected reload command after confirm delete")
@@ -853,15 +854,18 @@ func TestViewColumns_ActiveProjectShowsBadge(t *testing.T) {
 func TestViewColumns_FooterChangesWithFocus(t *testing.T) {
 	m := newSeededModel()
 	output1 := m.View()
-	if !strings.Contains(output1, "n add") {
-		t.Error("expected project-focused footer hints")
+	if !strings.Contains(output1, "x actions") {
+		t.Error("expected compact footer with actions hint")
+	}
+	if strings.Contains(output1, "n add") {
+		t.Error("expected compact footer without long shortcut list")
 	}
 
 	updated, _ := m.Update(keyMsg("l"))
 	m = updated.(Model)
 	output2 := m.View()
-	if !strings.Contains(output2, "h back") {
-		t.Error("expected detail-focused footer hints")
+	if !strings.Contains(output2, "x actions") {
+		t.Error("expected compact footer with actions hint on detail")
 	}
 }
 
@@ -898,6 +902,8 @@ func TestViewConfirmMode_ShowsPrompt(t *testing.T) {
 	m := newSeededModel()
 	updated, _ := m.Update(keyMsg("d"))
 	m = updated.(Model)
+	updated, _ = m.Update(keyMsg("enter"))
+	m = updated.(Model)
 	output := m.View()
 	if !strings.Contains(output, "remove 'kitmux'?") {
 		t.Error("expected confirm prompt in footer")
@@ -923,11 +929,18 @@ func TestDOnDetailInactiveWorktreeAsksRemoveWorktree(t *testing.T) {
 
 	updated, _ = m.Update(keyMsg("d"))
 	m = updated.(Model)
-	if m.mode != modeConfirm {
-		t.Fatalf("expected modeConfirm, got %d", m.mode)
+	if m.mode != modeActionPicker {
+		t.Fatalf("expected modeActionPicker, got %d", m.mode)
 	}
-	if m.confirmAction != confirmActionRemoveWorktree {
-		t.Fatalf("expected confirmActionRemoveWorktree, got %d", m.confirmAction)
+	if len(m.actionItems) < 2 {
+		t.Fatalf("expected archive/delete actions, got %+v", m.actionItems)
+	}
+	updated, _ = m.Update(keyMsg("j"))
+	m = updated.(Model)
+	updated, _ = m.Update(keyMsg("enter"))
+	m = updated.(Model)
+	if m.mode != modeConfirm {
+		t.Fatalf("expected modeConfirm after selecting delete, got %d", m.mode)
 	}
 	if m.confirmBranch != "experiment" {
 		t.Fatalf("expected confirm branch experiment, got %q", m.confirmBranch)
@@ -938,7 +951,41 @@ func TestDOnDetailInactiveWorktreeAsksRemoveWorktree(t *testing.T) {
 	}
 }
 
-func TestDOnDetailSessionShowsToast(t *testing.T) {
+func TestActionPickerArchiveSelectionReturnsReloadCmd(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	m := newSeededModel()
+	updated, _ := m.Update(keyMsg("l"))
+	m = updated.(Model)
+
+	found := -1
+	for i, br := range m.branches {
+		if !br.IsSession && br.Name == "experiment" {
+			found = i
+			break
+		}
+	}
+	if found < 0 {
+		t.Fatal("expected inactive 'experiment' worktree in detail")
+	}
+	m.detCursor = found
+
+	updated, _ = m.Update(keyMsg("d"))
+	m = updated.(Model)
+	if m.mode != modeActionPicker {
+		t.Fatalf("expected modeActionPicker, got %d", m.mode)
+	}
+	if len(m.actionItems) == 0 {
+		t.Fatal("expected actions")
+	}
+	updated, cmd := m.Update(keyMsg("enter")) // first action: archive
+	_ = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected command for archive action")
+	}
+}
+
+func TestDOnDetailSessionOpensActionPicker(t *testing.T) {
 	m := newSeededModel()
 	updated, _ := m.Update(keyMsg("l"))
 	m = updated.(Model)
@@ -948,15 +995,15 @@ func TestDOnDetailSessionShowsToast(t *testing.T) {
 
 	updated, _ = m.Update(keyMsg("d"))
 	m = updated.(Model)
-	if m.mode != modeNormal {
-		t.Fatalf("expected modeNormal when trying to remove active session branch, got %d", m.mode)
+	if m.mode != modeActionPicker {
+		t.Fatalf("expected modeActionPicker on active session branch, got %d", m.mode)
 	}
-	if !strings.Contains(m.toast, "close session first") {
-		t.Fatalf("expected close-session toast, got %q", m.toast)
+	if len(m.actionItems) < 2 {
+		t.Fatalf("expected archive/delete actions, got %+v", m.actionItems)
 	}
 }
 
-func TestDOnDetailMainWorktreeShowsToast(t *testing.T) {
+func TestDOnDetailMainWorktreeNoActions(t *testing.T) {
 	m := newSeededModel()
 	updated, _ := m.Update(keyMsg("l"))
 	m = updated.(Model)
@@ -965,10 +1012,10 @@ func TestDOnDetailMainWorktreeShowsToast(t *testing.T) {
 	updated, _ = m.Update(keyMsg("d"))
 	m = updated.(Model)
 	if m.mode != modeNormal {
-		t.Fatalf("expected modeNormal when trying to remove main worktree, got %d", m.mode)
+		t.Fatalf("expected modeNormal when opening actions on main branch, got %d", m.mode)
 	}
-	if !strings.Contains(m.toast, "cannot remove main worktree") {
-		t.Fatalf("expected main-worktree toast, got %q", m.toast)
+	if !strings.Contains(m.toast, "no actions available") {
+		t.Fatalf("expected no-actions toast, got %q", m.toast)
 	}
 }
 
@@ -977,8 +1024,35 @@ func TestDetailFooterIncludesRemoveHint(t *testing.T) {
 	updated, _ := m.Update(keyMsg("l"))
 	m = updated.(Model)
 	out := m.View()
-	if !strings.Contains(out, "d remove") {
-		t.Fatalf("expected detail footer to include d remove, got %q", out)
+	if !strings.Contains(out, "x actions") {
+		t.Fatalf("expected detail footer to include x actions, got %q", out)
+	}
+}
+
+func TestHelpModeOpensWithQuestionMark(t *testing.T) {
+	m := newSeededModel()
+	updated, _ := m.Update(keyMsg("?"))
+	m = updated.(Model)
+	if m.mode != modeHelp {
+		t.Fatalf("expected modeHelp, got %d", m.mode)
+	}
+	out := m.View()
+	if !strings.Contains(out, "Workspaces shortcuts") {
+		t.Fatalf("expected help title, got %q", out)
+	}
+	if !strings.Contains(out, "x            actions") {
+		t.Fatalf("expected actions shortcut in help, got %q", out)
+	}
+}
+
+func TestHelpModeEscCloses(t *testing.T) {
+	m := newSeededModel()
+	updated, _ := m.Update(keyMsg("?"))
+	m = updated.(Model)
+	updated, _ = m.Update(keyMsg("esc"))
+	m = updated.(Model)
+	if m.mode != modeNormal {
+		t.Fatalf("expected modeNormal after esc from help, got %d", m.mode)
 	}
 }
 

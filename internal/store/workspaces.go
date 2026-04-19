@@ -151,6 +151,70 @@ func HasWorkspacePath(path string) (bool, error) {
 	return exists == 1, nil
 }
 
+func AddArchivedWorktree(workspacePath, worktreePath string) error {
+	db, err := open()
+	if err != nil {
+		return err
+	}
+	if _, err := db.Exec(`INSERT OR IGNORE INTO archived_worktrees(workspace_path, worktree_path, archived_at) VALUES(?, ?, ?)`,
+		workspacePath, worktreePath, time.Now().UnixNano()); err != nil {
+		return fmt.Errorf("archive worktree %q/%q: %w", workspacePath, worktreePath, err)
+	}
+	return nil
+}
+
+func RemoveArchivedWorktree(workspacePath, worktreePath string) error {
+	db, err := open()
+	if err != nil {
+		return err
+	}
+	if _, err := db.Exec(`DELETE FROM archived_worktrees WHERE workspace_path = ? AND worktree_path = ?`,
+		workspacePath, worktreePath); err != nil {
+		return fmt.Errorf("remove archived worktree %q/%q: %w", workspacePath, worktreePath, err)
+	}
+	return nil
+}
+
+func LoadArchivedWorktrees() (map[string]map[string]bool, error) {
+	db, err := open()
+	if err != nil {
+		return nil, err
+	}
+	rows, err := db.Query(`SELECT workspace_path, worktree_path FROM archived_worktrees`)
+	if err != nil {
+		return nil, fmt.Errorf("query archived worktrees: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+
+	out := map[string]map[string]bool{}
+	for rows.Next() {
+		var workspacePath string
+		var worktreePath string
+		if err := rows.Scan(&workspacePath, &worktreePath); err != nil {
+			return nil, fmt.Errorf("scan archived worktree: %w", err)
+		}
+		if out[workspacePath] == nil {
+			out[workspacePath] = map[string]bool{}
+		}
+		out[workspacePath][worktreePath] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate archived worktrees: %w", err)
+	}
+	return out, nil
+}
+
+func PurgeArchivedWorktreesForWorkspace(workspacePath string) error {
+	db, err := open()
+	if err != nil {
+		return err
+	}
+	if _, err := db.Exec(`DELETE FROM archived_worktrees WHERE workspace_path = ?`, workspacePath); err != nil {
+		return fmt.Errorf("purge archived worktrees %q: %w", workspacePath, err)
+	}
+	return nil
+}
+
 func importLegacyWorkspaces(db *sql.DB) error {
 	empty, err := tableEmpty(db, tableWorkspaces)
 	if err != nil || !empty {

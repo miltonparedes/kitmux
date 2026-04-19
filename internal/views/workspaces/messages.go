@@ -27,6 +27,8 @@ const (
 	modeAttachBranchPicker
 	modeConfirm
 	modeAgentPicker
+	modeActionPicker
+	modeHelp
 )
 
 type confirmAction int
@@ -36,6 +38,19 @@ const (
 	confirmActionRemoveWorkspace
 	confirmActionRemoveWorktree
 )
+
+type actionKind int
+
+const (
+	actionKindRemoveWorkspace actionKind = iota
+	actionKindArchiveWorktree
+	actionKindDeleteWorktree
+)
+
+type actionMenuItem struct {
+	Label string
+	Kind  actionKind
+}
 
 // agentTarget describes where the agent process should land within the
 // target tmux session.
@@ -114,6 +129,7 @@ type dataLoadedMsg struct {
 	repoRoots  map[string]string
 	wtByPath   map[string][]worktree.Worktree
 	panes      []tmux.Pane
+	archived   map[string]map[string]bool
 }
 
 // statsLoadedMsg is dispatched when live worktree stats arrive from StatsService.

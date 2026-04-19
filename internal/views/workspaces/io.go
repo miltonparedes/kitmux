@@ -61,6 +61,7 @@ func loadInitialSnapshot(svc *wsdata.StatsService) tea.Msg {
 			Activity: act,
 		}
 	}
+	archived := wsreg.LoadArchivedWorktrees()
 
 	return dataLoadedMsg{
 		workspaces: entries,
@@ -68,6 +69,7 @@ func loadInitialSnapshot(svc *wsdata.StatsService) tea.Msg {
 		repoRoots:  repoRoots,
 		wtByPath:   wtByPath,
 		panes:      panes,
+		archived:   archived,
 	}
 }
 
