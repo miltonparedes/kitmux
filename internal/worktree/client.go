@@ -41,5 +41,15 @@ func Create(branch string) error {
 
 // Remove removes a worktree branch.
 func Remove(branch string) error {
-	return exec.Command("wt", "remove", branch).Run()
+	return RemoveInDir("", branch)
+}
+
+// RemoveInDir removes a worktree branch from the repo rooted at dir.
+// If dir is empty, it uses the current working directory.
+func RemoveInDir(dir, branch string) error {
+	cmd := exec.Command("wt", "remove", branch)
+	if dir != "" {
+		cmd.Dir = dir
+	}
+	return cmd.Run()
 }

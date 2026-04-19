@@ -1,6 +1,7 @@
 package cache
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"testing"
@@ -53,29 +54,45 @@ func TestLoad_MissingFile(t *testing.T) {
 	}
 }
 
-func TestLoad_InvalidJSON(t *testing.T) {
+func TestLoad_ImportsLegacyJSON(t *testing.T) {
 	dir := t.TempDir()
 	t.Setenv("HOME", dir)
 
 	p := filepath.Join(dir, cacheDir, cacheFile)
-	_ = os.MkdirAll(filepath.Dir(p), 0o700)
-	_ = os.WriteFile(p, []byte("not json"), 0o600)
-
-	if snap := Load(); snap != nil {
-		t.Errorf("expected nil for invalid JSON, got %+v", snap)
+	if err := os.MkdirAll(filepath.Dir(p), 0o700); err != nil {
+		t.Fatalf("mkdir legacy cache dir: %v", err)
 	}
-}
+	data, err := json.Marshal(&Snapshot{
+		Version:              version,
+		UpdatedAt:            time.Unix(100, 0),
+		Sessions:             []tmux.Session{{Name: "kitmux-main", Windows: 2, Path: "/tmp/kitmux", Activity: 123}},
+		RepoRoots:            map[string]string{"kitmux-main": "/tmp/kitmux"},
+		RepoRootsRefreshedAt: time.Unix(200, 0),
+		Stats:                map[string]DiffStat{"kitmux-main": {Added: 3, Deleted: 1}},
+		StatsTTL:             time.Unix(300, 0),
+	})
+	if err != nil {
+		t.Fatalf("marshal legacy cache: %v", err)
+	}
+	if err := os.WriteFile(p, data, 0o600); err != nil {
+		t.Fatalf("write legacy cache: %v", err)
+	}
 
-func TestLoad_WrongVersion(t *testing.T) {
-	dir := t.TempDir()
-	t.Setenv("HOME", dir)
+	snap := Load()
+	if snap == nil {
+		t.Fatal("expected imported snapshot, got nil")
+	}
+	if len(snap.Sessions) != 1 || snap.Sessions[0].Name != "kitmux-main" {
+		t.Fatalf("unexpected imported sessions: %+v", snap.Sessions)
+	}
 
-	p := filepath.Join(dir, cacheDir, cacheFile)
-	_ = os.MkdirAll(filepath.Dir(p), 0o700)
-	_ = os.WriteFile(p, []byte(`{"version":999}`), 0o600)
+	if err := os.Remove(p); err != nil {
+		t.Fatalf("remove legacy cache file: %v", err)
+	}
 
-	if snap := Load(); snap != nil {
-		t.Errorf("expected nil for wrong version, got %+v", snap)
+	snap = Load()
+	if snap == nil || snap.RepoRoots["kitmux-main"] != "/tmp/kitmux" {
+		t.Fatalf("expected sqlite-backed snapshot after import, got %+v", snap)
 	}
 }
 

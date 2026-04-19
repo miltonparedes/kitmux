@@ -138,19 +138,19 @@ func (m Model) viewPicker() string {
 	}
 
 	for i := start; i < end; i++ {
-		proj := m.picker.filtered[i]
+		entry := m.picker.filtered[i]
 		selected := i == m.picker.cursor
 
-		score := theme.TreeMeta.Render(fmt.Sprintf("%3.0f", proj.Score))
+		score := theme.TreeMeta.Render(fmt.Sprintf("%3.0f", entry.Score))
 		if selected {
 			fmt.Fprintf(&b, " %s %s %s",
 				theme.PaletteItemSelected.Render("▸"),
 				score,
-				theme.TreeNodeSelected.Render(proj.Short))
+				theme.TreeNodeSelected.Render(entry.Short))
 		} else {
 			fmt.Fprintf(&b, "   %s %s",
 				score,
-				theme.TreeNodeNormal.Render(proj.Short))
+				theme.TreeNodeNormal.Render(entry.Short))
 		}
 		b.WriteString("\n")
 

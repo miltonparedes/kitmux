@@ -107,9 +107,19 @@ func RenameSession(old, newName string) error {
 	return exec.Command("tmux", "rename-session", "-t", old, newName).Run()
 }
 
+// RenameWindow renames a window given a tmux target (e.g. "session:0").
+func RenameWindow(target, newName string) error {
+	return exec.Command("tmux", "rename-window", "-t", target, newName).Run()
+}
+
 // NewSessionInDir creates a detached session with the given name and working directory.
 func NewSessionInDir(name, dir string) error {
 	return exec.Command("tmux", "new-session", "-d", "-s", name, "-c", dir).Run()
+}
+
+// NewSessionDetached creates a detached session with the given name.
+func NewSessionDetached(name string) error {
+	return exec.Command("tmux", "new-session", "-d", "-s", name).Run()
 }
 
 // SendKeys sends keystrokes to a tmux target pane.
@@ -140,6 +150,23 @@ func NewWindowInDir(name, dir, command string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+// NewWindowInSession creates a new window inside an existing session,
+// optionally starting in `dir` and running `command`. It does not make the
+// new window active — callers that want focus should switch-client afterwards.
+func NewWindowInSession(session, name, dir, command string) error {
+	args := []string{"new-window", "-d", "-t", session + ":"}
+	if name != "" {
+		args = append(args, "-n", name)
+	}
+	if dir != "" {
+		args = append(args, "-c", dir)
+	}
+	if command != "" {
+		args = append(args, command)
+	}
+	return exec.Command("tmux", args...).Run()
+}
+
 func SplitWindowInDir(targetPane, dir, command string) (string, error) {
 	args := []string{
 		"split-window", "-h",
@@ -162,6 +189,44 @@ func SplitWindowInDir(targetPane, dir, command string) (string, error) {
 
 func SelectLayout(target, layout string) error {
 	return exec.Command("tmux", "select-layout", "-t", target, layout).Run()
+}
+
+// ListPanes returns all panes across all sessions with their running commands.
+func ListPanes() ([]Pane, error) {
+	out, err := exec.Command("tmux", "list-panes", "-a", "-F",
+		"#{session_name}\t#{window_index}\t#{pane_index}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}").Output()
+	if err != nil {
+		return nil, fmt.Errorf("list-panes: %w", err)
+	}
+	var panes []Pane
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == "" {
+			continue
+		}
+		parts := strings.SplitN(line, "\t", 6)
+		if len(parts) < 4 {
+			continue
+		}
+		winIdx, _ := strconv.Atoi(parts[1])
+		paneIdx, _ := strconv.Atoi(parts[2])
+		var pid int
+		if len(parts) >= 5 {
+			pid, _ = strconv.Atoi(parts[4])
+		}
+		var path string
+		if len(parts) >= 6 {
+			path = parts[5]
+		}
+		panes = append(panes, Pane{
+			SessionName: parts[0],
+			WindowIndex: winIdx,
+			PaneIndex:   paneIdx,
+			Command:     parts[3],
+			PID:         pid,
+			Path:        path,
+		})
+	}
+	return panes, nil
 }
 
 // DisplayPopup opens a tmux popup running the given command.

@@ -50,9 +50,15 @@ func DefaultCommands() []Command {
 			Category:    "Session",
 		},
 		{
-			ID:          "open_project",
-			Title:       "Open Project",
-			Description: "Open a recent project as a new session",
+			ID:          "open_workspace",
+			Title:       "Open Workspace",
+			Description: "Open the workspaces dashboard",
+			Category:    "Session",
+		},
+		{
+			ID:          "add_workspace",
+			Title:       "Add Workspace",
+			Description: "Pick a directory from zoxide and add it as a workspace",
 			Category:    "Session",
 		},
 

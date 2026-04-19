@@ -94,3 +94,9 @@ type OpenLocalEditorMsg struct {
 	Fallback string // non-empty when bridge was unreachable; contains the manual command
 	Err      error  // non-nil on hard failure
 }
+
+// OpenWorkspacesMsg switches to the workspaces dashboard view.
+// When AddMode is true, the dashboard opens with the zoxide add picker active.
+type OpenWorkspacesMsg struct {
+	AddMode bool
+}

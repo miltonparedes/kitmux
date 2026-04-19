@@ -1,3 +1,5 @@
 kitmux
 coverage.out
 dist/
+.factory
+.claude

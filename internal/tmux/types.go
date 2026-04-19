@@ -16,3 +16,13 @@ type Window struct {
 	Name        string
 	Active      bool
 }
+
+// Pane represents a tmux pane with its running command.
+type Pane struct {
+	SessionName string
+	WindowIndex int
+	PaneIndex   int
+	Command     string
+	PID         int
+	Path        string
+}

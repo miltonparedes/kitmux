@@ -1,17 +1,17 @@
 # kitmux
 
-A tmux command palette and session manager built with [Bubble Tea](https://github.com/charmbracelet/bubbletea).
+Think [Raycast](https://www.raycast.com/), but for tmux — a command palette, session manager, worktree navigator, and AI agent launcher that lives inside your terminal.
 
-Every operation is a command that can be triggered from the palette, bound to a tmux key, or run directly from the CLI.
+Fast, lightweight, and built in Go. Every operation is a command you can fuzzy-search from the palette, bind to a tmux key, or fire directly from the CLI.
 
 ## Features
 
 - **Command palette** (`palette`) — fuzzy-search and run any command
 - **Session tree** (`sessions`) — browse, switch, rename, and kill tmux sessions
-- **Project picker** (`projects`) — open zoxide-indexed projects as tmux sessions
+- **Workspace dashboard** (`workspaces`) — browse registered repos, open or switch tmux sessions, inspect worktrees, and hide repos from the dashboard
 - **Window list** (`windows`) — switch windows in the current session
 - **Worktree manager** (`worktrees`) — list, create, switch, and remove git worktrees
-- **Agent launcher** (`agents`) — launch AI coding agents (Claude, Gemini, Codex, etc.)
+- **Agent launcher** (`agents`) — launch AI coding agents from your session directory
 - **A/B agent launch** (`agent_ab`) — launch Codex and Claude side-by-side with a shared prompt
 - **Open in local editor** (`open_local_editor`) — open remote sessions in your local editor via SSH (coming soon)
 - **Direct execution** (`run <id>`) — execute any palette command headlessly
@@ -26,7 +26,7 @@ Views:
   palette  (p)    Command palette
   worktrees (wt)  Worktree manager
   agents   (a)    Agent launcher
-  projects (o)    Open a project
+  workspaces (o)  Workspace dashboard
   windows  (w)    Window list for current session
 
 Execute:
@@ -52,8 +52,8 @@ bind-key p display-popup -E -w 60% -h 80% "kitmux palette"
 # Session tree
 bind-key s display-popup -E -w 40% -h 80% "kitmux sessions"
 
-# Open project
-bind-key o display-popup -E -w 60% -h 80% "kitmux projects"
+# Workspace dashboard
+bind-key o display-popup -E -w 60% -h 80% "kitmux workspaces"
 
 # Window list
 bind-key w display-popup -E -w 40% -h 60% "kitmux windows"
@@ -80,6 +80,15 @@ bind-key g display-popup -E "kitmux tool_lazygit"
 >
 > Popup commands like `kitmux palette` will now run via `/bin/sh -c` (instant),
 > while new panes and windows still start your preferred shell.
+
+## Workspace Dashboard
+
+`workspaces` is the repo-level dashboard for kitmux:
+
+- shows registered repositories and their active tmux sessions
+- lets you add repos from zoxide and open them directly
+- lets you inspect project worktrees before opening or creating a session
+- `d` only hides a workspace from the dashboard; it does not delete branches, worktrees, or other repo state
 
 ## Open in Local Editor (coming soon)
 
@@ -111,22 +120,34 @@ kitmux bridge serve
 
 ## Requirements
 
-**Required:**
-
-- Go 1.25+
+- Go 1.25+ (build only)
 - tmux
 
-**Runtime dependencies (used by specific features):**
+## Recommended Dependencies
 
-| Dependency | Used by | Required? |
-|------------|---------|-----------|
-| [zoxide](https://github.com/ajeetdsouza/zoxide) | `projects` — indexes project directories | Yes, for project picker |
-| [git](https://git-scm.com/) | `sessions`, `projects` — detects repos and worktrees | Yes, for git-aware features |
-| [worktrunk](https://github.com/max-sixty/worktrunk) (`wt`) | `worktrees` — manages git worktrees | Yes, for worktree manager |
-| [lazygit](https://github.com/jesseduffield/lazygit) | `tool_lazygit` palette command | Optional |
-| [claude](https://docs.anthropic.com/en/docs/claude-code) | `agents` — Claude Code | Optional |
-| [gemini](https://github.com/google-gemini/gemini-cli) | `agents` — Gemini CLI | Optional |
-| [codex](https://github.com/openai/codex) | `agents` — Codex CLI | Optional |
+kitmux shells out to external tools for most of its features. Install the ones you plan to use:
+
+**Core — highly recommended for the full experience:**
+
+| Tool | Features it unlocks |
+|------|-------------------|
+| [git](https://git-scm.com/) | Repo detection, branch info, worktree support |
+| [zoxide](https://github.com/ajeetdsouza/zoxide) | Workspace discovery — find and register project directories |
+| [worktrunk](https://github.com/max-sixty/worktrunk) (`wt`) | Worktree management — create, switch, and remove git worktrees |
+
+**AI agents — special support for these coding agents (others work too):**
+
+| Tool | Description |
+|------|-------------|
+| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Anthropic's CLI coding agent |
+| [Codex](https://github.com/openai/codex) | OpenAI's CLI coding agent |
+| [Droid](https://docs.factory.ai/droid/overview) | Factory's CLI coding agent (coming soon) |
+
+**Extras:**
+
+| Tool | What it does |
+|------|-------------|
+| [lazygit](https://github.com/jesseduffield/lazygit) | Git TUI — launched via the `tool_lazygit` palette command |
 
 ## A/B Mode Configuration
 
