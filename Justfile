@@ -38,6 +38,19 @@ install:
 clean:
     rm -f kitmux
 
+# Install git hooks (pre-commit / pre-push) via lefthook
+hooks-install:
+    lefthook install
+
+# Uninstall git hooks
+hooks-uninstall:
+    lefthook uninstall
+
+# Report top-20 most complex functions (non-blocking)
+complexity-report:
+    @command -v gocyclo >/dev/null 2>&1 || go install github.com/fzipp/gocyclo/cmd/gocyclo@latest
+    @gocyclo -top 20 -avg .
+
 # --- Database dev tools ---
 
 db_path := env("HOME") / ".config/kitmux/state.db"
