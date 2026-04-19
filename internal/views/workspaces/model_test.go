@@ -854,18 +854,30 @@ func TestViewColumns_ActiveProjectShowsBadge(t *testing.T) {
 func TestViewColumns_FooterChangesWithFocus(t *testing.T) {
 	m := newSeededModel()
 	output1 := m.View()
-	if !strings.Contains(output1, "x actions") {
-		t.Error("expected compact footer with actions hint")
+	if !strings.Contains(output1, "j/k nav") {
+		t.Error("expected basic navigation hints on projects footer")
 	}
-	if strings.Contains(output1, "n add") {
-		t.Error("expected compact footer without long shortcut list")
+	if !strings.Contains(output1, "n add") {
+		t.Error("expected add shortcut on projects footer")
+	}
+	if !strings.Contains(output1, "x actions") {
+		t.Error("expected actions hint on projects footer")
+	}
+	if !strings.Contains(output1, "? help") {
+		t.Error("expected help hint on projects footer")
 	}
 
 	updated, _ := m.Update(keyMsg("l"))
 	m = updated.(Model)
 	output2 := m.View()
+	if !strings.Contains(output2, "j/k nav") {
+		t.Error("expected basic navigation hints on detail footer")
+	}
+	if !strings.Contains(output2, "c new worktree") {
+		t.Error("expected create shortcut on detail footer")
+	}
 	if !strings.Contains(output2, "x actions") {
-		t.Error("expected compact footer with actions hint on detail")
+		t.Error("expected actions hint on detail footer")
 	}
 }
 

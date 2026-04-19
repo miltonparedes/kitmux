@@ -428,9 +428,9 @@ func (m Model) footer() string {
 		return theme.HelpStyle.Render(" ⏎ select branch  j/k nav  esc back")
 	}
 	if m.focus == colDetail {
-		return theme.HelpStyle.Render(" x actions  ? help")
+		return theme.HelpStyle.Render(" j/k nav  ⏎ open  h back  c new worktree  x actions  ? help")
 	}
-	return theme.HelpStyle.Render(" x actions  ? help")
+	return theme.HelpStyle.Render(" j/k nav  l/⏎ open  c new worktree  n add  x actions  ? help")
 }
 
 func (m Model) renderToast() string {
