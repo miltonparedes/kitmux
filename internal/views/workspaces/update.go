@@ -378,10 +378,33 @@ func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.startAgentAttach(agentTargetSplit)
 
 	case "d":
-		if m.focus == colWorkspaces && len(m.workspaces) > 0 {
+		if len(m.workspaces) == 0 {
+			return m, nil
+		}
+		if m.focus == colWorkspaces {
 			p := m.workspaces[m.wsCursor]
+			m.confirmAction = confirmActionRemoveWorkspace
 			m.confirmName = p.Name
 			m.confirmPath = p.Path
+			m.confirmBranch = ""
+			m.confirmWPath = ""
+			m.mode = modeConfirm
+			return m, nil
+		}
+		if m.detCursor >= 0 && m.detCursor < len(m.branches) {
+			br := m.branches[m.detCursor]
+			if br.IsMain || isMainBranch(br.Name) {
+				return m, m.pushToast("cannot remove main worktree", toastWarn)
+			}
+			if br.IsSession {
+				return m, m.pushToast("close session first to remove this worktree", toastWarn)
+			}
+			proj := m.workspaces[m.wsCursor]
+			m.confirmAction = confirmActionRemoveWorktree
+			m.confirmName = proj.Name
+			m.confirmPath = proj.Path
+			m.confirmBranch = br.Name
+			m.confirmWPath = br.Path
 			m.mode = modeConfirm
 		}
 		return m, nil
@@ -680,14 +703,57 @@ func (m Model) handleConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y":
 		m.mode = modeNormal
-		wsreg.RemoveWorkspace(m.confirmPath)
-		if m.stats_svc != nil {
-			_ = m.stats_svc.Invalidate(m.confirmPath)
+		switch m.confirmAction {
+		case confirmActionRemoveWorkspace:
+			wsreg.RemoveWorkspace(m.confirmPath)
+			if m.stats_svc != nil {
+				_ = m.stats_svc.Invalidate(m.confirmPath)
+			}
+			m.confirmAction = confirmActionNone
+			m.confirmName = ""
+			m.confirmPath = ""
+			m.confirmBranch = ""
+			m.confirmWPath = ""
+			return m, loadDataCmd(m.stats_svc)
+		case confirmActionRemoveWorktree:
+			branch := m.confirmBranch
+			path := m.confirmWPath
+			workspacePath := m.confirmPath
+			m.confirmAction = confirmActionNone
+			m.confirmName = ""
+			m.confirmPath = ""
+			m.confirmBranch = ""
+			m.confirmWPath = ""
+			return m, m.removeWorktree(workspacePath, path, branch)
 		}
-		return m, loadDataCmd(m.stats_svc)
+		return m, nil
 	default:
 		m.mode = modeNormal
+		m.confirmAction = confirmActionNone
+		m.confirmName = ""
+		m.confirmPath = ""
+		m.confirmBranch = ""
+		m.confirmWPath = ""
 		return m, nil
+	}
+}
+
+func (m Model) removeWorktree(workspacePath, worktreePath, branch string) tea.Cmd {
+	svc := m.stats_svc
+	return func() tea.Msg {
+		if branch == "" {
+			return toastMsg{text: "missing worktree branch", level: toastWarn}
+		}
+		if worktreePath == "" {
+			return toastMsg{text: "missing worktree path", level: toastWarn}
+		}
+		if err := worktree.RemoveInDir(workspacePath, branch); err != nil {
+			return toastMsg{text: "wt remove failed: " + err.Error(), level: toastError}
+		}
+		if svc != nil {
+			_ = svc.Invalidate(workspacePath)
+		}
+		return actionDoneMsg{}
 	}
 }
 

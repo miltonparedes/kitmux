@@ -406,7 +406,12 @@ func (m Model) footer() string {
 	}
 	switch m.mode {
 	case modeConfirm:
-		return theme.AttachedBadge.Render(fmt.Sprintf(" remove '%s'? y/n", m.confirmName))
+		switch m.confirmAction {
+		case confirmActionRemoveWorktree:
+			return theme.AttachedBadge.Render(fmt.Sprintf(" remove worktree '%s'? y/n", m.confirmBranch))
+		default:
+			return theme.AttachedBadge.Render(fmt.Sprintf(" remove '%s'? y/n", m.confirmName))
+		}
 	case modeFiltering:
 		return theme.HelpStyle.Render(" type to filter  ⏎ select  esc cancel")
 	case modeNewBranch:
@@ -419,7 +424,7 @@ func (m Model) footer() string {
 		return theme.HelpStyle.Render(" ⏎ select branch  j/k nav  esc back")
 	}
 	if m.focus == colDetail {
-		return theme.HelpStyle.Render(" h back  j/k nav  ⏎ open  c new worktree  a agent  A split  / filter")
+		return theme.HelpStyle.Render(" h back  j/k nav  ⏎ open  c new worktree  d remove  a agent  A split  / filter")
 	}
 	return theme.HelpStyle.Render(" l/⏎ open  j/k nav  n add  c new worktree  f find  d remove  a agent  / filter  r refresh  q quit")
 }

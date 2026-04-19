@@ -78,9 +78,12 @@ type Model struct {
 	// attachBranchCursor is the cursor inside the "pick existing branch" picker.
 	attachBranchCursor int
 
-	// Confirm delete
-	confirmName string
-	confirmPath string
+	// Confirm action
+	confirmAction confirmAction
+	confirmName   string
+	confirmPath   string
+	confirmBranch string
+	confirmWPath  string
 
 	// Transient status line (errors, hints).
 	toast    string

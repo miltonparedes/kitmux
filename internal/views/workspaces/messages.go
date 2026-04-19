@@ -29,6 +29,14 @@ const (
 	modeAgentPicker
 )
 
+type confirmAction int
+
+const (
+	confirmActionNone confirmAction = iota
+	confirmActionRemoveWorkspace
+	confirmActionRemoveWorktree
+)
+
 // agentTarget describes where the agent process should land within the
 // target tmux session.
 type agentTarget int

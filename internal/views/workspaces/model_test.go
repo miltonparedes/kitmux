@@ -512,6 +512,9 @@ func TestDEntersConfirmMode(t *testing.T) {
 	if m.mode != modeConfirm {
 		t.Errorf("expected modeConfirm, got %d", m.mode)
 	}
+	if m.confirmAction != confirmActionRemoveWorkspace {
+		t.Errorf("expected workspace confirm action, got %d", m.confirmAction)
+	}
 	if m.confirmName != "kitmux" {
 		t.Errorf("expected confirm name 'kitmux', got %q", m.confirmName)
 	}
@@ -525,6 +528,9 @@ func TestConfirmNoCancels(t *testing.T) {
 	m = updated.(Model)
 	if m.mode != modeNormal {
 		t.Errorf("expected modeNormal after cancel, got %d", m.mode)
+	}
+	if m.confirmAction != confirmActionNone {
+		t.Errorf("expected confirmActionNone after cancel, got %d", m.confirmAction)
 	}
 }
 
@@ -895,6 +901,84 @@ func TestViewConfirmMode_ShowsPrompt(t *testing.T) {
 	output := m.View()
 	if !strings.Contains(output, "remove 'kitmux'?") {
 		t.Error("expected confirm prompt in footer")
+	}
+}
+
+func TestDOnDetailInactiveWorktreeAsksRemoveWorktree(t *testing.T) {
+	m := newSeededModel()
+	updated, _ := m.Update(keyMsg("l"))
+	m = updated.(Model)
+
+	found := -1
+	for i, br := range m.branches {
+		if !br.IsSession && br.Name == "experiment" {
+			found = i
+			break
+		}
+	}
+	if found < 0 {
+		t.Fatal("expected inactive 'experiment' worktree in detail")
+	}
+	m.detCursor = found
+
+	updated, _ = m.Update(keyMsg("d"))
+	m = updated.(Model)
+	if m.mode != modeConfirm {
+		t.Fatalf("expected modeConfirm, got %d", m.mode)
+	}
+	if m.confirmAction != confirmActionRemoveWorktree {
+		t.Fatalf("expected confirmActionRemoveWorktree, got %d", m.confirmAction)
+	}
+	if m.confirmBranch != "experiment" {
+		t.Fatalf("expected confirm branch experiment, got %q", m.confirmBranch)
+	}
+	out := m.View()
+	if !strings.Contains(out, "remove worktree 'experiment'?") {
+		t.Fatalf("expected worktree confirm prompt, got %q", out)
+	}
+}
+
+func TestDOnDetailSessionShowsToast(t *testing.T) {
+	m := newSeededModel()
+	updated, _ := m.Update(keyMsg("l"))
+	m = updated.(Model)
+	m.detCursor = 0 // main session
+	updated, _ = m.Update(keyMsg("j"))
+	m = updated.(Model) // feature session
+
+	updated, _ = m.Update(keyMsg("d"))
+	m = updated.(Model)
+	if m.mode != modeNormal {
+		t.Fatalf("expected modeNormal when trying to remove active session branch, got %d", m.mode)
+	}
+	if !strings.Contains(m.toast, "close session first") {
+		t.Fatalf("expected close-session toast, got %q", m.toast)
+	}
+}
+
+func TestDOnDetailMainWorktreeShowsToast(t *testing.T) {
+	m := newSeededModel()
+	updated, _ := m.Update(keyMsg("l"))
+	m = updated.(Model)
+	m.detCursor = 0 // main
+
+	updated, _ = m.Update(keyMsg("d"))
+	m = updated.(Model)
+	if m.mode != modeNormal {
+		t.Fatalf("expected modeNormal when trying to remove main worktree, got %d", m.mode)
+	}
+	if !strings.Contains(m.toast, "cannot remove main worktree") {
+		t.Fatalf("expected main-worktree toast, got %q", m.toast)
+	}
+}
+
+func TestDetailFooterIncludesRemoveHint(t *testing.T) {
+	m := newSeededModel()
+	updated, _ := m.Update(keyMsg("l"))
+	m = updated.(Model)
+	out := m.View()
+	if !strings.Contains(out, "d remove") {
+		t.Fatalf("expected detail footer to include d remove, got %q", out)
 	}
 }
 
