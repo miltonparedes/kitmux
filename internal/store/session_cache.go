@@ -67,18 +67,38 @@ func SaveSessionCache(snap *SessionCache) error {
 	if snap == nil {
 		return nil
 	}
-
 	db, err := open()
 	if err != nil {
 		return err
 	}
-
 	tx, err := db.Begin()
 	if err != nil {
 		return fmt.Errorf("begin save session cache: %w", err)
 	}
 	defer func() { _ = tx.Rollback() }()
 
+	if err := clearSessionCacheTables(tx); err != nil {
+		return err
+	}
+
+	now := time.Now()
+	updatedAt := snap.UpdatedAt
+	if updatedAt.IsZero() {
+		updatedAt = now
+	}
+	if err := writeSessionCachePayload(tx, snap, updatedAt, now); err != nil {
+		return err
+	}
+	if err := writeSessionCacheMetadata(tx, snap, updatedAt); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return fmt.Errorf("commit save session cache: %w", err)
+	}
+	return nil
+}
+
+func clearSessionCacheTables(tx *sql.Tx) error {
 	if _, err := tx.Exec(`DELETE FROM session_snapshots`); err != nil {
 		return fmt.Errorf("clear session snapshots: %w", err)
 	}
@@ -88,39 +108,31 @@ func SaveSessionCache(snap *SessionCache) error {
 	if _, err := tx.Exec(`DELETE FROM worktree_stats`); err != nil {
 		return fmt.Errorf("clear worktree stats: %w", err)
 	}
-	if _, err := tx.Exec(`DELETE FROM metadata WHERE key IN (?, ?, ?)`, metaUpdatedAt, metaRepoRootsAt, metaStatsTTL); err != nil {
+	query := `DELETE FROM metadata WHERE key IN (?, ?, ?)`
+	if _, err := tx.Exec(query, metaUpdatedAt, metaRepoRootsAt, metaStatsTTL); err != nil {
 		return fmt.Errorf("clear session cache metadata: %w", err)
 	}
+	return nil
+}
 
-	now := time.Now()
-	updatedAt := snap.UpdatedAt
-	if updatedAt.IsZero() {
-		updatedAt = now
-	}
-
+func writeSessionCachePayload(tx *sql.Tx, snap *SessionCache, updatedAt, now time.Time) error {
 	if err := insertSessions(tx, snap.Sessions, updatedAt); err != nil {
 		return err
 	}
 	if err := insertRepoRoots(tx, snap.RepoRoots, snap.RepoRootsRefreshedAt); err != nil {
 		return err
 	}
-	if err := insertWorktreeStats(tx, snap.RepoRoots, snap.Stats, snap.StatsTTL, now); err != nil {
-		return err
-	}
+	return insertWorktreeStats(tx, snap.RepoRoots, snap.Stats, snap.StatsTTL, now)
+}
+
+func writeSessionCacheMetadata(tx *sql.Tx, snap *SessionCache, updatedAt time.Time) error {
 	if err := setMetaTime(tx, metaUpdatedAt, updatedAt); err != nil {
 		return err
 	}
 	if err := setMetaTime(tx, metaRepoRootsAt, snap.RepoRootsRefreshedAt); err != nil {
 		return err
 	}
-	if err := setMetaTime(tx, metaStatsTTL, snap.StatsTTL); err != nil {
-		return err
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("commit save session cache: %w", err)
-	}
-	return nil
+	return setMetaTime(tx, metaStatsTTL, snap.StatsTTL)
 }
 
 func loadSessionCache(db *sql.DB) (*SessionCache, error) {
@@ -152,7 +164,12 @@ func loadSessionCache(db *sql.DB) (*SessionCache, error) {
 		return nil, err
 	}
 
-	found := len(sessions) > 0 || len(repoRoots) > 0 || len(stats) > 0 || !updatedAt.IsZero() || !repoRootsRefreshedAt.IsZero() || !statsTTL.IsZero()
+	found := len(sessions) > 0 ||
+		len(repoRoots) > 0 ||
+		len(stats) > 0 ||
+		!updatedAt.IsZero() ||
+		!repoRootsRefreshedAt.IsZero() ||
+		!statsTTL.IsZero()
 	if !found {
 		return nil, nil
 	}
@@ -273,7 +290,9 @@ func loadWorktreeStats(db *sql.DB) (map[string]DiffStat, error) {
 }
 
 func insertSessions(tx *sql.Tx, sessions []tmux.Session, updatedAt time.Time) error {
-	stmt, err := tx.Prepare(`INSERT INTO session_snapshots(session_name, path, windows, attached, activity, updated_at) VALUES(?, ?, ?, ?, ?, ?)`)
+	stmt, err := tx.Prepare(
+		`INSERT INTO session_snapshots(session_name, path, windows, attached, activity, updated_at) VALUES(?, ?, ?, ?, ?, ?)`,
+	)
 	if err != nil {
 		return fmt.Errorf("prepare insert session snapshot: %w", err)
 	}
@@ -308,8 +327,15 @@ func insertRepoRoots(tx *sql.Tx, repoRoots map[string]string, refreshedAt time.T
 	return nil
 }
 
-func insertWorktreeStats(tx *sql.Tx, repoRoots map[string]string, stats map[string]DiffStat, expiresAt, updatedAt time.Time) error {
-	stmt, err := tx.Prepare(`INSERT INTO worktree_stats(session_name, repo_root, added, deleted, expires_at, updated_at) VALUES(?, ?, ?, ?, ?, ?)`)
+func insertWorktreeStats(
+	tx *sql.Tx,
+	repoRoots map[string]string,
+	stats map[string]DiffStat,
+	expiresAt, updatedAt time.Time,
+) error {
+	stmt, err := tx.Prepare(
+		`INSERT INTO worktree_stats(session_name, repo_root, added, deleted, expires_at, updated_at) VALUES(?, ?, ?, ?, ?, ?)`,
+	)
 	if err != nil {
 		return fmt.Errorf("prepare insert worktree stat: %w", err)
 	}
@@ -342,7 +368,8 @@ func sessionCacheEmpty(db *sql.DB) (bool, error) {
 	}
 
 	var count int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM metadata WHERE key IN (?, ?, ?)`, metaUpdatedAt, metaRepoRootsAt, metaStatsTTL).Scan(&count); err != nil {
+	query := `SELECT COUNT(*) FROM metadata WHERE key IN (?, ?, ?)`
+	if err := db.QueryRow(query, metaUpdatedAt, metaRepoRootsAt, metaStatsTTL).Scan(&count); err != nil {
 		return false, fmt.Errorf("count session cache metadata: %w", err)
 	}
 	return count == 0, nil

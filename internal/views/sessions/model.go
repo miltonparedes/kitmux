@@ -176,12 +176,7 @@ func refreshWorktreeStats(sessions []tmux.Session, repoRoots map[string]string) 
 		}
 	}
 
-	uniqueRoots := make(map[string]struct{})
-	for _, root := range repoRoots {
-		if root != "" {
-			uniqueRoots[root] = struct{}{}
-		}
-	}
+	uniqueRoots := uniqueRepoRoots(repoRoots)
 	if len(uniqueRoots) == 0 {
 		return nil
 	}
@@ -200,21 +195,40 @@ func refreshWorktreeStats(sessions []tmux.Session, repoRoots map[string]string) 
 			if res.Err != nil {
 				return
 			}
-			mu.Lock()
-			defer mu.Unlock()
-			for _, wt := range res.Stats.Worktrees {
-				name, ok := pathToName[wt.WorktreePath]
-				if !ok {
-					continue
-				}
-				if wt.Added > 0 || wt.Deleted > 0 {
-					out[name] = sessionStats{Added: wt.Added, Deleted: wt.Deleted}
-				}
-			}
+			collectWorktreeStats(res.Stats.Worktrees, pathToName, out, &mu)
 		}(root)
 	}
 	wg.Wait()
 	return out
+}
+
+func uniqueRepoRoots(repoRoots map[string]string) map[string]struct{} {
+	out := make(map[string]struct{})
+	for _, root := range repoRoots {
+		if root != "" {
+			out[root] = struct{}{}
+		}
+	}
+	return out
+}
+
+func collectWorktreeStats(
+	worktrees []wsdata.WorktreeStat,
+	pathToName map[string]string,
+	out map[string]sessionStats,
+	mu *sync.Mutex,
+) {
+	mu.Lock()
+	defer mu.Unlock()
+	for _, wt := range worktrees {
+		name, ok := pathToName[wt.WorktreePath]
+		if !ok {
+			continue
+		}
+		if wt.Added > 0 || wt.Deleted > 0 {
+			out[name] = sessionStats{Added: wt.Added, Deleted: wt.Deleted}
+		}
+	}
 }
 
 // sharedStatsService returns a process-wide StatsService so sessions and the
@@ -235,97 +249,113 @@ func sharedStatsService() *wsdata.StatsService {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case cachedSnapshotMsg:
-		m.roots = BuildTree(msg.sessions, msg.repoRoots)
-		m.visible = Flatten(m.roots)
-		m.clampCursor()
-		if len(msg.stats) > 0 {
-			applyStats(m.roots, msg.stats)
-		}
-		// Reconcile with live tmux data in background
-		return m, tea.Batch(m.emitCursorChange(), m.loadSessions)
-
+		return m.handleCachedSnapshot(msg)
 	case sessionsLoadedMsg:
-		m.roots = BuildTree(msg.sessions, msg.repoRoots)
-		// Paint the SQLite-backed cache immediately so the tree shows
-		// stats without waiting for the live refresh below.
-		if snapStats := sharedStatsForSessions(msg.sessions); len(snapStats) > 0 {
-			applyStats(m.roots, snapStats)
-		}
-		m.visible = Flatten(m.roots)
-		m.clampCursor()
-		m.justLoaded = true
-		sessions := msg.sessions
-		repoRoots := msg.repoRoots
-		return m, tea.Batch(m.emitCursorChange(), func() tea.Msg {
-			return statsLoadedMsg{stats: refreshWorktreeStats(sessions, repoRoots)}
-		})
-
+		return m.handleSessionsLoaded(msg)
 	case statsLoadedMsg:
 		applyStats(m.roots, msg.stats)
 		return m, nil
-
 	case zoxideEntriesLoadedMsg:
 		m.picker.setEntries(msg.entries)
 		return m, nil
-
 	case tea.MouseMsg:
-		if m.IsEditing() {
-			return m, nil
-		}
-		switch msg.Button {
-		case tea.MouseButtonLeft:
-			if msg.Action != tea.MouseActionRelease {
-				return m, nil
-			}
-			row := msg.Y
-			if row%2 != 0 {
-				return m, nil
-			}
-			idx := m.scroll + row/2
-			if idx < 0 || idx >= len(m.visible) {
-				return m, nil
-			}
-			node := m.visible[idx]
-			if len(node.Children) > 0 {
-				node.Expanded = !node.Expanded
-				m.visible = Flatten(m.roots)
-				m.clampCursor()
-				return m, nil
-			}
-			if node.Kind == KindSession {
-				return m, func() tea.Msg {
-					return messages.SwitchSessionMsg{Name: node.SessionName}
-				}
-			}
-		case tea.MouseButtonWheelUp:
-			m.cursor--
-			m.clampCursor()
-			m.ensureVisible()
-			return m, m.emitCursorChange()
-		case tea.MouseButtonWheelDown:
-			m.cursor++
-			m.clampCursor()
-			m.ensureVisible()
-			return m, m.emitCursorChange()
-		}
-		return m, nil
-
+		return m.handleMouse(msg)
 	case tea.KeyMsg:
-		if m.picking {
-			return m.handlePicker(msg)
-		}
-		if m.searching {
-			return m.handleSearch(msg)
-		}
-		if m.confirming {
-			return m.handleConfirm(msg)
-		}
-		if m.renaming {
-			return m.handleRename(msg)
-		}
-		return m.handleNormal(msg)
+		return m.routeKey(msg)
 	}
 	return m, nil
+}
+
+func (m Model) handleCachedSnapshot(msg cachedSnapshotMsg) (Model, tea.Cmd) {
+	m.roots = BuildTree(msg.sessions, msg.repoRoots)
+	m.visible = Flatten(m.roots)
+	m.clampCursor()
+	if len(msg.stats) > 0 {
+		applyStats(m.roots, msg.stats)
+	}
+	return m, tea.Batch(m.emitCursorChange(), m.loadSessions)
+}
+
+func (m Model) handleSessionsLoaded(msg sessionsLoadedMsg) (Model, tea.Cmd) {
+	m.roots = BuildTree(msg.sessions, msg.repoRoots)
+	if snapStats := sharedStatsForSessions(msg.sessions); len(snapStats) > 0 {
+		applyStats(m.roots, snapStats)
+	}
+	m.visible = Flatten(m.roots)
+	m.clampCursor()
+	m.justLoaded = true
+	sessions := msg.sessions
+	repoRoots := msg.repoRoots
+	return m, tea.Batch(m.emitCursorChange(), func() tea.Msg {
+		return statsLoadedMsg{stats: refreshWorktreeStats(sessions, repoRoots)}
+	})
+}
+
+func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
+	if m.IsEditing() {
+		return m, nil
+	}
+	switch msg.Button {
+	case tea.MouseButtonLeft:
+		return m.handleMouseLeft(msg)
+	case tea.MouseButtonWheelUp:
+		m.cursor--
+		m.clampCursor()
+		m.ensureVisible()
+		return m, m.emitCursorChange()
+	case tea.MouseButtonWheelDown:
+		m.cursor++
+		m.clampCursor()
+		m.ensureVisible()
+		return m, m.emitCursorChange()
+	}
+	return m, nil
+}
+
+func (m Model) handleMouseLeft(msg tea.MouseMsg) (Model, tea.Cmd) {
+	if msg.Action != tea.MouseActionRelease {
+		return m, nil
+	}
+	row := msg.Y
+	if row%2 != 0 {
+		return m, nil
+	}
+	idx := m.scroll + row/2
+	if idx < 0 || idx >= len(m.visible) {
+		return m, nil
+	}
+	node := m.visible[idx]
+	if len(node.Children) > 0 {
+		node.Expanded = !node.Expanded
+		m.visible = Flatten(m.roots)
+		m.clampCursor()
+		return m, nil
+	}
+	if node.Kind == KindSession {
+		return m, switchSessionCmd(node.SessionName)
+	}
+	return m, nil
+}
+
+func (m Model) routeKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch {
+	case m.picking:
+		return m.handlePicker(msg)
+	case m.searching:
+		return m.handleSearch(msg)
+	case m.confirming:
+		return m.handleConfirm(msg)
+	case m.renaming:
+		return m.handleRename(msg)
+	default:
+		return m.handleNormal(msg)
+	}
+}
+
+func switchSessionCmd(name string) tea.Cmd {
+	return func() tea.Msg {
+		return messages.SwitchSessionMsg{Name: name}
+	}
 }
 
 func applyStats(roots []*TreeNode, stats map[string]sessionStats) {
@@ -347,112 +377,192 @@ func applyStats(roots []*TreeNode, stats map[string]sessionStats) {
 func (m Model) handleNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 	prevCursor := m.cursor
 
+	if updated, handled := m.handleNormalNav(msg); handled {
+		if updated.cursor != prevCursor {
+			return updated, updated.emitCursorChange()
+		}
+		return updated, nil
+	}
+	if updated, cmd, handled := m.handleNormalAction(msg); handled {
+		return updated, cmd
+	}
+	if updated, cmd, handled := m.handleDigitJump(msg); handled {
+		return updated, cmd
+	}
+	return m, nil
+}
+
+// handleNormalNav handles cursor/scroll navigation keys.
+func (m Model) handleNormalNav(msg tea.KeyMsg) (Model, bool) {
 	switch msg.String() {
 	case "j", "down":
 		m.cursor++
 		m.clampCursor()
 		m.ensureVisible()
+		return m, true
 	case "k", "up":
 		m.cursor--
 		m.clampCursor()
 		m.ensureVisible()
+		return m, true
 	case "g", "home":
 		m.cursor = 0
 		m.scroll = 0
+		return m, true
 	case "G", "end":
 		m.cursor = len(m.visible) - 1
 		m.ensureVisible()
+		return m, true
+	case "J":
+		m.jumpToNextRoot()
+		return m, true
+	case "K":
+		m.jumpToPrevRoot()
+		return m, true
+	}
+	return m, false
+}
 
-	case "J": // next root/group
-		for i := m.cursor + 1; i < len(m.visible); i++ {
-			if m.visible[i].Depth == 0 {
-				m.cursor = i
-				break
-			}
+func (m *Model) jumpToNextRoot() {
+	for i := m.cursor + 1; i < len(m.visible); i++ {
+		if m.visible[i].Depth == 0 {
+			m.cursor = i
+			break
 		}
-		m.clampCursor()
-		m.ensureVisible()
+	}
+	m.clampCursor()
+	m.ensureVisible()
+}
 
-	case "K": // prev root/group
-		for i := m.cursor - 1; i >= 0; i-- {
-			if m.visible[i].Depth == 0 {
-				m.cursor = i
-				break
-			}
+func (m *Model) jumpToPrevRoot() {
+	for i := m.cursor - 1; i >= 0; i-- {
+		if m.visible[i].Depth == 0 {
+			m.cursor = i
+			break
 		}
-		m.clampCursor()
-		m.ensureVisible()
+	}
+	m.clampCursor()
+	m.ensureVisible()
+}
 
+// handleNormalAction handles non-navigation keys (enter/space/search/delete/rename/new/open).
+func (m Model) handleNormalAction(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	switch msg.String() {
 	case "enter":
-		if node := m.selected(); node != nil && node.Kind == KindSession {
-			return m, func() tea.Msg {
-				return messages.SwitchSessionMsg{Name: node.SessionName}
-			}
-		}
-
+		return m.actionEnter()
 	case " ":
-		if node := m.selected(); node != nil && len(node.Children) > 0 {
-			node.Expanded = !node.Expanded
-			m.visible = Flatten(m.roots)
-			m.clampCursor()
-		}
-
+		return m.actionToggleExpand()
 	case "/":
-		m.searching = true
-		m.searchInput.SetValue("")
-		m.searchInput.Focus()
-		m.filterSessions()
-		return m, textinput.Blink
-
+		return m.actionStartSearch()
 	case "d":
-		if node := m.selected(); node != nil && node.Kind == KindSession {
-			m.confirming = true
-		}
-
+		return m.actionDelete()
 	case "r":
-		if node := m.selected(); node != nil && node.Kind == KindSession {
-			m.renaming = true
-			m.renameInput.SetValue(node.SessionName)
-			m.renameInput.Focus()
-			return m, textinput.Blink
-		}
-
+		return m.actionStartRename()
 	case "n":
-		m.picking = true
-		m.picker.input.SetValue("")
-		m.picker.input.Focus()
-		return m, tea.Batch(textinput.Blink, loadZoxideEntries)
-
+		return m.actionOpenPicker()
 	case "ctrl+o":
-		return m, func() tea.Msg {
-			return messages.ExecuteCommandMsg{ID: "open_local_editor"}
-		}
+		return m, openLocalEditorExecuteCmd(), true
+	}
+	return m, nil, false
+}
 
+func (m Model) actionEnter() (Model, tea.Cmd, bool) {
+	node := m.selected()
+	if node == nil || node.Kind != KindSession {
+		return m, nil, true
+	}
+	return m, switchSessionCmd(node.SessionName), true
+}
+
+func (m Model) actionToggleExpand() (Model, tea.Cmd, bool) {
+	node := m.selected()
+	if node == nil || len(node.Children) == 0 {
+		return m, nil, true
+	}
+	node.Expanded = !node.Expanded
+	m.visible = Flatten(m.roots)
+	m.clampCursor()
+	return m, nil, true
+}
+
+func (m Model) actionStartSearch() (Model, tea.Cmd, bool) {
+	m.searching = true
+	m.searchInput.SetValue("")
+	m.searchInput.Focus()
+	m.filterSessions()
+	return m, textinput.Blink, true
+}
+
+func (m Model) actionDelete() (Model, tea.Cmd, bool) {
+	if node := m.selected(); node != nil && node.Kind == KindSession {
+		m.confirming = true
+	}
+	return m, nil, true
+}
+
+func (m Model) actionStartRename() (Model, tea.Cmd, bool) {
+	node := m.selected()
+	if node == nil || node.Kind != KindSession {
+		return m, nil, true
+	}
+	m.renaming = true
+	m.renameInput.SetValue(node.SessionName)
+	m.renameInput.Focus()
+	return m, textinput.Blink, true
+}
+
+func (m Model) actionOpenPicker() (Model, tea.Cmd, bool) {
+	m.picking = true
+	m.picker.input.SetValue("")
+	m.picker.input.Focus()
+	return m, tea.Batch(textinput.Blink, loadZoxideEntries), true
+}
+
+func (m Model) handleDigitJump(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	switch msg.String() {
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9",
 		"alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "alt+6", "alt+7", "alt+8", "alt+9":
-		if config.SuperKey == "none" && !msg.Alt || config.SuperKey == "alt" && msg.Alt {
-			digit := msg.Runes[0]
-			target := int(digit - '0')
-			n := 0
-			for _, node := range m.visible {
-				if node.Kind == KindSession {
-					n++
-					if n == target {
-						name := node.SessionName
-						return m, func() tea.Msg {
-							return messages.SwitchSessionMsg{Name: name}
-						}
-					}
-				}
-			}
+	default:
+		return m, nil, false
+	}
+	if !digitJumpActive(msg) {
+		return m, nil, true
+	}
+	target := int(msg.Runes[0] - '0')
+	if name := m.sessionNameAt(target); name != "" {
+		return m, switchSessionCmd(name), true
+	}
+	return m, nil, true
+}
+
+func digitJumpActive(msg tea.KeyMsg) bool {
+	if config.SuperKey == "none" && !msg.Alt {
+		return true
+	}
+	if config.SuperKey == "alt" && msg.Alt {
+		return true
+	}
+	return false
+}
+
+func (m Model) sessionNameAt(ordinal int) string {
+	n := 0
+	for _, node := range m.visible {
+		if node.Kind != KindSession {
+			continue
+		}
+		n++
+		if n == ordinal {
+			return node.SessionName
 		}
 	}
+	return ""
+}
 
-	// Emit cursor change if cursor moved
-	if m.cursor != prevCursor {
-		return m, m.emitCursorChange()
+func openLocalEditorExecuteCmd() tea.Cmd {
+	return func() tea.Msg {
+		return messages.ExecuteCommandMsg{ID: "open_local_editor"}
 	}
-	return m, nil
 }
 
 func (m Model) handleConfirm(msg tea.KeyMsg) (Model, tea.Cmd) {

@@ -22,103 +22,102 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.width = msg.Width
 		m.height = msg.Height
 		return m, nil
-
 	case dataLoadedMsg:
-		m.workspaces = msg.workspaces
-		m.sessions = msg.sessions
-		m.repoRoots = msg.repoRoots
-		m.wtByPath = msg.wtByPath
-		m.panes = msg.panes
-		m.archived = msg.archived
-		m.clampWorkspaceCursor()
-
-		// Seed from the persistent cache so the UI renders stats instantly.
-		if m.stats_svc != nil && len(m.wsStats) == 0 {
-			if cached, err := m.stats_svc.LoadAllCached(); err == nil {
-				m.wsStats = cached
-			}
-		}
-		m.applyWorkspaceSummary()
-		m.rebuildDetail()
-
-		// Kick off background refresh for every visible workspace.
-		return m, refreshAllStatsCmd(m.stats_svc, m.workspaces)
-
+		return m.handleDataLoaded(msg)
 	case statsLoadedMsg:
-		if m.wsStats == nil {
-			m.wsStats = make(map[string]wsdata.WorkspaceStats)
-		}
-		if m.wtByPath == nil {
-			m.wtByPath = make(map[string][]worktree.Worktree, len(msg.wsStats))
-		}
-		for path, ws := range msg.wsStats {
-			m.wsStats[path] = ws
-			m.wtByPath[path] = worktreesFromStats(ws)
-		}
-		if len(msg.stats) > 0 {
-			if m.stats == nil {
-				m.stats = make(map[string]sessionStats)
-			}
-			for k, v := range msg.stats {
-				m.stats[k] = v
-			}
-		}
-		m.applyWorkspaceSummary()
-		m.rebuildDetail()
-		return m, nil
-
+		return m.handleStatsLoaded(msg)
 	case switchDoneMsg:
 		return m, tea.Quit
-
 	case actionDoneMsg:
 		return m, loadDataCmd(m.stats_svc)
-
 	case zoxideLoadedMsg:
 		m.zoxide.all = msg.entries
 		m.zoxide.filtered = msg.entries
 		m.zoxide.cursor = 0
 		m.zoxide.scroll = 0
 		return m, nil
-
 	case toastMsg:
 		return m, m.pushToast(msg.text, msg.level)
-
 	case toastClearMsg:
 		if msg.seq == m.toastSeq {
 			m.toast = ""
 		}
 		return m, nil
-
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
-
 	case tea.KeyMsg:
-		switch m.mode {
-		case modeConfirm:
-			return m.handleConfirm(msg)
-		case modeActionPicker:
-			return m.handleActionPicker(msg)
-		case modeHelp:
-			return m.handleHelp(msg)
-		case modeFiltering:
-			return m.handleFilter(msg)
-		case modeWorkspaceSearch:
-			return m.handleWorkspaceSearch(msg)
-		case modeNewBranch:
-			return m.handleNewBranch(msg)
-		case modeNewBranchAgent:
-			return m.handleNewBranchAgent(msg)
-		case modeAgentAttachChoice:
-			return m.handleAgentAttachChoice(msg)
-		case modeAttachBranchPicker:
-			return m.handleAttachBranchPicker(msg)
-		case modeAgentPicker:
-			return m.handleAgentPicker(msg)
-		default:
-			return m.handleKey(msg)
-		}
+		return m.routeKey(msg)
 	}
 	return m, nil
+}
+
+func (m Model) handleDataLoaded(msg dataLoadedMsg) (tea.Model, tea.Cmd) {
+	m.workspaces = msg.workspaces
+	m.sessions = msg.sessions
+	m.repoRoots = msg.repoRoots
+	m.wtByPath = msg.wtByPath
+	m.panes = msg.panes
+	m.archived = msg.archived
+	m.clampWorkspaceCursor()
+	if m.stats_svc != nil && len(m.wsStats) == 0 {
+		if cached, err := m.stats_svc.LoadAllCached(); err == nil {
+			m.wsStats = cached
+		}
+	}
+	m.applyWorkspaceSummary()
+	m.rebuildDetail()
+	return m, refreshAllStatsCmd(m.stats_svc, m.workspaces)
+}
+
+func (m Model) handleStatsLoaded(msg statsLoadedMsg) (tea.Model, tea.Cmd) {
+	if m.wsStats == nil {
+		m.wsStats = make(map[string]wsdata.WorkspaceStats)
+	}
+	if m.wtByPath == nil {
+		m.wtByPath = make(map[string][]worktree.Worktree, len(msg.wsStats))
+	}
+	for path, ws := range msg.wsStats {
+		m.wsStats[path] = ws
+		m.wtByPath[path] = worktreesFromStats(ws)
+	}
+	if len(msg.stats) > 0 {
+		if m.stats == nil {
+			m.stats = make(map[string]sessionStats)
+		}
+		for k, v := range msg.stats {
+			m.stats[k] = v
+		}
+	}
+	m.applyWorkspaceSummary()
+	m.rebuildDetail()
+	return m, nil
+}
+
+func (m Model) routeKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch m.mode {
+	case modeConfirm:
+		return m.handleConfirm(msg)
+	case modeActionPicker:
+		return m.handleActionPicker(msg)
+	case modeHelp:
+		return m.handleHelp(msg)
+	case modeFiltering:
+		return m.handleFilter(msg)
+	case modeWorkspaceSearch:
+		return m.handleWorkspaceSearch(msg)
+	case modeNewBranch:
+		return m.handleNewBranch(msg)
+	case modeNewBranchAgent:
+		return m.handleNewBranchAgent(msg)
+	case modeAgentAttachChoice:
+		return m.handleAgentAttachChoice(msg)
+	case modeAttachBranchPicker:
+		return m.handleAttachBranchPicker(msg)
+	case modeAgentPicker:
+		return m.handleAgentPicker(msg)
+	default:
+		return m.handleKey(msg)
+	}
 }
 
 // applyWorkspaceSummary populates the aggregate fields on each workspaceEntry
@@ -295,130 +294,144 @@ func (m Model) clickDetail(visualRow int) (tea.Model, tea.Cmd) {
 }
 
 func (m Model) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if updated, cmd, handled := m.handleKeyNav(msg); handled {
+		return updated, cmd
+	}
+	if updated, cmd, handled := m.handleKeyAction(msg); handled {
+		return updated, cmd
+	}
+	if updated, cmd, handled := m.handleKeySystem(msg); handled {
+		return updated, cmd
+	}
+	return m, nil
+}
+
+func (m Model) handleKeyNav(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
 	switch msg.String() {
 	case "j", "down":
-		return m.moveCursor(+1)
-
+		model, cmd := m.moveCursor(+1)
+		return model, cmd, true
 	case "k", "up":
-		return m.moveCursor(-1)
-
+		model, cmd := m.moveCursor(-1)
+		return model, cmd, true
 	case "g", "home":
-		if m.focus == colWorkspaces {
-			m.wsCursor = 0
-			m.wsScroll = 0
-			m.rebuildDetail()
-		} else {
-			m.detCursor = 0
-			m.detScroll = 0
-		}
-		return m, nil
-
+		return m.jumpHome(), nil, true
 	case "G", "end":
-		if m.focus == colWorkspaces {
-			m.wsCursor = len(m.workspaces) - 1
-			m.clampWorkspaceCursor()
-			m.ensureWorkspaceVisible()
-			m.rebuildDetail()
-		} else {
-			m.detCursor = m.detailItems - 1
-			m.clampDetCursor()
-			m.ensureDetVisible()
-		}
-		return m, nil
-
+		return m.jumpEnd(), nil, true
 	case "l", "right":
 		if m.focus == colWorkspaces && m.detailItems > 0 {
 			m.focus = colDetail
 		}
-		return m, nil
-
+		return m, nil, true
 	case "h", "left":
 		if m.focus == colDetail {
 			m.focus = colWorkspaces
 		}
-		return m, nil
-
+		return m, nil, true
 	case keyEnter:
 		if m.focus == colWorkspaces {
 			if m.detailItems > 0 {
 				m.focus = colDetail
 			}
-			return m, nil
+			return m, nil, true
 		}
-		return m.activateDetailItem()
+		model, cmd := m.activateDetailItem()
+		return model, cmd, true
+	}
+	return m, nil, false
+}
 
+func (m Model) jumpHome() tea.Model {
+	if m.focus == colWorkspaces {
+		m.wsCursor = 0
+		m.wsScroll = 0
+		m.rebuildDetail()
+	} else {
+		m.detCursor = 0
+		m.detScroll = 0
+	}
+	return m
+}
+
+func (m Model) jumpEnd() tea.Model {
+	if m.focus == colWorkspaces {
+		m.wsCursor = len(m.workspaces) - 1
+		m.clampWorkspaceCursor()
+		m.ensureWorkspaceVisible()
+		m.rebuildDetail()
+	} else {
+		m.detCursor = m.detailItems - 1
+		m.clampDetCursor()
+		m.ensureDetVisible()
+	}
+	return m
+}
+
+func (m Model) handleKeyAction(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+	switch msg.String() {
 	case "/":
 		m.mode = modeFiltering
 		m.filter.SetValue("")
 		m.filter.Focus()
-		return m, textinput.Blink
-
+		return m, textinput.Blink, true
 	case "n":
 		if m.focus == colWorkspaces {
-			m.mode = modeWorkspaceSearch
-			m.zoxide.input.SetValue("")
-			m.zoxide.input.Focus()
-			m.zoxide.all = nil
-			m.zoxide.filtered = nil
-			m.zoxide.cursor = 0
-			m.zoxide.scroll = 0
-			return m, tea.Batch(textinput.Blink, loadZoxide())
+			return m.startZoxideSearch(), tea.Batch(textinput.Blink, loadZoxide()), true
 		}
-		return m, nil
-
+		return m, nil, true
 	case "f":
-		// Global zoxide search (any dir, not just workspaces).
-		m.mode = modeWorkspaceSearch
-		m.zoxide.input.SetValue("")
-		m.zoxide.input.Focus()
-		m.zoxide.all = nil
-		m.zoxide.filtered = nil
-		m.zoxide.cursor = 0
-		m.zoxide.scroll = 0
-		return m, tea.Batch(textinput.Blink, loadZoxide())
-
+		return m.startZoxideSearch(), tea.Batch(textinput.Blink, loadZoxide()), true
 	case "a":
-		return m.startAgentAttach(agentTargetWindow)
+		return m.startAgentAttach(agentTargetWindow), nil, true
 	case "A":
-		return m.startAgentAttach(agentTargetSplit)
-
-	case "x":
-		return m.openActionPicker()
-
-	case "d":
-		return m.openActionPicker()
-
+		return m.startAgentAttach(agentTargetSplit), nil, true
+	case "x", "d":
+		model, cmd := m.openActionPicker()
+		return model, cmd, true
 	case "c":
 		if len(m.workspaces) > 0 {
 			m.newBranchWs = m.workspaces[m.wsCursor]
 			m.mode = modeNewBranch
 			m.newBranch.SetValue("")
 			m.newBranch.Focus()
-			return m, textinput.Blink
+			return m, textinput.Blink, true
 		}
-		return m, nil
+		return m, nil, true
+	}
+	return m, nil, false
+}
 
+func (m Model) startZoxideSearch() Model {
+	m.mode = modeWorkspaceSearch
+	m.zoxide.input.SetValue("")
+	m.zoxide.input.Focus()
+	m.zoxide.all = nil
+	m.zoxide.filtered = nil
+	m.zoxide.cursor = 0
+	m.zoxide.scroll = 0
+	return m
+}
+
+func (m Model) handleKeySystem(msg tea.KeyMsg) (tea.Model, tea.Cmd, bool) {
+	switch msg.String() {
 	case "r":
-		// Force refresh: purge cache for visible workspaces and reload.
 		if m.stats_svc != nil {
 			for _, p := range m.workspaces {
 				_ = m.stats_svc.Invalidate(p.Path)
 			}
 		}
-		return m, loadDataCmd(m.stats_svc)
-
+		return m, loadDataCmd(m.stats_svc), true
 	case "?":
 		m.mode = modeHelp
-		return m, nil
-
+		return m, nil, true
 	case "q", "esc":
 		if m.focus == colDetail {
 			m.focus = colWorkspaces
-			return m, nil
+			return m, nil, true
 		}
-		return m, tea.Quit
+		return m, tea.Quit, true
 	}
-	return m, nil
+	return m, nil, false
 }
 
 func (m Model) moveCursor(delta int) (tea.Model, tea.Cmd) {
@@ -685,49 +698,42 @@ func (m Model) handleNewBranchAgent(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 func (m Model) handleConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "y", "Y":
-		m.mode = modeNormal
-		switch m.confirmAction {
-		case confirmActionRemoveWorkspace:
-			wsreg.RemoveWorkspace(m.confirmPath)
-			if m.stats_svc != nil {
-				_ = m.stats_svc.Invalidate(m.confirmPath)
-			}
-			_ = wsreg.PurgeArchivedWorktreesForWorkspace(m.confirmPath)
-			m.confirmAction = confirmActionNone
-			m.confirmName = ""
-			m.confirmPath = ""
-			m.confirmBranch = ""
-			m.confirmWPath = ""
-			return m, loadDataCmd(m.stats_svc)
-		case confirmActionRemoveWorktree:
-			branch := m.confirmBranch
-			path := m.confirmWPath
-			workspacePath := m.confirmPath
-			m.confirmAction = confirmActionNone
-			m.confirmName = ""
-			m.confirmPath = ""
-			m.confirmBranch = ""
-			m.confirmWPath = ""
-			return m, m.deleteWorktree(workspacePath, path, branch)
-		}
-		return m, nil
-	case "n", "N", "esc":
-		m.mode = modeNormal
-		m.confirmAction = confirmActionNone
-		m.confirmName = ""
-		m.confirmPath = ""
-		m.confirmBranch = ""
-		m.confirmWPath = ""
-		return m, nil
+		return m.confirmYes()
 	default:
-		m.mode = modeNormal
-		m.confirmAction = confirmActionNone
-		m.confirmName = ""
-		m.confirmPath = ""
-		m.confirmBranch = ""
-		m.confirmWPath = ""
+		// "n", "N", "esc" and any other key cancel.
+		m.resetConfirm()
 		return m, nil
 	}
+}
+
+func (m Model) confirmYes() (tea.Model, tea.Cmd) {
+	action := m.confirmAction
+	path := m.confirmPath
+	branch := m.confirmBranch
+	wpath := m.confirmWPath
+	m.resetConfirm()
+
+	switch action {
+	case confirmActionRemoveWorkspace:
+		wsreg.RemoveWorkspace(path)
+		if m.stats_svc != nil {
+			_ = m.stats_svc.Invalidate(path)
+		}
+		_ = wsreg.PurgeArchivedWorktreesForWorkspace(path)
+		return m, loadDataCmd(m.stats_svc)
+	case confirmActionRemoveWorktree:
+		return m, m.deleteWorktree(path, wpath, branch)
+	}
+	return m, nil
+}
+
+func (m *Model) resetConfirm() {
+	m.mode = modeNormal
+	m.confirmAction = confirmActionNone
+	m.confirmName = ""
+	m.confirmPath = ""
+	m.confirmBranch = ""
+	m.confirmWPath = ""
 }
 
 func (m Model) deleteWorktree(workspacePath, worktreePath, branch string) tea.Cmd {
@@ -800,9 +806,7 @@ func (m Model) openActionPicker() (tea.Model, tea.Cmd) {
 func (m Model) handleActionPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
 	case "esc", "q":
-		m.mode = modeNormal
-		m.actionItems = nil
-		m.actionCursor = 0
+		m.closeActionPicker()
 		return m, nil
 	case "j", "down":
 		if m.actionCursor < len(m.actionItems)-1 {
@@ -815,53 +819,80 @@ func (m Model) handleActionPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return m, nil
 	case keyEnter:
-		if m.actionCursor < 0 || m.actionCursor >= len(m.actionItems) || len(m.workspaces) == 0 {
-			return m, nil
-		}
-		selected := m.actionItems[m.actionCursor]
-		m.mode = modeNormal
-		m.actionItems = nil
-		m.actionCursor = 0
-
-		switch selected.Kind {
-		case actionKindRemoveWorkspace:
-			p := m.workspaces[m.wsCursor]
-			m.confirmAction = confirmActionRemoveWorkspace
-			m.confirmName = p.Name
-			m.confirmPath = p.Path
-			m.confirmBranch = ""
-			m.confirmWPath = ""
-			m.mode = modeConfirm
-			return m, nil
-		case actionKindArchiveWorktree:
-			if m.detCursor < 0 || m.detCursor >= len(m.branches) {
-				return m, nil
-			}
-			br := m.branches[m.detCursor]
-			if br.Path == "" {
-				return m, m.pushToast("missing worktree path", toastWarn)
-			}
-			p := m.workspaces[m.wsCursor]
-			return m, m.archiveWorktree(p.Path, br.Path)
-		case actionKindDeleteWorktree:
-			if m.detCursor < 0 || m.detCursor >= len(m.branches) {
-				return m, nil
-			}
-			br := m.branches[m.detCursor]
-			if br.Path == "" {
-				return m, m.pushToast("missing worktree path", toastWarn)
-			}
-			p := m.workspaces[m.wsCursor]
-			m.confirmAction = confirmActionRemoveWorktree
-			m.confirmName = p.Name
-			m.confirmPath = p.Path
-			m.confirmBranch = br.Name
-			m.confirmWPath = br.Path
-			m.mode = modeConfirm
-			return m, nil
-		}
+		return m.confirmActionPickerSelection()
 	}
 	return m, nil
+}
+
+func (m *Model) closeActionPicker() {
+	m.mode = modeNormal
+	m.actionItems = nil
+	m.actionCursor = 0
+}
+
+func (m Model) confirmActionPickerSelection() (tea.Model, tea.Cmd) {
+	if m.actionCursor < 0 || m.actionCursor >= len(m.actionItems) || len(m.workspaces) == 0 {
+		return m, nil
+	}
+	selected := m.actionItems[m.actionCursor]
+	m.closeActionPicker()
+	switch selected.Kind {
+	case actionKindRemoveWorkspace:
+		return m.dispatchRemoveWorkspaceAction()
+	case actionKindArchiveWorktree:
+		return m.dispatchArchiveWorktreeAction()
+	case actionKindDeleteWorktree:
+		return m.dispatchDeleteWorktreeAction()
+	}
+	return m, nil
+}
+
+func (m Model) dispatchRemoveWorkspaceAction() (tea.Model, tea.Cmd) {
+	p := m.workspaces[m.wsCursor]
+	m.confirmAction = confirmActionRemoveWorkspace
+	m.confirmName = p.Name
+	m.confirmPath = p.Path
+	m.confirmBranch = ""
+	m.confirmWPath = ""
+	m.mode = modeConfirm
+	return m, nil
+}
+
+func (m Model) dispatchArchiveWorktreeAction() (tea.Model, tea.Cmd) {
+	br, ok := m.selectedBranch()
+	if !ok {
+		return m, nil
+	}
+	if br.Path == "" {
+		return m, m.pushToast("missing worktree path", toastWarn)
+	}
+	p := m.workspaces[m.wsCursor]
+	return m, m.archiveWorktree(p.Path, br.Path)
+}
+
+func (m Model) dispatchDeleteWorktreeAction() (tea.Model, tea.Cmd) {
+	br, ok := m.selectedBranch()
+	if !ok {
+		return m, nil
+	}
+	if br.Path == "" {
+		return m, m.pushToast("missing worktree path", toastWarn)
+	}
+	p := m.workspaces[m.wsCursor]
+	m.confirmAction = confirmActionRemoveWorktree
+	m.confirmName = p.Name
+	m.confirmPath = p.Path
+	m.confirmBranch = br.Name
+	m.confirmWPath = br.Path
+	m.mode = modeConfirm
+	return m, nil
+}
+
+func (m Model) selectedBranch() (branchEntry, bool) {
+	if m.detCursor < 0 || m.detCursor >= len(m.branches) {
+		return branchEntry{}, false
+	}
+	return m.branches[m.detCursor], true
 }
 
 func (m Model) handleHelp(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
@@ -914,22 +945,20 @@ func (m Model) handleAgentPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // When focus is on the detail column with a branch under the cursor, the
 // agent picker opens pre-targeting that branch. When focus is on the
 // workspaces column (no branch context), it opens a small chooser instead.
-func (m Model) startAgentAttach(target agentTarget) (tea.Model, tea.Cmd) {
+func (m Model) startAgentAttach(target agentTarget) tea.Model {
 	if len(m.workspaces) == 0 {
-		return m, nil
+		return m
 	}
-
 	if m.focus == colDetail && m.detCursor >= 0 && m.detCursor < len(m.branches) {
 		br := m.branches[m.detCursor]
-		return m.openAgentPickerFor(br, target), nil
+		return m.openAgentPickerFor(br, target)
 	}
-
 	// Workspaces focus or agents row selected: open the "where do you want
 	// the agent?" modal.
 	m.mode = modeAgentAttachChoice
 	m.attachChoiceCursor = 0
 	m.agentPickerTarget = target
-	return m, nil
+	return m
 }
 
 // openAgentPickerFor prepares the picker to attach an agent to `br`.
@@ -1043,30 +1072,8 @@ func (m Model) openWorktreeSession(project string, b branchEntry) tea.Cmd {
 func (m Model) createWorktreeAndOpen(project, projPath, branch string, agent *agents.Agent, mode agents.AgentMode) tea.Cmd {
 	svc := m.stats_svc
 	return func() tea.Msg {
-		// Avoid asking worktrunk to --create a worktree that already exists:
-		// with a stale worktree present it can generate a sibling directory
-		// with a numeric suffix. Probe the worktree list first and only pass
-		// --create when the branch really is missing.
-		existing, err := worktree.ListInDir(projPath)
-		if err != nil {
-			return toastMsg{text: "wt list failed: " + err.Error(), level: toastError}
-		}
-		alreadyExists := false
-		for _, wt := range existing {
-			if wt.Branch == branch {
-				alreadyExists = true
-				break
-			}
-		}
-		args := []string{"switch", "--no-cd"}
-		if !alreadyExists {
-			args = append(args, "--create")
-		}
-		args = append(args, branch)
-		cmd := exec.Command("wt", args...)
-		cmd.Dir = projPath
-		if err := cmd.Run(); err != nil {
-			return toastMsg{text: "wt switch failed: " + err.Error(), level: toastError}
+		if err := ensureWorktreeBranch(projPath, branch); err != nil {
+			return toastMsg{text: err.Error(), level: toastError}
 		}
 		wts, err := worktree.ListInDir(projPath)
 		if err != nil {
@@ -1075,33 +1082,79 @@ func (m Model) createWorktreeAndOpen(project, projPath, branch string, agent *ag
 		if svc != nil {
 			_ = svc.Invalidate(projPath)
 		}
-		for _, wt := range wts {
-			if wt.Branch != branch {
-				continue
-			}
-			sessName, freshSession, err := ensureSessionForPath(project, branch, wt.Path)
-			if err != nil {
-				return toastMsg{text: err.Error(), level: toastError}
-			}
-			if agent != nil {
-				if freshSession {
-					// new-session already created window 0; reuse it so the
-					// layout stays minimal.
-					winTarget := sessName + ":0"
-					_ = tmux.RenameWindow(winTarget, agent.ID)
-					_ = tmux.SendKeys(winTarget, agent.FullCommand(mode))
-				} else {
-					winName := uniqueWindowName(sessName, agent.ID)
-					if err := tmux.NewWindowInSession(sessName, winName, wt.Path, agent.FullCommand(mode)); err != nil {
-						return toastMsg{text: "tmux new-window failed: " + err.Error(), level: toastError}
-					}
-				}
-			}
-			_ = tmux.SwitchClient(sessName)
-			return switchDoneMsg{}
+		wt, ok := findWorktreeByBranch(wts, branch)
+		if !ok {
+			return actionDoneMsg{}
 		}
-		return actionDoneMsg{}
+		return attachSessionAndAgent(project, branch, wt, agent, mode)
 	}
+}
+
+// ensureWorktreeBranch creates the branch if it doesn't exist yet.
+// We probe first because `wt switch --create` against an existing branch can
+// generate sibling directories with numeric suffixes.
+func ensureWorktreeBranch(projPath, branch string) error {
+	existing, err := worktree.ListInDir(projPath)
+	if err != nil {
+		return fmt.Errorf("wt list failed: %w", err)
+	}
+	alreadyExists := false
+	for _, wt := range existing {
+		if wt.Branch == branch {
+			alreadyExists = true
+			break
+		}
+	}
+	args := []string{"switch", "--no-cd"}
+	if !alreadyExists {
+		args = append(args, "--create")
+	}
+	args = append(args, branch)
+	cmd := exec.Command("wt", args...)
+	cmd.Dir = projPath
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("wt switch failed: %w", err)
+	}
+	return nil
+}
+
+func findWorktreeByBranch(wts []worktree.Worktree, branch string) (worktree.Worktree, bool) {
+	for _, wt := range wts {
+		if wt.Branch == branch {
+			return wt, true
+		}
+	}
+	return worktree.Worktree{}, false
+}
+
+func attachSessionAndAgent(project, branch string, wt worktree.Worktree, agent *agents.Agent, mode agents.AgentMode) tea.Msg {
+	sessName, freshSession, err := ensureSessionForPath(project, branch, wt.Path)
+	if err != nil {
+		return toastMsg{text: err.Error(), level: toastError}
+	}
+	if agent != nil {
+		if err := spawnAgentForSession(sessName, wt.Path, *agent, mode, freshSession); err != nil {
+			return toastMsg{text: err.Error(), level: toastError}
+		}
+	}
+	_ = tmux.SwitchClient(sessName)
+	return switchDoneMsg{}
+}
+
+func spawnAgentForSession(sessName, worktreePath string, agent agents.Agent, mode agents.AgentMode, freshSession bool) error {
+	command := agent.FullCommand(mode)
+	if freshSession {
+		// new-session already created window 0; reuse it so the layout stays minimal.
+		winTarget := sessName + ":0"
+		_ = tmux.RenameWindow(winTarget, agent.ID)
+		_ = tmux.SendKeys(winTarget, command)
+		return nil
+	}
+	winName := uniqueWindowName(sessName, agent.ID)
+	if err := tmux.NewWindowInSession(sessName, winName, worktreePath, command); err != nil {
+		return fmt.Errorf("tmux new-window failed: %w", err)
+	}
+	return nil
 }
 
 // ensureSessionForPath returns the tmux session that already points at

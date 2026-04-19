@@ -58,86 +58,94 @@ func (m Model) Init() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.MouseMsg:
-		switch msg.Button {
-		case tea.MouseButtonLeft:
-			if msg.Action != tea.MouseActionRelease {
-				return m, nil
-			}
-			row := msg.Y
-			if row < 2 || (row-2)%2 != 0 {
-				return m, nil
-			}
-			idx := m.scroll + (row-2)/2
-			if idx < 0 || idx >= len(m.filtered) {
-				return m, nil
-			}
-			cmd := m.filtered[idx]
-			return m, func() tea.Msg {
-				return messages.ExecuteCommandMsg{ID: cmd.ID}
-			}
-		case tea.MouseButtonWheelUp:
-			m.cursor--
-			if m.cursor < 0 {
-				m.cursor = 0
-			}
-			m.ensureVisible()
-		case tea.MouseButtonWheelDown:
-			m.cursor++
-			if m.cursor >= len(m.filtered) {
-				m.cursor = len(m.filtered) - 1
-			}
-			if m.cursor < 0 {
-				m.cursor = 0
-			}
-			m.ensureVisible()
-		}
-		return m, nil
-
+		return m.handleMouse(msg)
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "enter":
-			if m.cursor >= 0 && m.cursor < len(m.filtered) {
-				cmd := m.filtered[m.cursor]
-				return m, func() tea.Msg {
-					return messages.ExecuteCommandMsg{ID: cmd.ID}
-				}
-			}
-
-		case "up", "ctrl+k":
-			m.cursor--
-			if m.cursor < 0 {
-				m.cursor = 0
-			}
-			m.ensureVisible()
-			return m, nil
-
-		case "down", "ctrl+j":
-			m.cursor++
-			if m.cursor >= len(m.filtered) {
-				m.cursor = len(m.filtered) - 1
-			}
-			if m.cursor < 0 {
-				m.cursor = 0
-			}
-			m.ensureVisible()
-			return m, nil
-
-		case "alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "alt+6", "alt+7", "alt+8", "alt+9":
-			idx := int(msg.Runes[0]-'0') - 1
-			if idx < len(m.filtered) {
-				cmd := m.filtered[idx]
-				return m, func() tea.Msg {
-					return messages.ExecuteCommandMsg{ID: cmd.ID}
-				}
-			}
-			return m, nil
+		if updated, cmd, handled := m.handleKey(msg); handled {
+			return updated, cmd
 		}
 	}
 
 	var cmd tea.Cmd
 	m.input, cmd = m.input.Update(msg)
+	m.refilter()
+	return m, cmd
+}
 
-	// Re-filter on every keystroke
+func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
+	switch msg.Button {
+	case tea.MouseButtonLeft:
+		return m.handleMouseLeft(msg)
+	case tea.MouseButtonWheelUp:
+		m.moveCursor(-1)
+	case tea.MouseButtonWheelDown:
+		m.moveCursor(1)
+	}
+	return m, nil
+}
+
+func (m Model) handleMouseLeft(msg tea.MouseMsg) (Model, tea.Cmd) {
+	if msg.Action != tea.MouseActionRelease {
+		return m, nil
+	}
+	row := msg.Y
+	if row < 2 || (row-2)%2 != 0 {
+		return m, nil
+	}
+	idx := m.scroll + (row-2)/2
+	if idx < 0 || idx >= len(m.filtered) {
+		return m, nil
+	}
+	return m, executeCmdByID(m.filtered[idx].ID)
+}
+
+func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	switch msg.String() {
+	case "enter":
+		return m.handleEnter()
+	case "up", "ctrl+k":
+		m.moveCursor(-1)
+		return m, nil, true
+	case "down", "ctrl+j":
+		m.moveCursor(1)
+		return m, nil, true
+	case "alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "alt+6", "alt+7", "alt+8", "alt+9":
+		return m.handleAltDigit(msg)
+	}
+	return m, nil, false
+}
+
+func (m Model) handleEnter() (Model, tea.Cmd, bool) {
+	if m.cursor < 0 || m.cursor >= len(m.filtered) {
+		return m, nil, false
+	}
+	cmd := m.filtered[m.cursor]
+	return m, executeCmdByID(cmd.ID), true
+}
+
+func (m Model) handleAltDigit(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	idx := int(msg.Runes[0]-'0') - 1
+	if idx < 0 || idx >= len(m.filtered) {
+		return m, nil, true
+	}
+	cmd := m.filtered[idx]
+	return m, executeCmdByID(cmd.ID), true
+}
+
+func (m *Model) moveCursor(delta int) {
+	m.cursor += delta
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+	if m.cursor >= len(m.filtered) {
+		m.cursor = len(m.filtered) - 1
+	}
+	if m.cursor < 0 {
+		m.cursor = 0
+	}
+	m.ensureVisible()
+}
+
+func (m *Model) refilter() {
 	query := m.input.Value()
 	if query == "" {
 		m.filtered = m.commands
@@ -154,8 +162,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	}
 	m.cursor = 0
 	m.scroll = 0
+}
 
-	return m, cmd
+func executeCmdByID(id string) tea.Cmd {
+	return func() tea.Msg {
+		return messages.ExecuteCommandMsg{ID: id}
+	}
 }
 
 func (m Model) maxVisible() int {
