@@ -8,18 +8,18 @@ import (
 )
 
 // rebuildDetail rebuilds the right column (branches + agents) for the
-// currently selected project.
+// currently selected workspace.
 func (m *Model) rebuildDetail() {
-	if len(m.projects) == 0 {
+	if len(m.workspaces) == 0 {
 		m.branches = nil
 		m.agentEntries = nil
 		m.detailItems = 0
 		return
 	}
 
-	proj := m.projects[m.projCursor]
-	m.branches = m.buildBranches(proj)
-	m.agentEntries = detectAgents(m.panes, proj.Path, m.repoRoots, m.sessions)
+	ws := m.workspaces[m.wsCursor]
+	m.branches = m.buildBranches(ws)
+	m.agentEntries = detectAgents(m.panes, ws.Path, m.repoRoots, m.sessions)
 	m.detailItems = len(m.branches) + len(m.agentEntries)
 	m.detCursor = 0
 	m.detScroll = 0
@@ -27,11 +27,11 @@ func (m *Model) rebuildDetail() {
 
 // buildBranches merges live sessions and inactive worktrees into the
 // ordered list shown in the detail column.
-func (m *Model) buildBranches(proj projectEntry) []branchEntry {
+func (m *Model) buildBranches(wsEntry workspaceEntry) []branchEntry {
 	// Pull stats once for this workspace.
-	ws := m.wsStats[proj.Path]
-	statsByPath := make(map[string]int, len(ws.Worktrees))
-	for i, wt := range ws.Worktrees {
+	stats := m.wsStats[wsEntry.Path]
+	statsByPath := make(map[string]int, len(stats.Worktrees))
+	for i, wt := range stats.Worktrees {
 		statsByPath[wt.WorktreePath] = i
 	}
 
@@ -40,11 +40,11 @@ func (m *Model) buildBranches(proj projectEntry) []branchEntry {
 
 	for _, s := range m.sessions {
 		root := m.repoRoots[s.Name]
-		if root != proj.Path {
+		if root != wsEntry.Path {
 			continue
 		}
-		childName := trimPrefix(s.Name, proj.Name)
-		if s.Path == proj.Path {
+		childName := trimPrefix(s.Name, wsEntry.Name)
+		if s.Path == wsEntry.Path {
 			if branch := resolveGitBranch(s.Path); branch != "" {
 				childName = branch
 			}
@@ -60,7 +60,7 @@ func (m *Model) buildBranches(proj projectEntry) []branchEntry {
 		}
 
 		if idx, ok := statsByPath[s.Path]; ok {
-			wt := ws.Worktrees[idx]
+			wt := stats.Worktrees[idx]
 			entry.DiffAdded = wt.Added
 			entry.DiffDel = wt.Deleted
 			entry.IsMain = wt.IsMain
@@ -92,7 +92,7 @@ func (m *Model) buildBranches(proj projectEntry) []branchEntry {
 	})
 
 	var inactive []branchEntry
-	for _, wt := range m.wtByPath[proj.Path] {
+	for _, wt := range m.wtByPath[wsEntry.Path] {
 		if sessionPaths[wt.Path] {
 			continue
 		}
@@ -101,15 +101,15 @@ func (m *Model) buildBranches(proj projectEntry) []branchEntry {
 			Path: wt.Path,
 		}
 		if idx, ok := statsByPath[wt.Path]; ok {
-			ws := ws.Worktrees[idx]
-			entry.DiffAdded = ws.Added
-			entry.DiffDel = ws.Deleted
-			entry.IsMain = ws.IsMain
-			entry.Staged = ws.Staged
-			entry.Modified = ws.Modified
-			entry.Untracked = ws.Untracked
-			entry.Ahead = ws.Ahead
-			entry.Behind = ws.Behind
+			st := stats.Worktrees[idx]
+			entry.DiffAdded = st.Added
+			entry.DiffDel = st.Deleted
+			entry.IsMain = st.IsMain
+			entry.Staged = st.Staged
+			entry.Modified = st.Modified
+			entry.Untracked = st.Untracked
+			entry.Ahead = st.Ahead
+			entry.Behind = st.Behind
 		} else {
 			entry.IsMain = wt.IsMain
 		}
@@ -132,7 +132,7 @@ func (m *Model) buildBranches(proj projectEntry) []branchEntry {
 }
 
 // detectAgents finds running agent panes scoped to a workspace path.
-func detectAgents(panes []tmux.Pane, projectPath string, repoRoots map[string]string, sessions []tmux.Session) []agentEntry {
+func detectAgents(panes []tmux.Pane, workspacePath string, repoRoots map[string]string, sessions []tmux.Session) []agentEntry {
 	agentCommands := make(map[string]agents.Agent)
 	for _, a := range agents.DefaultAgents() {
 		agentCommands[a.Command] = a
@@ -148,7 +148,7 @@ func detectAgents(panes []tmux.Pane, projectPath string, repoRoots map[string]st
 	var detected []agentEntry
 	for _, p := range panes {
 		root := sessPathMap[p.SessionName]
-		if root != projectPath {
+		if root != workspacePath {
 			continue
 		}
 		a, ok := agentCommands[p.Command]

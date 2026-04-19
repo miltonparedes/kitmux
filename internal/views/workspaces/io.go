@@ -51,10 +51,10 @@ func loadInitialSnapshot(svc *wsdata.StatsService) tea.Msg {
 	}
 	wtByPath := worktreesFromCache(projs, cached)
 
-	entries := make([]projectEntry, len(projs))
+	entries := make([]workspaceEntry, len(projs))
 	for i, p := range projs {
 		act := activePaths[p.Path]
-		entries[i] = projectEntry{
+		entries[i] = workspaceEntry{
 			Name:     p.Name,
 			Path:     p.Path,
 			Active:   act > 0,
@@ -63,11 +63,11 @@ func loadInitialSnapshot(svc *wsdata.StatsService) tea.Msg {
 	}
 
 	return dataLoadedMsg{
-		projects:  entries,
-		sessions:  sess,
-		repoRoots: repoRoots,
-		wtByPath:  wtByPath,
-		panes:     panes,
+		workspaces: entries,
+		sessions:   sess,
+		repoRoots:  repoRoots,
+		wtByPath:   wtByPath,
+		panes:      panes,
 	}
 }
 
@@ -135,13 +135,13 @@ func refreshStatsCmd(svc *wsdata.StatsService, workspacePath string) tea.Cmd {
 // single statsLoadedMsg — we intentionally avoid dispatching one Bubble Tea
 // message per workspace because the UI re-renders on every message and that
 // creates visible flicker with large workspace lists.
-func refreshAllStatsCmd(svc *wsdata.StatsService, projects []projectEntry) tea.Cmd {
-	if svc == nil || len(projects) == 0 {
+func refreshAllStatsCmd(svc *wsdata.StatsService, workspaces []workspaceEntry) tea.Cmd {
+	if svc == nil || len(workspaces) == 0 {
 		return nil
 	}
-	paths := make([]string, 0, len(projects))
-	for _, p := range projects {
-		paths = append(paths, p.Path)
+	paths := make([]string, 0, len(workspaces))
+	for _, w := range workspaces {
+		paths = append(paths, w.Path)
 	}
 	return func() tea.Msg {
 		var (

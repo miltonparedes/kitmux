@@ -11,7 +11,7 @@ import (
 type column int
 
 const (
-	colProjects column = iota
+	colWorkspaces column = iota
 	colDetail
 )
 
@@ -20,7 +20,7 @@ type dashMode int
 const (
 	modeNormal dashMode = iota
 	modeFiltering
-	modeProjectSearch
+	modeWorkspaceSearch
 	modeNewBranch
 	modeConfirm
 	modeAgentPicker
@@ -28,8 +28,8 @@ const (
 
 const keyEnter = "enter"
 
-// projectEntry represents a workspace in the left column.
-type projectEntry struct {
+// workspaceEntry represents a workspace in the left column.
+type workspaceEntry struct {
 	Name       string
 	Path       string
 	Active     bool
@@ -76,11 +76,11 @@ type sessionStats struct {
 
 // dataLoadedMsg is dispatched when the initial snapshot finishes loading.
 type dataLoadedMsg struct {
-	projects  []projectEntry
-	sessions  []tmux.Session
-	repoRoots map[string]string
-	wtByPath  map[string][]worktree.Worktree
-	panes     []tmux.Pane
+	workspaces []workspaceEntry
+	sessions   []tmux.Session
+	repoRoots  map[string]string
+	wtByPath   map[string][]worktree.Worktree
+	panes      []tmux.Pane
 }
 
 // statsLoadedMsg is dispatched when live worktree stats arrive from StatsService.
@@ -91,7 +91,7 @@ type statsLoadedMsg struct {
 	workPath string // "" for full reload, else single-workspace delta
 }
 
-// zoxideLoadedMsg delivers zoxide query results to the project search.
+// zoxideLoadedMsg delivers zoxide query results to the workspace picker.
 type zoxideLoadedMsg struct {
 	entries []zoxideEntry
 }

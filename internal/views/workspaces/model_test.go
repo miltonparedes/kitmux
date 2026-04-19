@@ -59,22 +59,22 @@ func keyMsg(s string) tea.KeyMsg {
 	}
 }
 
-func seedModel(projects []projectEntry, sessions []tmux.Session, repoRoots map[string]string, wtByPath map[string][]worktree.Worktree, panes []tmux.Pane) Model {
+func seedModel(projects []workspaceEntry, sessions []tmux.Session, repoRoots map[string]string, wtByPath map[string][]worktree.Worktree, panes []tmux.Pane) Model {
 	m := New()
 	m.width = 120
 	m.height = 30
-	m.projects = projects
+	m.workspaces = projects
 	m.sessions = sessions
 	m.repoRoots = repoRoots
 	m.wtByPath = wtByPath
 	m.panes = panes
-	m.clampProjCursor()
+	m.clampWorkspaceCursor()
 	m.rebuildDetail()
 	return m
 }
 
-func testProjects() []projectEntry {
-	return []projectEntry{
+func testWorkspaces() []workspaceEntry {
+	return []workspaceEntry{
 		{Name: "kitmux", Path: "/home/user/kitmux", Active: true, Activity: 200},
 		{Name: "api", Path: "/home/user/api", Active: true, Activity: 100},
 		{Name: "dotfiles", Path: "/home/user/dotfiles", Active: false},
@@ -119,15 +119,15 @@ func testPanes() []tmux.Pane {
 }
 
 func newSeededModel() Model {
-	return seedModel(testProjects(), testSessions(), testRepoRoots(), testWtByPath(), testPanes())
+	return seedModel(testWorkspaces(), testSessions(), testRepoRoots(), testWtByPath(), testPanes())
 }
 
 // --- Column focus tests ---
 
 func TestInitialFocusIsProjects(t *testing.T) {
 	m := newSeededModel()
-	if m.focus != colProjects {
-		t.Errorf("expected initial focus on colProjects, got %d", m.focus)
+	if m.focus != colWorkspaces {
+		t.Errorf("expected initial focus on colWorkspaces, got %d", m.focus)
 	}
 }
 
@@ -146,8 +146,8 @@ func TestFocusSwitchWithH(t *testing.T) {
 	m = updated.(Model)
 	updated, _ = m.Update(keyMsg("h"))
 	m = updated.(Model)
-	if m.focus != colProjects {
-		t.Errorf("expected focus on colProjects after 'h', got %d", m.focus)
+	if m.focus != colWorkspaces {
+		t.Errorf("expected focus on colWorkspaces after 'h', got %d", m.focus)
 	}
 }
 
@@ -160,8 +160,8 @@ func TestFocusSwitchWithArrows(t *testing.T) {
 	}
 	updated, _ = m.Update(keyMsg("left"))
 	m = updated.(Model)
-	if m.focus != colProjects {
-		t.Errorf("expected focus on colProjects after left arrow, got %d", m.focus)
+	if m.focus != colWorkspaces {
+		t.Errorf("expected focus on colWorkspaces after left arrow, got %d", m.focus)
 	}
 }
 
@@ -178,8 +178,8 @@ func TestHOnProjectsDoesNothing(t *testing.T) {
 	m := newSeededModel()
 	updated, _ := m.Update(keyMsg("h"))
 	m = updated.(Model)
-	if m.focus != colProjects {
-		t.Errorf("expected focus to remain on colProjects, got %d", m.focus)
+	if m.focus != colWorkspaces {
+		t.Errorf("expected focus to remain on colWorkspaces, got %d", m.focus)
 	}
 }
 
@@ -187,8 +187,8 @@ func TestLOnEmptyDetailDoesNotSwitch(t *testing.T) {
 	m := seedModel(nil, nil, nil, nil, nil)
 	updated, _ := m.Update(keyMsg("l"))
 	m = updated.(Model)
-	if m.focus != colProjects {
-		t.Errorf("expected focus to remain on colProjects with no detail, got %d", m.focus)
+	if m.focus != colWorkspaces {
+		t.Errorf("expected focus to remain on colWorkspaces with no detail, got %d", m.focus)
 	}
 }
 
@@ -196,20 +196,20 @@ func TestLOnEmptyDetailDoesNotSwitch(t *testing.T) {
 
 func TestJKNavigateProjects(t *testing.T) {
 	m := newSeededModel()
-	if m.projCursor != 0 {
-		t.Fatalf("expected initial cursor at 0, got %d", m.projCursor)
+	if m.wsCursor != 0 {
+		t.Fatalf("expected initial cursor at 0, got %d", m.wsCursor)
 	}
 
 	updated, _ := m.Update(keyMsg("j"))
 	m = updated.(Model)
-	if m.projCursor != 1 {
-		t.Errorf("expected cursor at 1 after 'j', got %d", m.projCursor)
+	if m.wsCursor != 1 {
+		t.Errorf("expected cursor at 1 after 'j', got %d", m.wsCursor)
 	}
 
 	updated, _ = m.Update(keyMsg("k"))
 	m = updated.(Model)
-	if m.projCursor != 0 {
-		t.Errorf("expected cursor at 0 after 'k', got %d", m.projCursor)
+	if m.wsCursor != 0 {
+		t.Errorf("expected cursor at 0 after 'k', got %d", m.wsCursor)
 	}
 }
 
@@ -220,8 +220,8 @@ func TestProjectCursorClamps(t *testing.T) {
 		updated, _ := m.Update(keyMsg("j"))
 		m = updated.(Model)
 	}
-	if m.projCursor != len(m.projects)-1 {
-		t.Errorf("expected cursor clamped to %d, got %d", len(m.projects)-1, m.projCursor)
+	if m.wsCursor != len(m.workspaces)-1 {
+		t.Errorf("expected cursor clamped to %d, got %d", len(m.workspaces)-1, m.wsCursor)
 	}
 
 	// Go past the beginning
@@ -229,8 +229,8 @@ func TestProjectCursorClamps(t *testing.T) {
 		updated, _ := m.Update(keyMsg("k"))
 		m = updated.(Model)
 	}
-	if m.projCursor != 0 {
-		t.Errorf("expected cursor clamped to 0, got %d", m.projCursor)
+	if m.wsCursor != 0 {
+		t.Errorf("expected cursor clamped to 0, got %d", m.wsCursor)
 	}
 }
 
@@ -238,13 +238,13 @@ func TestGAndGJumpToEnds(t *testing.T) {
 	m := newSeededModel()
 	updated, _ := m.Update(keyMsg("G"))
 	m = updated.(Model)
-	if m.projCursor != len(m.projects)-1 {
-		t.Errorf("expected cursor at last project, got %d", m.projCursor)
+	if m.wsCursor != len(m.workspaces)-1 {
+		t.Errorf("expected cursor at last project, got %d", m.wsCursor)
 	}
 	updated, _ = m.Update(keyMsg("g"))
 	m = updated.(Model)
-	if m.projCursor != 0 {
-		t.Errorf("expected cursor at 0 after 'g', got %d", m.projCursor)
+	if m.wsCursor != 0 {
+		t.Errorf("expected cursor at 0 after 'g', got %d", m.wsCursor)
 	}
 }
 
@@ -254,15 +254,15 @@ func TestProjectCursorChangeUpdatesDetail(t *testing.T) {
 
 	updated, _ := m.Update(keyMsg("j"))
 	m = updated.(Model)
-	if len(m.branches) == initialBranches && m.projects[0].Path != m.projects[1].Path {
+	if len(m.branches) == initialBranches && m.workspaces[0].Path != m.workspaces[1].Path {
 		t.Log("branches may have changed")
 	}
 	// Verify detail corresponds to the second project (api)
 	for _, b := range m.branches {
 		if b.IsSession && b.SessionName != "" {
 			root := m.repoRoots[b.SessionName]
-			if root != m.projects[m.projCursor].Path {
-				t.Errorf("branch %q belongs to %q, not selected project %q", b.Name, root, m.projects[m.projCursor].Path)
+			if root != m.workspaces[m.wsCursor].Path {
+				t.Errorf("branch %q belongs to %q, not selected project %q", b.Name, root, m.workspaces[m.wsCursor].Path)
 			}
 		}
 	}
@@ -326,18 +326,18 @@ func TestDataLoadedMsgPopulatesModel(t *testing.T) {
 	m.height = 30
 
 	msg := dataLoadedMsg{
-		projects:  testProjects(),
-		sessions:  testSessions(),
-		repoRoots: testRepoRoots(),
-		wtByPath:  testWtByPath(),
-		panes:     testPanes(),
+		workspaces: testWorkspaces(),
+		sessions:   testSessions(),
+		repoRoots:  testRepoRoots(),
+		wtByPath:   testWtByPath(),
+		panes:      testPanes(),
 	}
 
 	updated, _ := m.Update(msg)
 	m = updated.(Model)
 
-	if len(m.projects) != 3 {
-		t.Errorf("expected 3 projects, got %d", len(m.projects))
+	if len(m.workspaces) != 3 {
+		t.Errorf("expected 3 workspaces, got %d", len(m.workspaces))
 	}
 	if len(m.sessions) != 3 {
 		t.Errorf("expected 3 sessions, got %d", len(m.sessions))
@@ -370,8 +370,8 @@ func TestRebuildDetail_InactiveProjectHasNoSessions(t *testing.T) {
 	updated, _ = m.Update(keyMsg("j"))
 	m = updated.(Model)
 
-	if m.projCursor != 2 {
-		t.Fatalf("expected cursor at 2, got %d", m.projCursor)
+	if m.wsCursor != 2 {
+		t.Fatalf("expected cursor at 2, got %d", m.wsCursor)
 	}
 
 	sessionCount := 0
@@ -478,7 +478,7 @@ func TestEscOnDetailGoesBackToProjects(t *testing.T) {
 	}
 	updated, _ = m.Update(keyMsg("esc"))
 	m = updated.(Model)
-	if m.focus != colProjects {
+	if m.focus != colWorkspaces {
 		t.Errorf("expected focus back to projects after esc, got %d", m.focus)
 	}
 }
@@ -489,7 +489,7 @@ func TestQOnDetailGoesBackToProjects(t *testing.T) {
 	m = updated.(Model)
 	updated, cmd := m.Update(keyMsg("q"))
 	m = updated.(Model)
-	if m.focus != colProjects {
+	if m.focus != colWorkspaces {
 		t.Errorf("expected focus back to projects after q, got %d", m.focus)
 	}
 	if cmd != nil {
@@ -539,13 +539,13 @@ func TestConfirmYesRemoves(t *testing.T) {
 	}
 
 	m := seedModel(
-		[]projectEntry{
+		[]workspaceEntry{
 			{Name: "alpha", Path: "/tmp/alpha"},
 			{Name: "beta", Path: "/tmp/beta"},
 		},
 		nil, nil, nil, nil,
 	)
-	m.projCursor = 0
+	m.wsCursor = 0
 
 	updated, _ := m.Update(keyMsg("d"))
 	m = updated.(Model)
@@ -569,8 +569,8 @@ func TestNEntersProjectSearchMode(t *testing.T) {
 	m := newSeededModel()
 	updated, _ := m.Update(keyMsg("n"))
 	m = updated.(Model)
-	if m.mode != modeProjectSearch {
-		t.Errorf("expected modeProjectSearch, got %d", m.mode)
+	if m.mode != modeWorkspaceSearch {
+		t.Errorf("expected modeWorkspaceSearch, got %d", m.mode)
 	}
 }
 
@@ -759,7 +759,7 @@ func TestProjectScrollingWithSmallHeight(t *testing.T) {
 	}
 
 	// Scroll should have adjusted
-	if m.projCursor > len(m.projects)-1 {
+	if m.wsCursor > len(m.workspaces)-1 {
 		t.Error("cursor out of bounds")
 	}
 }
@@ -844,7 +844,7 @@ func TestViewColumns_FooterChangesWithFocus(t *testing.T) {
 
 func TestViewProjectSearch_Renders(t *testing.T) {
 	m := newSeededModel()
-	m.mode = modeProjectSearch
+	m.mode = modeWorkspaceSearch
 	m.zoxide.all = []zoxideEntry{
 		{Score: 100, Path: "/home/user/test", Short: "~/test"},
 	}
@@ -905,8 +905,8 @@ func TestViewColumns_InactiveWorktreeDimmed(t *testing.T) {
 func TestViewColumns_HasColumnHeaders(t *testing.T) {
 	m := newSeededModel()
 	output := m.View()
-	if !strings.Contains(output, "Projects") {
-		t.Error("expected 'Projects' header in output")
+	if !strings.Contains(output, "Workspaces") {
+		t.Error("expected 'Workspaces' header in output")
 	}
 	if !strings.Contains(output, "Branches") {
 		t.Error("expected 'Branches' section header in output")
@@ -977,13 +977,13 @@ func TestMouseScrollInProjects(t *testing.T) {
 	m := newSeededModel()
 	updated, _ := m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelDown})
 	m = updated.(Model)
-	if m.projCursor != 1 {
-		t.Errorf("expected cursor at 1 after wheel down, got %d", m.projCursor)
+	if m.wsCursor != 1 {
+		t.Errorf("expected cursor at 1 after wheel down, got %d", m.wsCursor)
 	}
 	updated, _ = m.Update(tea.MouseMsg{Button: tea.MouseButtonWheelUp})
 	m = updated.(Model)
-	if m.projCursor != 0 {
-		t.Errorf("expected cursor at 0 after wheel up, got %d", m.projCursor)
+	if m.wsCursor != 0 {
+		t.Errorf("expected cursor at 0 after wheel up, got %d", m.wsCursor)
 	}
 }
 
@@ -1011,10 +1011,10 @@ func TestMouseClickProject_SelectsAndMovesCursor(t *testing.T) {
 	// Click on the second project (row index 1 -> y = 2 + 1*2 = 4).
 	updated, _ := m.Update(clickAt(2, 4))
 	m = updated.(Model)
-	if m.projCursor != 1 {
-		t.Errorf("expected cursor on project 1 after click, got %d", m.projCursor)
+	if m.wsCursor != 1 {
+		t.Errorf("expected cursor on project 1 after click, got %d", m.wsCursor)
 	}
-	if m.focus != colProjects {
+	if m.focus != colWorkspaces {
 		t.Errorf("expected focus on projects column, got %d", m.focus)
 	}
 }
@@ -1176,7 +1176,7 @@ func TestEmptyModelNavigation(t *testing.T) {
 
 func TestSingleProjectModel(t *testing.T) {
 	m := seedModel(
-		[]projectEntry{{Name: "solo", Path: "/tmp/solo"}},
+		[]workspaceEntry{{Name: "solo", Path: "/tmp/solo"}},
 		nil, nil, nil, nil,
 	)
 	output := m.View()
@@ -1254,17 +1254,17 @@ func TestZoxideSelected(t *testing.T) {
 	}
 }
 
-// --- selectedProject ---
+// --- selectedWorkspace ---
 
 func TestSelectedProject(t *testing.T) {
 	m := newSeededModel()
-	p := m.selectedProject()
+	p := m.selectedWorkspace()
 	if p == nil || p.Name != "kitmux" {
 		t.Error("expected selected project to be kitmux")
 	}
 
-	m.projects = nil
-	if m.selectedProject() != nil {
+	m.workspaces = nil
+	if m.selectedWorkspace() != nil {
 		t.Error("expected nil when no projects")
 	}
 }
@@ -1275,15 +1275,15 @@ func TestFullNavigationFlow(t *testing.T) {
 	m := newSeededModel()
 
 	// Start at projects column, first project selected
-	if m.focus != colProjects || m.projCursor != 0 {
+	if m.focus != colWorkspaces || m.wsCursor != 0 {
 		t.Fatal("unexpected initial state")
 	}
 
 	// Move to second project
 	updated, _ := m.Update(keyMsg("j"))
 	m = updated.(Model)
-	if m.projCursor != 1 {
-		t.Fatalf("expected cursor at 1, got %d", m.projCursor)
+	if m.wsCursor != 1 {
+		t.Fatalf("expected cursor at 1, got %d", m.wsCursor)
 	}
 	// Second project is "api" — verify detail shows api branches
 	for _, b := range m.branches {
@@ -1306,17 +1306,17 @@ func TestFullNavigationFlow(t *testing.T) {
 	// Go back to projects
 	updated, _ = m.Update(keyMsg("h"))
 	m = updated.(Model)
-	if m.focus != colProjects {
+	if m.focus != colWorkspaces {
 		t.Fatal("expected projects focus after h")
 	}
 
 	// Move to last project and check
 	updated, _ = m.Update(keyMsg("G"))
 	m = updated.(Model)
-	if m.projCursor != 2 {
-		t.Fatalf("expected cursor at 2, got %d", m.projCursor)
+	if m.wsCursor != 2 {
+		t.Fatalf("expected cursor at 2, got %d", m.wsCursor)
 	}
-	if m.projects[m.projCursor].Name != "dotfiles" {
+	if m.workspaces[m.wsCursor].Name != "dotfiles" {
 		t.Error("expected dotfiles at cursor")
 	}
 }

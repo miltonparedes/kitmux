@@ -6,22 +6,22 @@ import (
 )
 
 func TestFilteredIndicesFuzzy(t *testing.T) {
-	projects := []projectEntry{
+	wss := []workspaceEntry{
 		{Name: "kitmux", Path: "/a"},
 		{Name: "api", Path: "/b"},
 		{Name: "dotfiles", Path: "/c"},
 	}
-	got := filteredProjectIndices(projects, "api")
+	got := filteredWorkspaceIndices(wss, "api")
 	if len(got) != 1 || got[0] != 1 {
 		t.Fatalf("expected [1], got %v", got)
 	}
 
-	got = filteredProjectIndices(projects, "")
+	got = filteredWorkspaceIndices(wss, "")
 	if len(got) != 3 {
 		t.Fatalf("expected all indices, got %v", got)
 	}
 
-	got = filteredProjectIndices(projects, "zzzzz")
+	got = filteredWorkspaceIndices(wss, "zzzzz")
 	if len(got) != 0 {
 		t.Fatalf("expected no matches, got %v", got)
 	}
@@ -62,7 +62,7 @@ func TestRenderFilteredLeftShowsNoMatchHint(t *testing.T) {
 
 func TestFilterEnterSnapsCursorToFirstMatch(t *testing.T) {
 	m := newSeededModel()
-	m.projCursor = 0
+	m.wsCursor = 0
 	updated, _ := m.Update(keyMsg("/"))
 	m = updated.(Model)
 
@@ -78,7 +78,7 @@ func TestFilterEnterSnapsCursorToFirstMatch(t *testing.T) {
 	if m.mode != modeNormal {
 		t.Fatalf("expected modeNormal after enter, got %d", m.mode)
 	}
-	if m.projects[m.projCursor].Name != "dotfiles" {
-		t.Errorf("expected cursor on dotfiles, got %q", m.projects[m.projCursor].Name)
+	if m.workspaces[m.wsCursor].Name != "dotfiles" {
+		t.Errorf("expected cursor on dotfiles, got %q", m.workspaces[m.wsCursor].Name)
 	}
 }

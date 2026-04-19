@@ -26,12 +26,12 @@ type Model struct {
 	focus column
 	mode  dashMode
 
-	// Left column — projects
-	projects   []projectEntry
-	projCursor int
-	projScroll int
+	// Left column — workspaces
+	workspaces []workspaceEntry
+	wsCursor   int
+	wsScroll   int
 
-	// Right column — detail for selected project
+	// Right column — detail for selected workspace
 	branches     []branchEntry
 	agentEntries []agentEntry
 	detailItems  int // len(branches) + len(agentEntries)
@@ -56,12 +56,12 @@ type Model struct {
 	// Filter (/)
 	filter textinput.Model
 
-	// Project search (n) — zoxide
+	// Workspace picker (n/f) — zoxide
 	zoxide zoxidePicker
 
 	// New branch input
-	newBranch     textinput.Model
-	newBranchProj projectEntry
+	newBranch   textinput.Model
+	newBranchWs workspaceEntry
 
 	// Agent picker
 	agentPicker agentPickerState
@@ -112,7 +112,7 @@ func newWithService(svc *wsdata.StatsService) Model {
 
 	zi := textinput.New()
 	zi.Prompt = "> "
-	zi.Placeholder = "search project..."
+	zi.Placeholder = "search workspace..."
 	zi.CharLimit = 128
 
 	bi := textinput.New()
@@ -143,7 +143,7 @@ func (m Model) Init() tea.Cmd {
 // InitAddMode returns an Init command that also opens the zoxide "add workspace"
 // picker once initial data has loaded.
 func (m *Model) InitAddMode() tea.Cmd {
-	m.mode = modeProjectSearch
+	m.mode = modeWorkspaceSearch
 	m.zoxide.input.SetValue("")
 	m.zoxide.input.Focus()
 	m.zoxide.all = nil
@@ -165,7 +165,7 @@ func (m *Model) SetSize(w, h int) {
 // intercepted.
 func (m Model) IsEditing() bool {
 	switch m.mode {
-	case modeFiltering, modeProjectSearch, modeNewBranch, modeConfirm, modeAgentPicker:
+	case modeFiltering, modeWorkspaceSearch, modeNewBranch, modeConfirm, modeAgentPicker:
 		return true
 	default:
 		return false
@@ -189,9 +189,9 @@ func (m *Model) pushToast(text string, level toastLevel) tea.Cmd {
 	}
 }
 
-func (m Model) selectedProject() *projectEntry {
-	if m.projCursor >= 0 && m.projCursor < len(m.projects) {
-		return &m.projects[m.projCursor]
+func (m Model) selectedWorkspace() *workspaceEntry {
+	if m.wsCursor >= 0 && m.wsCursor < len(m.workspaces) {
+		return &m.workspaces[m.wsCursor]
 	}
 	return nil
 }
@@ -233,15 +233,15 @@ func trimPrefix(sessionName, projectName string) string {
 
 // Cursor helpers
 
-func (m *Model) clampProjCursor() {
-	if m.projCursor < 0 {
-		m.projCursor = 0
+func (m *Model) clampWorkspaceCursor() {
+	if m.wsCursor < 0 {
+		m.wsCursor = 0
 	}
-	if m.projCursor >= len(m.projects) {
-		m.projCursor = len(m.projects) - 1
+	if m.wsCursor >= len(m.workspaces) {
+		m.wsCursor = len(m.workspaces) - 1
 	}
-	if m.projCursor < 0 {
-		m.projCursor = 0
+	if m.wsCursor < 0 {
+		m.wsCursor = 0
 	}
 }
 
@@ -257,16 +257,16 @@ func (m *Model) clampDetCursor() {
 	}
 }
 
-func (m *Model) ensureProjVisible() {
+func (m *Model) ensureWorkspaceVisible() {
 	avail := m.contentHeight()
 	if avail < 1 {
 		avail = 1
 	}
-	if m.projCursor < m.projScroll {
-		m.projScroll = m.projCursor
+	if m.wsCursor < m.wsScroll {
+		m.wsScroll = m.wsCursor
 	}
-	if m.projCursor >= m.projScroll+avail {
-		m.projScroll = m.projCursor - avail + 1
+	if m.wsCursor >= m.wsScroll+avail {
+		m.wsScroll = m.wsCursor - avail + 1
 	}
 }
 

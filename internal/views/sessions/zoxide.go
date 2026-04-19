@@ -17,51 +17,54 @@ import (
 	"github.com/miltonparedes/kitmux/internal/worktree"
 )
 
-// Project represents a directory entry from zoxide.
-type Project struct {
+// ZoxideEntry represents a directory entry returned by `zoxide query -ls`.
+// The sessions view offers these as the target when the user invokes the
+// "new session from recent directory" picker.
+type ZoxideEntry struct {
 	Score float64
 	Path  string
 	Short string // path relative to $HOME
 }
 
-// projectPicker is the state for the zoxide-based project selector.
-type projectPicker struct {
-	all      []Project
-	filtered []Project
+// zoxidePicker is the state for the zoxide-backed directory picker used
+// by the sessions view.
+type zoxidePicker struct {
+	all      []ZoxideEntry
+	filtered []ZoxideEntry
 	input    textinput.Model
 	cursor   int
 	scroll   int
 }
 
-func newProjectPicker() projectPicker {
+func newZoxidePicker() zoxidePicker {
 	ti := textinput.New()
 	ti.Prompt = "> "
-	ti.Placeholder = "Search project..."
+	ti.Placeholder = "Search directory..."
 	ti.CharLimit = 128
 	ti.Focus()
-	return projectPicker{input: ti}
+	return zoxidePicker{input: ti}
 }
 
-type projectsLoadedMsg struct {
-	projects []Project
+type zoxideEntriesLoadedMsg struct {
+	entries []ZoxideEntry
 }
 
-func loadProjects() tea.Msg {
-	projects, err := queryZoxide()
+func loadZoxideEntries() tea.Msg {
+	entries, err := queryZoxide()
 	if err != nil {
-		return projectsLoadedMsg{}
+		return zoxideEntriesLoadedMsg{}
 	}
-	return projectsLoadedMsg{projects: projects}
+	return zoxideEntriesLoadedMsg{entries: entries}
 }
 
-func queryZoxide() ([]Project, error) {
+func queryZoxide() ([]ZoxideEntry, error) {
 	out, err := exec.Command("zoxide", "query", "-ls").Output()
 	if err != nil {
 		return nil, err
 	}
 
 	home, _ := os.UserHomeDir()
-	var projects []Project
+	var entries []ZoxideEntry
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
 		if line == "" {
 			continue
@@ -80,33 +83,33 @@ func queryZoxide() ([]Project, error) {
 			short = "~" + path[len(home):]
 		}
 
-		projects = append(projects, Project{
+		entries = append(entries, ZoxideEntry{
 			Score: score,
 			Path:  path,
 			Short: short,
 		})
 	}
-	return projects, nil
+	return entries, nil
 }
 
-func (p *projectPicker) setProjects(projects []Project) {
-	p.all = projects
-	p.filtered = projects
+func (p *zoxidePicker) setEntries(entries []ZoxideEntry) {
+	p.all = entries
+	p.filtered = entries
 	p.cursor = 0
 	p.scroll = 0
 }
 
-func (p *projectPicker) filter() {
+func (p *zoxidePicker) filter() {
 	query := p.input.Value()
 	if query == "" {
 		p.filtered = p.all
 	} else {
 		shorts := make([]string, len(p.all))
-		for i, proj := range p.all {
-			shorts[i] = proj.Short
+		for i, e := range p.all {
+			shorts[i] = e.Short
 		}
 		matches := fuzzy.Find(query, shorts)
-		filtered := make([]Project, len(matches))
+		filtered := make([]ZoxideEntry, len(matches))
 		for i, m := range matches {
 			filtered[i] = p.all[m.Index]
 		}
@@ -116,14 +119,14 @@ func (p *projectPicker) filter() {
 	p.scroll = 0
 }
 
-func (p *projectPicker) selected() *Project {
+func (p *zoxidePicker) selected() *ZoxideEntry {
 	if p.cursor >= 0 && p.cursor < len(p.filtered) {
 		return &p.filtered[p.cursor]
 	}
 	return nil
 }
 
-func (p *projectPicker) clampCursor() {
+func (p *zoxidePicker) clampCursor() {
 	if p.cursor < 0 {
 		p.cursor = 0
 	}
@@ -135,7 +138,7 @@ func (p *projectPicker) clampCursor() {
 	}
 }
 
-func (p *projectPicker) ensureVisible(maxVisible int) {
+func (p *zoxidePicker) ensureVisible(maxVisible int) {
 	if maxVisible < 1 {
 		maxVisible = 1
 	}
@@ -147,9 +150,10 @@ func (p *projectPicker) ensureVisible(maxVisible int) {
 	}
 }
 
-// resolveProject determines the session name and working directory for a project path.
-// For git repos with worktrees, it finds the main worktree and appends "-main" to the name.
-func resolveProject(dir string) (name, resolved string) {
+// resolveWorkspace turns a directory path into a (session-name, working-dir)
+// pair suitable for launching a tmux session. For git repos with multiple
+// worktrees it prefers the main worktree and appends "-main" to the name.
+func resolveWorkspace(dir string) (name, resolved string) {
 	base := filepath.Base(dir)
 
 	if !isGitRepo(dir) {
@@ -175,12 +179,12 @@ func isGitRepo(dir string) bool {
 	return cmd.Run() == nil
 }
 
-// openProject resolves the project and emits the message to create the session.
-// If a session already exists at the same path, it switches to it instead.
-// If the session name collides with a different path, a numeric suffix is appended.
-func openProject(proj Project) tea.Cmd {
+// openZoxideEntry resolves the workspace and emits the message to create the
+// session. If a session already exists at the same path it switches to it
+// instead; on name collision a numeric suffix is appended.
+func openZoxideEntry(entry ZoxideEntry) tea.Cmd {
 	return func() tea.Msg {
-		name, dir := resolveProject(proj.Path)
+		name, dir := resolveWorkspace(entry.Path)
 
 		sessions, err := tmux.ListSessions()
 		if err == nil {

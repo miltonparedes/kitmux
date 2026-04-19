@@ -488,7 +488,7 @@ func (m Model) executeCommand(id string) (tea.Model, tea.Cmd) {
 		m.paletteReturn = false
 		m.view = viewSessions
 		return m, m.sessions.Reload()
-	case "open_project":
+	case "open_workspace":
 		return m, func() tea.Msg {
 			return messages.OpenWorkspacesMsg{}
 		}

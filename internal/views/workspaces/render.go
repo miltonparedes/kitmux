@@ -16,7 +16,7 @@ import (
 // footer separator above the help/status text.
 func (m Model) View() string {
 	switch m.mode {
-	case modeProjectSearch:
+	case modeWorkspaceSearch:
 		return m.viewProjectSearch()
 	case modeAgentPicker:
 		return m.viewAgentPicker()
@@ -86,21 +86,21 @@ func rowSep(width int) string {
 }
 
 func (m Model) renderLeftColumn(width, avail int) string {
-	if m.mode == modeFiltering && m.focus == colProjects {
+	if m.mode == modeFiltering && m.focus == colWorkspaces {
 		return m.renderFilteredLeft(width, avail)
 	}
 
 	var b strings.Builder
 	used := 0
 
-	b.WriteString(columnHeader("Projects", m.focus == colProjects))
+	b.WriteString(columnHeader("Workspaces", m.focus == colWorkspaces))
 	b.WriteString("\n")
 	used++
 	b.WriteString(rowSep(width))
 	b.WriteString("\n")
 	used++
 
-	if len(m.projects) == 0 {
+	if len(m.workspaces) == 0 {
 		b.WriteString(" " + theme.HelpStyle.Render("No workspaces"))
 		b.WriteString("\n")
 		used++
@@ -117,15 +117,15 @@ func (m Model) renderLeftColumn(width, avail int) string {
 		maxVisible = 1
 	}
 
-	end := m.projScroll + maxVisible
-	if end > len(m.projects) {
-		end = len(m.projects)
+	end := m.wsScroll + maxVisible
+	if end > len(m.workspaces) {
+		end = len(m.workspaces)
 	}
 
-	for i := m.projScroll; i < end; i++ {
-		p := m.projects[i]
-		selected := i == m.projCursor && m.focus == colProjects
-		b.WriteString(m.renderProjectLine(p, selected, width))
+	for i := m.wsScroll; i < end; i++ {
+		p := m.workspaces[i]
+		selected := i == m.wsCursor && m.focus == colWorkspaces
+		b.WriteString(m.renderWorkspaceLine(p, selected, width))
 		b.WriteString("\n")
 		used++
 		if i < end-1 && used < avail-1 {
@@ -150,7 +150,7 @@ func (m Model) renderFilteredLeft(width, avail int) string {
 	b.WriteString("\n")
 	used++
 
-	idxs := filteredProjectIndices(m.projects, m.filter.Value())
+	idxs := filteredWorkspaceIndices(m.workspaces, m.filter.Value())
 	if len(idxs) == 0 {
 		b.WriteString(" " + theme.HelpStyle.Render("no matches"))
 		b.WriteString("\n")
@@ -168,9 +168,9 @@ func (m Model) renderFilteredLeft(width, avail int) string {
 		if k >= maxVisible {
 			break
 		}
-		p := m.projects[idx]
-		selected := idx == m.projCursor
-		b.WriteString(m.renderProjectLine(p, selected, width))
+		p := m.workspaces[idx]
+		selected := idx == m.wsCursor
+		b.WriteString(m.renderWorkspaceLine(p, selected, width))
 		b.WriteString("\n")
 		used++
 		if k < len(idxs)-1 && k < maxVisible-1 && used < avail-1 {
@@ -184,7 +184,7 @@ func (m Model) renderFilteredLeft(width, avail int) string {
 	return b.String()
 }
 
-func (m Model) renderProjectLine(p projectEntry, selected bool, width int) string {
+func (m Model) renderWorkspaceLine(p workspaceEntry, selected bool, width int) string {
 	var name string
 	if selected {
 		name = " " + theme.TreeNodeSelected.Render("▸ "+p.Name)
@@ -194,7 +194,7 @@ func (m Model) renderProjectLine(p projectEntry, selected bool, width int) strin
 	if p.Active {
 		name += " " + theme.AttachedBadge.Render("●")
 	}
-	summary := projectDiffSummary(p)
+	summary := workspaceDiffSummary(p)
 	if summary == "" || width <= 0 {
 		return name
 	}
@@ -207,7 +207,7 @@ func (m Model) renderProjectLine(p projectEntry, selected bool, width int) strin
 	return name + strings.Repeat(" ", gap) + summary
 }
 
-func projectDiffSummary(p projectEntry) string {
+func workspaceDiffSummary(p workspaceEntry) string {
 	var parts []string
 	if p.Added > 0 {
 		parts = append(parts, theme.DiffAdded.Render(fmt.Sprintf("+%d", p.Added)))
@@ -227,7 +227,7 @@ func (m Model) renderRightColumn(width, avail int) string {
 	used := 0
 
 	title := " "
-	if p := m.selectedProject(); p != nil {
+	if p := m.selectedWorkspace(); p != nil {
 		title = p.Name
 	}
 	b.WriteString(columnHeader(title, m.focus == colDetail))
@@ -237,8 +237,8 @@ func (m Model) renderRightColumn(width, avail int) string {
 	b.WriteString("\n")
 	used++
 
-	if len(m.projects) == 0 || m.detailItems == 0 {
-		b.WriteString(" " + theme.HelpStyle.Render("Select a project"))
+	if len(m.workspaces) == 0 || m.detailItems == 0 {
+		b.WriteString(" " + theme.HelpStyle.Render("Select a workspace"))
 		b.WriteString("\n")
 		used++
 		padTo(&b, used, avail)
@@ -559,7 +559,7 @@ func (m Model) innerWidth() int {
 	return w
 }
 
-// leftWidth is the projects column. We aim for ~32% of usable width with
+// leftWidth is the workspaces column. We aim for ~32% of usable width with
 // reasonable bounds.
 func (m Model) leftWidth() int {
 	inner := m.innerWidth()

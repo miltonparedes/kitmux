@@ -29,8 +29,8 @@ type Model struct {
 	renameInput textinput.Model
 	searching   bool
 	searchInput textinput.Model
-	picking     bool // project picker active
-	picker      projectPicker
+	picking     bool // zoxide directory picker active
+	picker      zoxidePicker
 	justLoaded  bool // set on sessionsLoadedMsg, cleared by ConsumeLoaded
 }
 
@@ -47,7 +47,7 @@ func New() Model {
 	return Model{
 		renameInput: ri,
 		searchInput: si,
-		picker:      newProjectPicker(),
+		picker:      newZoxidePicker(),
 	}
 }
 
@@ -264,8 +264,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		applyStats(m.roots, msg.stats)
 		return m, nil
 
-	case projectsLoadedMsg:
-		m.picker.setProjects(msg.projects)
+	case zoxideEntriesLoadedMsg:
+		m.picker.setEntries(msg.entries)
 		return m, nil
 
 	case tea.MouseMsg:
@@ -421,7 +421,7 @@ func (m Model) handleNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
 		m.picking = true
 		m.picker.input.SetValue("")
 		m.picker.input.Focus()
-		return m, tea.Batch(textinput.Blink, loadProjects)
+		return m, tea.Batch(textinput.Blink, loadZoxideEntries)
 
 	case "ctrl+o":
 		return m, func() tea.Msg {
@@ -502,9 +502,9 @@ func (m Model) handleRename(msg tea.KeyMsg) (Model, tea.Cmd) {
 func (m Model) handlePicker(msg tea.KeyMsg) (Model, tea.Cmd) {
 	switch msg.String() {
 	case "enter":
-		if proj := m.picker.selected(); proj != nil {
+		if entry := m.picker.selected(); entry != nil {
 			m.picking = false
-			return m, openProject(*proj)
+			return m, openZoxideEntry(*entry)
 		}
 		return m, nil
 	case "esc":
@@ -703,7 +703,7 @@ func (m *Model) ConsumeLoaded() bool {
 	return false
 }
 
-// SetPickingMode activates the project picker state.
+// SetPickingMode activates the zoxide directory picker state.
 // Use this from a value-receiver context (e.g. Init) where pointer-receiver
 // mutations would be lost.
 func (m *Model) SetPickingMode() {
@@ -712,14 +712,14 @@ func (m *Model) SetPickingMode() {
 	m.picker.input.Focus()
 }
 
-// ProjectPickerCmds returns the commands needed for the project picker
+// ZoxidePickerCmds returns the commands needed for the zoxide picker
 // without mutating state.
-func (m Model) ProjectPickerCmds() tea.Cmd {
-	return tea.Batch(textinput.Blink, loadProjects)
+func (m Model) ZoxidePickerCmds() tea.Cmd {
+	return tea.Batch(textinput.Blink, loadZoxideEntries)
 }
 
-// InitProjectPicker activates the project picker and starts loading projects.
-func (m *Model) InitProjectPicker() tea.Cmd {
+// InitZoxidePicker activates the zoxide picker and starts loading entries.
+func (m *Model) InitZoxidePicker() tea.Cmd {
 	m.SetPickingMode()
-	return m.ProjectPickerCmds()
+	return m.ZoxidePickerCmds()
 }
