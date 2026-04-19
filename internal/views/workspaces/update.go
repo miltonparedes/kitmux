@@ -684,7 +684,7 @@ func (m Model) handleNewBranchAgent(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (m Model) handleConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	switch msg.String() {
-	case "y":
+	case "y", "Y":
 		m.mode = modeNormal
 		switch m.confirmAction {
 		case confirmActionRemoveWorkspace:
@@ -710,6 +710,14 @@ func (m Model) handleConfirm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			m.confirmWPath = ""
 			return m, m.deleteWorktree(workspacePath, path, branch)
 		}
+		return m, nil
+	case "n", "N", "esc":
+		m.mode = modeNormal
+		m.confirmAction = confirmActionNone
+		m.confirmName = ""
+		m.confirmPath = ""
+		m.confirmBranch = ""
+		m.confirmWPath = ""
 		return m, nil
 	default:
 		m.mode = modeNormal

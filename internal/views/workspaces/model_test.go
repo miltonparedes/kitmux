@@ -572,6 +572,63 @@ func TestConfirmYesRemoves(t *testing.T) {
 	}
 }
 
+func TestConfirmYesUppercaseAlsoRemoves(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	if err := wsreg.SaveRegistry([]wsreg.Workspace{
+		{Name: "alpha", Path: "/tmp/alpha", AddedAt: 1, LastSeenAt: 1},
+		{Name: "beta", Path: "/tmp/beta", AddedAt: 2, LastSeenAt: 2},
+	}); err != nil {
+		t.Fatalf("SaveRegistry: %v", err)
+	}
+
+	m := seedModel(
+		[]workspaceEntry{
+			{Name: "alpha", Path: "/tmp/alpha"},
+			{Name: "beta", Path: "/tmp/beta"},
+		},
+		nil, nil, nil, nil,
+	)
+	updated, _ := m.Update(keyMsg("d"))
+	m = updated.(Model)
+	updated, _ = m.Update(keyMsg("enter"))
+	m = updated.(Model)
+	if m.mode != modeConfirm {
+		t.Fatalf("expected modeConfirm, got %d", m.mode)
+	}
+	updated, cmd := m.Update(keyMsg("Y"))
+	_ = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected reload command on uppercase Y")
+	}
+}
+
+func TestConfirmUppercaseNAndEscCancel(t *testing.T) {
+	m := newSeededModel()
+	updated, _ := m.Update(keyMsg("d"))
+	m = updated.(Model)
+	updated, _ = m.Update(keyMsg("enter"))
+	m = updated.(Model)
+	if m.mode != modeConfirm {
+		t.Fatalf("expected modeConfirm, got %d", m.mode)
+	}
+	updated, _ = m.Update(keyMsg("N"))
+	m = updated.(Model)
+	if m.mode != modeNormal {
+		t.Fatalf("expected modeNormal after N, got %d", m.mode)
+	}
+
+	updated, _ = m.Update(keyMsg("d"))
+	m = updated.(Model)
+	updated, _ = m.Update(keyMsg("enter"))
+	m = updated.(Model)
+	updated, _ = m.Update(keyMsg("esc"))
+	m = updated.(Model)
+	if m.mode != modeNormal {
+		t.Fatalf("expected modeNormal after esc, got %d", m.mode)
+	}
+}
+
 func TestNEntersProjectSearchMode(t *testing.T) {
 	m := newSeededModel()
 	updated, _ := m.Update(keyMsg("n"))
