@@ -596,12 +596,15 @@ func TestCEntersNewBranchMode(t *testing.T) {
 	}
 }
 
-func TestCInProjectsDoesNothing(t *testing.T) {
+func TestCInProjectsEntersNewWorktreeMode(t *testing.T) {
+	// `c` is now valid from either column because creating a worktree does
+	// not require a branch to be selected: the workspaces under the cursor
+	// is enough context.
 	m := newSeededModel()
 	updated, _ := m.Update(keyMsg("c"))
 	m = updated.(Model)
-	if m.mode != modeNormal {
-		t.Errorf("expected modeNormal, got %d", m.mode)
+	if m.mode != modeNewBranch {
+		t.Errorf("expected modeNewBranch from workspaces column, got %d", m.mode)
 	}
 }
 
@@ -651,8 +654,22 @@ func TestAgentPickerEntersAndExits(t *testing.T) {
 
 	updated, _ = m.Update(keyMsg("enter"))
 	m = updated.(Model)
+	// Launcher now opens the attach-choice modal so the user decides
+	// whether to run the agent on an existing branch or a new worktree.
+	if m.mode != modeAgentAttachChoice {
+		t.Errorf("expected modeAgentAttachChoice, got %d", m.mode)
+	}
+
+	// Select "In existing branch..." to reach the agent picker.
+	updated, _ = m.Update(keyMsg("enter"))
+	m = updated.(Model)
+	if m.mode != modeAttachBranchPicker {
+		t.Fatalf("expected modeAttachBranchPicker after choosing existing branch, got %d", m.mode)
+	}
+	updated, _ = m.Update(keyMsg("enter"))
+	m = updated.(Model)
 	if m.mode != modeAgentPicker {
-		t.Errorf("expected modeAgentPicker, got %d", m.mode)
+		t.Fatalf("expected modeAgentPicker after selecting branch, got %d", m.mode)
 	}
 
 	// Navigate the picker
@@ -888,8 +905,8 @@ func TestViewNewBranch_ShowsInput(t *testing.T) {
 	updated, _ = m.Update(keyMsg("c"))
 	m = updated.(Model)
 	output := m.View()
-	if !strings.Contains(output, "New branch") {
-		t.Error("expected 'New branch' in output")
+	if !strings.Contains(output, "New worktree") {
+		t.Error("expected 'New worktree' in output")
 	}
 }
 

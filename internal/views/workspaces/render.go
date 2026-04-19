@@ -18,8 +18,12 @@ func (m Model) View() string {
 	switch m.mode {
 	case modeWorkspaceSearch:
 		return m.viewProjectSearch()
-	case modeAgentPicker:
+	case modeAgentPicker, modeNewBranchAgent:
 		return m.viewAgentPicker()
+	case modeAgentAttachChoice:
+		return m.viewAgentAttachChoice()
+	case modeAttachBranchPicker:
+		return m.viewAttachBranchPicker()
 	default:
 		return m.viewColumns()
 	}
@@ -313,7 +317,7 @@ func (m Model) renderRightColumn(width, avail int) string {
 func (m Model) renderNewBranchOverlay(width, avail int) string {
 	var b strings.Builder
 	used := 0
-	b.WriteString(columnHeader("New branch", true))
+	b.WriteString(columnHeader("New worktree", true))
 	b.WriteString("\n")
 	used++
 	b.WriteString(rowSep(width))
@@ -406,12 +410,18 @@ func (m Model) footer() string {
 	case modeFiltering:
 		return theme.HelpStyle.Render(" type to filter  ⏎ select  esc cancel")
 	case modeNewBranch:
-		return theme.HelpStyle.Render(" ⏎ create  esc back")
+		return theme.HelpStyle.Render(" ⏎ create  tab + agent  esc back")
+	case modeNewBranchAgent:
+		return theme.HelpStyle.Render(" ⏎ create + launch  tab mode  esc back")
+	case modeAgentAttachChoice:
+		return theme.HelpStyle.Render(" ⏎ choose  j/k nav  esc back")
+	case modeAttachBranchPicker:
+		return theme.HelpStyle.Render(" ⏎ select branch  j/k nav  esc back")
 	}
 	if m.focus == colDetail {
-		return theme.HelpStyle.Render(" h back  j/k nav  ⏎ open  c new branch  a agent  / filter")
+		return theme.HelpStyle.Render(" h back  j/k nav  ⏎ open  c new worktree  a agent  A split  / filter")
 	}
-	return theme.HelpStyle.Render(" l/⏎ open  j/k nav  n add  f find  d remove  a agent  / filter  r refresh  q quit")
+	return theme.HelpStyle.Render(" l/⏎ open  j/k nav  n add  c new worktree  f find  d remove  a agent  / filter  r refresh  q quit")
 }
 
 func (m Model) renderToast() string {
@@ -496,7 +506,20 @@ func (m Model) viewAgentPicker() string {
 	var b strings.Builder
 	innerW := m.innerWidth()
 
-	b.WriteString(" " + theme.TreeGroupHeader.Render("Launch Agent"))
+	title := "Launch Agent"
+	switch m.mode {
+	case modeNewBranchAgent:
+		title = "New worktree: pick agent (" + m.newBranch.Value() + ")"
+	case modeAgentPicker:
+		if m.attachBranch.Name != "" {
+			if m.agentPickerTarget == agentTargetSplit {
+				title = "Split agent into " + m.attachBranch.Name
+			} else {
+				title = "Attach agent to " + m.attachBranch.Name
+			}
+		}
+	}
+	b.WriteString(" " + theme.TreeGroupHeader.Render(title))
 	b.WriteString("\n")
 	mainSep := " " + theme.TreeConnector.Render(strings.Repeat("─", innerW))
 	itemSep := " " + theme.TreeMeta.Render(strings.Repeat("─", innerW))
@@ -544,6 +567,108 @@ func (m Model) viewAgentPicker() string {
 	b.WriteString(footerSep)
 	b.WriteString("\n")
 	b.WriteString(theme.HelpStyle.Render(" ⏎ launch  tab mode  esc back"))
+	return b.String()
+}
+
+// viewAgentAttachChoice renders the "In existing branch / In new worktree"
+// modal shown when `a` is pressed without a branch context.
+func (m Model) viewAgentAttachChoice() string {
+	var b strings.Builder
+	innerW := m.innerWidth()
+
+	b.WriteString(" " + theme.TreeGroupHeader.Render("Where should the agent run?"))
+	b.WriteString("\n")
+	mainSep := " " + theme.TreeConnector.Render(strings.Repeat("─", innerW))
+	itemSep := " " + theme.TreeMeta.Render(strings.Repeat("─", innerW))
+	b.WriteString(mainSep)
+	b.WriteString("\n")
+
+	items := []string{
+		"In existing branch...",
+		"In new worktree...",
+	}
+	avail := m.height - 4
+	if avail < 1 {
+		avail = 1
+	}
+	used := 0
+	for i, it := range items {
+		selected := i == m.attachChoiceCursor
+		if selected {
+			b.WriteString(" " + theme.PaletteItemSelected.Render("▸") + " " +
+				theme.TreeNodeSelected.Render(it))
+		} else {
+			b.WriteString("   " + theme.TreeNodeNormal.Render(it))
+		}
+		b.WriteString("\n")
+		used++
+		if i < len(items)-1 && used < avail-1 {
+			b.WriteString(itemSep)
+			b.WriteString("\n")
+			used++
+		}
+	}
+	padTo(&b, used, avail)
+
+	footerSep := " " + theme.TreeConnector.Render(strings.Repeat("─", innerW))
+	b.WriteString(footerSep)
+	b.WriteString("\n")
+	b.WriteString(theme.HelpStyle.Render(" ⏎ choose  j/k nav  esc back"))
+	return b.String()
+}
+
+// viewAttachBranchPicker renders a simple list of branches for the current
+// workspace so the user can pick where to attach the agent.
+func (m Model) viewAttachBranchPicker() string {
+	var b strings.Builder
+	innerW := m.innerWidth()
+
+	b.WriteString(" " + theme.TreeGroupHeader.Render("Pick branch to attach agent"))
+	b.WriteString("\n")
+	mainSep := " " + theme.TreeConnector.Render(strings.Repeat("─", innerW))
+	itemSep := " " + theme.TreeMeta.Render(strings.Repeat("─", innerW))
+	b.WriteString(mainSep)
+	b.WriteString("\n")
+
+	avail := m.height - 4
+	if avail < 1 {
+		avail = 1
+	}
+	maxVisible := (avail + 1) / 2
+	if maxVisible < 1 {
+		maxVisible = 1
+	}
+
+	used := 0
+	for i, br := range m.branches {
+		if i >= maxVisible {
+			break
+		}
+		label := br.Name
+		if br.IsSession {
+			label += "  " + theme.TreeMeta.Render("(session)")
+		}
+		selected := i == m.attachBranchCursor
+		if selected {
+			b.WriteString(" " + theme.PaletteItemSelected.Render("▸") + " " +
+				theme.TreeNodeSelected.Render(label))
+		} else {
+			b.WriteString("   " + theme.TreeNodeNormal.Render(label))
+		}
+		b.WriteString("\n")
+		used++
+		if i < len(m.branches)-1 && i < maxVisible-1 && used < avail-1 {
+			b.WriteString(itemSep)
+			b.WriteString("\n")
+			used++
+		}
+	}
+	padTo(&b, used, avail)
+
+	footerSep := " " + theme.TreeConnector.Render(strings.Repeat("─", innerW))
+	b.WriteString(footerSep)
+	b.WriteString("\n")
+	b.WriteString(theme.HelpStyle.Render(" ⏎ select branch  j/k nav  esc back"))
 	return b.String()
 }
 

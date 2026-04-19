@@ -6,16 +6,22 @@ import (
 	wsdata "github.com/miltonparedes/kitmux/internal/workspaces/data"
 )
 
-func TestAOpensAgentPickerFromProjects(t *testing.T) {
+func TestAFromProjectsOpensAttachChoice(t *testing.T) {
+	// From the workspaces column we don't yet have a branch target, so `a`
+	// opens the "existing branch / new worktree" chooser rather than jumping
+	// straight into the agent picker.
 	m := newSeededModel()
 	updated, _ := m.Update(keyMsg("a"))
 	m = updated.(Model)
-	if m.mode != modeAgentPicker {
-		t.Errorf("expected modeAgentPicker from workspaces column, got %d", m.mode)
+	if m.mode != modeAgentAttachChoice {
+		t.Errorf("expected modeAgentAttachChoice from workspaces column, got %d", m.mode)
+	}
+	if m.agentPickerTarget != agentTargetWindow {
+		t.Errorf("expected target window, got %d", m.agentPickerTarget)
 	}
 }
 
-func TestAOpensAgentPickerFromDetail(t *testing.T) {
+func TestAFromDetailOpensAgentPickerForBranch(t *testing.T) {
 	m := newSeededModel()
 	updated, _ := m.Update(keyMsg("l"))
 	m = updated.(Model)
@@ -23,6 +29,78 @@ func TestAOpensAgentPickerFromDetail(t *testing.T) {
 	m = updated.(Model)
 	if m.mode != modeAgentPicker {
 		t.Errorf("expected modeAgentPicker from detail, got %d", m.mode)
+	}
+	if m.agentPickerIntent != agentIntentAttachBranch {
+		t.Errorf("expected intent attachBranch, got %d", m.agentPickerIntent)
+	}
+	if m.attachBranch.Name == "" {
+		t.Error("expected attachBranch populated from detail cursor")
+	}
+}
+
+func TestShiftAFromDetailUsesSplitTarget(t *testing.T) {
+	m := newSeededModel()
+	updated, _ := m.Update(keyMsg("l"))
+	m = updated.(Model)
+	updated, _ = m.Update(keyMsg("A"))
+	m = updated.(Model)
+	if m.mode != modeAgentPicker {
+		t.Errorf("expected modeAgentPicker, got %d", m.mode)
+	}
+	if m.agentPickerTarget != agentTargetSplit {
+		t.Errorf("expected target split, got %d", m.agentPickerTarget)
+	}
+}
+
+func TestAttachChoiceExistingBranchOpensPicker(t *testing.T) {
+	m := newSeededModel()
+	updated, _ := m.Update(keyMsg("a"))
+	m = updated.(Model)
+	// cursor 0 = "In existing branch..."
+	updated, _ = m.Update(keyMsg("enter"))
+	m = updated.(Model)
+	if m.mode != modeAttachBranchPicker {
+		t.Errorf("expected modeAttachBranchPicker, got %d", m.mode)
+	}
+}
+
+func TestAttachChoiceNewWorktreeOpensInput(t *testing.T) {
+	m := newSeededModel()
+	updated, _ := m.Update(keyMsg("a"))
+	m = updated.(Model)
+	updated, _ = m.Update(keyMsg("j")) // move to "In new worktree..."
+	m = updated.(Model)
+	updated, _ = m.Update(keyMsg("enter"))
+	m = updated.(Model)
+	if m.mode != modeNewBranch {
+		t.Errorf("expected modeNewBranch, got %d", m.mode)
+	}
+}
+
+func TestNewBranchTabOpensAgentPicker(t *testing.T) {
+	m := newSeededModel()
+	updated, _ := m.Update(keyMsg("c"))
+	m = updated.(Model)
+	// Need a branch name before Tab is meaningful.
+	m.newBranch.SetValue("feat/x")
+	updated, _ = m.Update(keyMsg("tab"))
+	m = updated.(Model)
+	if m.mode != modeNewBranchAgent {
+		t.Errorf("expected modeNewBranchAgent after Tab, got %d", m.mode)
+	}
+	if m.agentPickerIntent != agentIntentNewWorktreeAgent {
+		t.Errorf("expected intent newWorktreeAgent, got %d", m.agentPickerIntent)
+	}
+}
+
+func TestNewBranchTabIgnoredWhenEmpty(t *testing.T) {
+	m := newSeededModel()
+	updated, _ := m.Update(keyMsg("c"))
+	m = updated.(Model)
+	updated, _ = m.Update(keyMsg("tab"))
+	m = updated.(Model)
+	if m.mode != modeNewBranch {
+		t.Errorf("expected to stay in modeNewBranch with empty input, got %d", m.mode)
 	}
 }
 
@@ -60,6 +138,18 @@ func TestIsEditingReportsInputModes(t *testing.T) {
 	m.mode = modeAgentPicker
 	if !m.IsEditing() {
 		t.Error("expected editing in modeAgentPicker")
+	}
+	m.mode = modeNewBranchAgent
+	if !m.IsEditing() {
+		t.Error("expected editing in modeNewBranchAgent")
+	}
+	m.mode = modeAgentAttachChoice
+	if !m.IsEditing() {
+		t.Error("expected editing in modeAgentAttachChoice")
+	}
+	m.mode = modeAttachBranchPicker
+	if !m.IsEditing() {
+		t.Error("expected editing in modeAttachBranchPicker")
 	}
 }
 

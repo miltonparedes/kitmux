@@ -22,8 +22,33 @@ const (
 	modeFiltering
 	modeWorkspaceSearch
 	modeNewBranch
+	modeNewBranchAgent
+	modeAgentAttachChoice
+	modeAttachBranchPicker
 	modeConfirm
 	modeAgentPicker
+)
+
+// agentTarget describes where the agent process should land within the
+// target tmux session.
+type agentTarget int
+
+const (
+	agentTargetWindow agentTarget = iota
+	agentTargetSplit
+)
+
+// agentPickerIntent describes why the agent picker is open so handleAgentPicker
+// can route the selection to the correct action on Enter.
+type agentPickerIntent int
+
+const (
+	// agentIntentAttachBranch attaches the picked agent to a specific branch
+	// (session may already exist or be created on the fly).
+	agentIntentAttachBranch agentPickerIntent = iota
+	// agentIntentNewWorktreeAgent runs after the "new worktree" flow and
+	// launches the picked agent in window 0 of the freshly created session.
+	agentIntentNewWorktreeAgent
 )
 
 const keyEnter = "enter"

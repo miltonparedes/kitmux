@@ -107,6 +107,11 @@ func RenameSession(old, newName string) error {
 	return exec.Command("tmux", "rename-session", "-t", old, newName).Run()
 }
 
+// RenameWindow renames a window given a tmux target (e.g. "session:0").
+func RenameWindow(target, newName string) error {
+	return exec.Command("tmux", "rename-window", "-t", target, newName).Run()
+}
+
 // NewSessionInDir creates a detached session with the given name and working directory.
 func NewSessionInDir(name, dir string) error {
 	return exec.Command("tmux", "new-session", "-d", "-s", name, "-c", dir).Run()
@@ -143,6 +148,23 @@ func NewWindowInDir(name, dir, command string) (string, error) {
 		return "", fmt.Errorf("new-window: %w", err)
 	}
 	return strings.TrimSpace(string(out)), nil
+}
+
+// NewWindowInSession creates a new window inside an existing session,
+// optionally starting in `dir` and running `command`. It does not make the
+// new window active — callers that want focus should switch-client afterwards.
+func NewWindowInSession(session, name, dir, command string) error {
+	args := []string{"new-window", "-d", "-t", session + ":"}
+	if name != "" {
+		args = append(args, "-n", name)
+	}
+	if dir != "" {
+		args = append(args, "-c", dir)
+	}
+	if command != "" {
+		args = append(args, command)
+	}
+	return exec.Command("tmux", args...).Run()
 }
 
 func SplitWindowInDir(targetPane, dir, command string) (string, error) {

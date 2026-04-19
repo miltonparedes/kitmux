@@ -64,7 +64,19 @@ type Model struct {
 	newBranchWs workspaceEntry
 
 	// Agent picker
-	agentPicker agentPickerState
+	agentPicker       agentPickerState
+	agentPickerIntent agentPickerIntent
+	agentPickerTarget agentTarget
+	// attachBranch is the branch selected as the target for an attach-agent
+	// action. Used by modeAttachBranchPicker and modeAgentPicker (when
+	// intent == agentIntentAttachBranch).
+	attachBranch branchEntry
+
+	// attachChoice is the cursor inside the "in existing branch / new worktree"
+	// modal when `a` is pressed from the workspaces column.
+	attachChoiceCursor int
+	// attachBranchCursor is the cursor inside the "pick existing branch" picker.
+	attachBranchCursor int
 
 	// Confirm delete
 	confirmName string
@@ -165,7 +177,10 @@ func (m *Model) SetSize(w, h int) {
 // intercepted.
 func (m Model) IsEditing() bool {
 	switch m.mode {
-	case modeFiltering, modeWorkspaceSearch, modeNewBranch, modeConfirm, modeAgentPicker:
+	case modeFiltering, modeWorkspaceSearch,
+		modeNewBranch, modeNewBranchAgent,
+		modeAgentAttachChoice, modeAttachBranchPicker,
+		modeConfirm, modeAgentPicker:
 		return true
 	default:
 		return false
