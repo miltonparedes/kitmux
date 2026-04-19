@@ -87,3 +87,25 @@ func TestHandleKeyMsgEscInStandaloneWorkspacesUsesViewCommand(t *testing.T) {
 		t.Fatal("expected workspaces view command (quit) to be returned")
 	}
 }
+
+// Regression for a bug where esc pressed while the workspaces view was in
+// an editing mode (filter, search, new-branch, confirm, agent-picker) fell
+// through the app-level switch and quit the whole program instead of
+// letting the view cancel the modal.
+func TestHandleKeyMsgEscInWorkspacesEditingDoesNotQuit(t *testing.T) {
+	m := New(ModeWorkspaces)
+	// InitAddMode flips the workspaces view into modeWorkspaceSearch
+	// (an editing mode) without requiring data to be loaded.
+	m.workspacesView.InitAddMode()
+	if !m.workspacesView.IsEditing() {
+		t.Fatal("precondition: expected workspaces view to be editing")
+	}
+
+	_, cmd, handled := m.handleKeyMsg(appKeyMsg("esc"))
+	if handled {
+		t.Fatal("expected esc to fall through so the workspaces view can cancel its modal")
+	}
+	if cmd != nil {
+		t.Fatal("expected no app-level command (no tea.Quit) when workspaces is editing")
+	}
+}

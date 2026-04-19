@@ -393,6 +393,13 @@ func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			return m, func() tea.Msg {
 				return messages.BackFromAgentABMsg{}
 			}, true
+		case viewWorkspaces:
+			// The non-editing case is handled above (detail→projects
+			// back-nav + custom quit). When IsEditing() is true we let the
+			// workspaces view cancel its own modal (filter / search /
+			// newBranch / confirm / agentPicker) by falling through to
+			// routeToView instead of quitting the app.
+			return m, nil, false
 		default:
 			if m.sessions.IsEditing() {
 				// esc in sessions editing → falls through to sessions.Update
