@@ -38,6 +38,14 @@ install:
 clean:
     rm -f kitmux
 
+# Install git hooks (pre-commit / pre-push) via lefthook
+hooks-install:
+    lefthook install
+
+# Uninstall git hooks
+hooks-uninstall:
+    lefthook uninstall
+
 # --- Database dev tools ---
 
 db_path := env("HOME") / ".config/kitmux/state.db"

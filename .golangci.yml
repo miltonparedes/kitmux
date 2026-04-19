@@ -15,15 +15,22 @@ linters:
   default: standard
   enable:
     - copyloopvar
+    - cyclop
+    - dupl
     - dupword
     - durationcheck
     - errname
+    - funlen
     - gochecknoinits
     - gocognit
     - goconst
     - gocritic
+    - gocyclo
     - gosec
+    - lll
+    - maintidx
     - misspell
+    - nestif
     - nilerr
     - prealloc
     - revive
@@ -32,8 +39,16 @@ linters:
     - usestdlibvars
     - wastedassign
   settings:
+    cyclop:
+      max-complexity: 15
+      package-average: 8.0
+    dupl:
+      threshold: 150
+    funlen:
+      lines: 100
+      statements: 50
     gocognit:
-      min-complexity: 65
+      min-complexity: 20
     goconst:
       min-len: 5
       min-occurrences: 5
@@ -46,9 +61,18 @@ linters:
         - hugeParam        # Bubble Tea requires value receivers on Model
         - rangeValCopy     # Acceptable for small-to-medium structs
         - evalOrder        # returnToPalette pointer-receiver pattern is intentional
+    gocyclo:
+      min-complexity: 15
     gosec:
       excludes:
         - G204
+    lll:
+      line-length: 140
+      tab-width: 4
+    maintidx:
+      under: 20
+    nestif:
+      min-complexity: 4
     revive:
       rules:
         - name: blank-imports
@@ -66,6 +90,23 @@ linters:
         - name: time-naming
         - name: unexported-return
         - name: var-declaration
+  exclusions:
+    rules:
+      # Declarative registries are intentionally long
+      - path: internal/views/palette/commands.go
+        linters:
+          - funlen
+          - maintidx
+      # Tests may be verbose / duplicative by nature
+      - path: _test\.go
+        linters:
+          - cyclop
+          - dupl
+          - funlen
+          - gocognit
+          - gocyclo
+          - lll
+          - maintidx
 
 issues:
   max-issues-per-linter: 0

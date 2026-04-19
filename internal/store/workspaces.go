@@ -107,7 +107,8 @@ func AddWorkspace(name, path string) (bool, error) {
 	}
 
 	now := time.Now().Unix()
-	if _, err := db.Exec(`INSERT INTO workspaces(path, name, added_at, last_seen_at) VALUES(?, ?, ?, ?)`, path, name, now, now); err != nil {
+	query := `INSERT INTO workspaces(path, name, added_at, last_seen_at) VALUES(?, ?, ?, ?)`
+	if _, err := db.Exec(query, path, name, now, now); err != nil {
 		return false, fmt.Errorf("insert workspace %q: %w", path, err)
 	}
 	return true, nil

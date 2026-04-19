@@ -78,127 +78,168 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.worktrees = msg.worktrees
 		m.clampCursor()
 		return m, nil
-
 	case tea.MouseMsg:
-		if m.IsEditing() {
-			return m, nil
-		}
-		switch msg.Button {
-		case tea.MouseButtonLeft:
-			if msg.Action != tea.MouseActionRelease {
-				return m, nil
-			}
-			row := msg.Y
-			if row%2 != 0 {
-				return m, nil
-			}
-			idx := m.scroll + row/2
-			if idx < 0 || idx >= len(m.worktrees) {
-				return m, nil
-			}
-			branch := m.worktrees[idx].Branch
-			return m, func() tea.Msg {
-				return messages.SwitchWorktreeMsg{Branch: branch}
-			}
-		case tea.MouseButtonWheelUp:
-			m.cursor--
-			m.clampCursor()
-			m.ensureVisible()
-		case tea.MouseButtonWheelDown:
-			m.cursor++
-			m.clampCursor()
-			m.ensureVisible()
-		}
-		return m, nil
-
+		return m.handleMouse(msg)
 	case tea.KeyMsg:
-		if m.confirming {
-			return m.handleConfirm(msg)
-		}
-		if m.describing {
-			return m.handleDescribe(msg)
-		}
-		if m.confirmingBranch {
-			return m.handleConfirmBranch(msg)
-		}
-		if m.creating {
-			return m.handleCreate(msg)
-		}
-		return m.handleNormal(msg)
+		return m.routeKey(msg)
 	}
 	return m, nil
 }
 
+func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
+	if m.IsEditing() {
+		return m, nil
+	}
+	switch msg.Button {
+	case tea.MouseButtonLeft:
+		return m.handleMouseLeft(msg)
+	case tea.MouseButtonWheelUp:
+		m.cursor--
+		m.clampCursor()
+		m.ensureVisible()
+	case tea.MouseButtonWheelDown:
+		m.cursor++
+		m.clampCursor()
+		m.ensureVisible()
+	}
+	return m, nil
+}
+
+func (m Model) handleMouseLeft(msg tea.MouseMsg) (Model, tea.Cmd) {
+	if msg.Action != tea.MouseActionRelease {
+		return m, nil
+	}
+	row := msg.Y
+	if row%2 != 0 {
+		return m, nil
+	}
+	idx := m.scroll + row/2
+	if idx < 0 || idx >= len(m.worktrees) {
+		return m, nil
+	}
+	return m, switchWorktreeCmd(m.worktrees[idx].Branch)
+}
+
+func (m Model) routeKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch {
+	case m.confirming:
+		return m.handleConfirm(msg)
+	case m.describing:
+		return m.handleDescribe(msg)
+	case m.confirmingBranch:
+		return m.handleConfirmBranch(msg)
+	case m.creating:
+		return m.handleCreate(msg)
+	default:
+		return m.handleNormal(msg)
+	}
+}
+
+func switchWorktreeCmd(branch string) tea.Cmd {
+	return func() tea.Msg { return messages.SwitchWorktreeMsg{Branch: branch} }
+}
+
 func (m Model) handleNormal(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if updated, cmd, handled := m.handleWorktreeNav(msg); handled {
+		return updated, cmd
+	}
+	if updated, cmd, handled := m.handleWorktreeAction(msg); handled {
+		return updated, cmd
+	}
+	if updated, cmd, handled := m.handleWorktreeDigit(msg); handled {
+		return updated, cmd
+	}
+	if msg.String() == "esc" {
+		return m, func() tea.Msg { return messages.SwitchViewMsg{View: "sessions"} }
+	}
+	return m, nil
+}
+
+func (m Model) handleWorktreeNav(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	switch msg.String() {
 	case "j", "down":
 		m.cursor++
 		m.clampCursor()
 		m.ensureVisible()
+		return m, nil, true
 	case "k", "up":
 		m.cursor--
 		m.clampCursor()
 		m.ensureVisible()
+		return m, nil, true
 	case "g", "home":
 		m.cursor = 0
 		m.scroll = 0
+		return m, nil, true
 	case "G", "end":
 		m.cursor = len(m.worktrees) - 1
 		m.ensureVisible()
-
+		return m, nil, true
 	case "enter":
 		if wt := m.selected(); wt != nil {
-			branch := wt.Branch
-			return m, func() tea.Msg {
-				return messages.SwitchWorktreeMsg{Branch: branch}
-			}
+			return m, switchWorktreeCmd(wt.Branch), true
 		}
+		return m, nil, true
+	}
+	return m, nil, false
+}
 
+func (m Model) handleWorktreeAction(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	switch msg.String() {
 	case "n":
 		m.creating = true
 		m.newInput.SetValue("")
 		m.newInput.Focus()
-		return m, textinput.Blink
-
+		return m, textinput.Blink, true
 	case "N":
 		m.describing = true
 		m.describeInput.SetValue("")
 		m.describeInput.Focus()
-		return m, textinput.Blink
-
+		return m, textinput.Blink, true
 	case "d":
 		if wt := m.selected(); wt != nil && !wt.IsMain && !wt.IsCurrent {
 			m.confirming = true
 		}
-
+		return m, nil, true
 	case "m":
-		return m, func() tea.Msg {
-			return messages.RunPopupMsg{Command: "wt merge", Width: "80%", Height: "80%"}
-		}
-
+		return m, popupCmd("wt merge"), true
 	case "c":
-		return m, func() tea.Msg {
-			return messages.RunPopupMsg{Command: "wt step commit", Width: "80%", Height: "80%"}
-		}
+		return m, popupCmd("wt step commit"), true
+	}
+	return m, nil, false
+}
 
+func popupCmd(command string) tea.Cmd {
+	return func() tea.Msg {
+		return messages.RunPopupMsg{Command: command, Width: "80%", Height: "80%"}
+	}
+}
+
+func (m Model) handleWorktreeDigit(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	switch msg.String() {
 	case "1", "2", "3", "4", "5", "6", "7", "8", "9",
 		"alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "alt+6", "alt+7", "alt+8", "alt+9":
-		if config.SuperKey == "none" && !msg.Alt || config.SuperKey == "alt" && msg.Alt {
-			idx := int(msg.Runes[0]-'0') - 1
-			if idx < len(m.worktrees) {
-				branch := m.worktrees[idx].Branch
-				return m, func() tea.Msg {
-					return messages.SwitchWorktreeMsg{Branch: branch}
-				}
-			}
-		}
-
-	case "esc":
-		return m, func() tea.Msg {
-			return messages.SwitchViewMsg{View: "sessions"}
-		}
+	default:
+		return m, nil, false
 	}
-	return m, nil
+	if !digitJumpActive(msg) {
+		return m, nil, true
+	}
+	idx := int(msg.Runes[0]-'0') - 1
+	if idx >= 0 && idx < len(m.worktrees) {
+		return m, switchWorktreeCmd(m.worktrees[idx].Branch), true
+	}
+	return m, nil, true
+}
+
+func digitJumpActive(msg tea.KeyMsg) bool {
+	if config.SuperKey == "none" && !msg.Alt {
+		return true
+	}
+	if config.SuperKey == "alt" && msg.Alt {
+		return true
+	}
+	return false
 }
 
 func (m Model) handleDescribe(msg tea.KeyMsg) (Model, tea.Cmd) {

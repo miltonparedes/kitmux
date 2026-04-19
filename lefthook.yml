@@ -1,0 +1,22 @@
+# lefthook config: local git hooks for kitmux
+# Install once per clone:  just hooks-install
+# Docs: https://lefthook.dev
+
+pre-commit:
+  parallel: false
+  commands:
+    golangci-lint:
+      glob: "*.go"
+      run: golangci-lint run --fix {staged_files}
+      stage_fixed: true
+    gofumpt:
+      glob: "*.go"
+      run: golangci-lint fmt {staged_files}
+      stage_fixed: true
+
+pre-push:
+  commands:
+    full-lint:
+      run: golangci-lint run ./...
+    test:
+      run: go test ./...

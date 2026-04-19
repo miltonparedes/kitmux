@@ -143,158 +143,189 @@ func (m Model) initCurrentSessionWindows() tea.Cmd {
 }
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
+	if updated, cmd, handled := m.dispatchInput(msg); handled {
+		return updated, cmd
+	}
+	if updated, cmd, handled := m.dispatchNavigation(msg); handled {
+		return updated, cmd
+	}
+	if updated, cmd, handled := m.dispatchAction(msg); handled {
+		return updated, cmd
+	}
+	return m.routeToView(msg)
+}
+
+// dispatchInput handles low-level input messages (window/mouse/keys) and the
+// palette toggle. Returns handled=false if the caller should keep dispatching.
+func (m Model) dispatchInput(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
-		m.sessions.SetSize(m.width, m.height-1)
-		m.windows.SetSize(m.width, m.height-1)
-		m.worktreeView.SetSize(m.width, m.height-1)
-		m.agentsView.SetSize(m.width, m.height-1)
-		m.agentABView.SetSize(m.width, m.height-1)
-		m.workspacesView.SetSize(m.width, m.height-1)
-		m.palette.SetSize(m.width, m.height)
-		return m, nil
-
+		return m.applyWindowSize(msg), nil, true
 	case tea.MouseMsg:
 		if m.paletteActive {
 			var cmd tea.Cmd
 			m.palette, cmd = m.palette.Update(msg)
-			return m, cmd
+			return m, cmd, true
 		}
-
 	case tea.KeyMsg:
 		if updated, cmd, handled := m.handleKeyMsg(msg); handled {
-			return updated, cmd
+			return updated, cmd, true
 		}
-
 	case messages.TogglePaletteMsg:
-		if m.mode == ModePalette {
-			return m, tea.Quit
-		}
-		m.paletteActive = !m.paletteActive
-		if m.paletteActive {
-			m.palette.Reset()
-		}
-		return m, nil
-
+		return m.handleTogglePalette()
 	case messages.ExecuteCommandMsg:
 		m.paletteActive = false
-		return m.executeCommand(msg.ID)
+		updated, cmd := m.executeCommand(msg.ID)
+		return updated, cmd, true
+	}
+	return m, nil, false
+}
 
+// dispatchNavigation handles session/window/view navigation messages.
+func (m Model) dispatchNavigation(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
+	switch msg := msg.(type) {
 	case messages.SwitchSessionMsg:
 		_ = tmux.SwitchClient(msg.Name)
-		return m, tea.Quit
-
+		return m, tea.Quit, true
 	case messages.SwitchWindowMsg:
 		_ = tmux.SwitchClient(msg.Target)
-		return m, tea.Quit
-
+		return m, tea.Quit, true
 	case messages.DrillWindowsMsg:
 		m.view = viewWindows
-		cmd := m.windows.LoadSession(msg.SessionName)
-		return m, cmd
-
+		return m, m.windows.LoadSession(msg.SessionName), true
 	case messages.BackToSessionsMsg:
 		if m.paletteReturn {
-			return m, m.returnToPalette()
+			return m, m.returnToPalette(), true
 		}
 		m.view = viewSessions
-		return m, nil
-
+		return m, nil, true
 	case messages.SessionCursorMsg:
-		return m, nil
-
+		return m, nil, true
 	case messages.ReloadSessionsMsg:
 		m.view = viewSessions
-		return m, m.sessions.Reload()
+		return m, m.sessions.Reload(), true
+	case messages.SwitchViewMsg:
+		return m.handleSwitchView(msg)
+	case messages.OpenWorkspacesMsg:
+		return m.handleOpenWorkspaces(msg)
+	}
+	return m, nil, false
+}
 
+// dispatchAction handles side-effect messages (create/kill/launch/popup/editor).
+func (m Model) dispatchAction(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
+	switch msg := msg.(type) {
 	case messages.CreateSessionInDirMsg:
 		_ = tmux.NewSessionInDir(msg.Name, msg.Dir)
 		_ = tmux.SwitchClient(msg.Name)
-		return m, tea.Quit
-
+		return m, tea.Quit, true
 	case messages.SwitchWorktreeMsg:
 		_ = worktree.SwitchTo(msg.Branch)
-		return m, tea.Quit
-
+		return m, tea.Quit, true
 	case messages.CreateWorktreeMsg:
 		_ = worktree.Create(msg.Branch)
-		return m, tea.Quit
-
+		return m, tea.Quit, true
 	case messages.RemoveWorktreeMsg:
 		_ = worktree.Remove(msg.Branch)
-		return m, m.worktreeView.Reload()
-
+		return m, m.worktreeView.Reload(), true
 	case messages.ReloadWorktreesMsg:
-		return m, m.worktreeView.Reload()
-
+		return m, m.worktreeView.Reload(), true
 	case messages.LaunchAgentMsg:
-		return m.launchAgent(msg)
-
+		updated, cmd := m.launchAgent(msg)
+		return updated, cmd, true
 	case messages.OpenAgentABMsg:
 		m.returnView = m.view
 		m.view = viewAgentAB
 		m.agentABView.Reset()
-		return m, m.agentABView.Init()
-
+		return m, m.agentABView.Init(), true
 	case messages.BackFromAgentABMsg:
-		if m.paletteReturn {
-			return m, m.returnToPalette()
-		}
-		m.view = m.returnView
-		if m.view == viewAgentAB {
-			m.view = viewSessions
-		}
-		return m, nil
-
+		return m.handleBackFromAgentAB()
 	case messages.LaunchAgentABMsg:
-		return m.launchAgentAB(msg)
-
-	case messages.SwitchViewMsg:
-		switch msg.View {
-		case "sessions":
-			if m.paletteReturn {
-				return m, m.returnToPalette()
-			}
-			m.view = viewSessions
-			return m, nil
-		case "worktrees":
-			m.view = viewWorktrees
-			return m, m.worktreeView.Init()
-		case "agents":
-			m.view = viewAgents
-			return m, nil
-		}
-		return m, nil
-
+		updated, cmd := m.launchAgentAB(msg)
+		return updated, cmd, true
 	case messages.RunPopupMsg:
 		_ = tmux.DisplayPopup(msg.Command, msg.Width, msg.Height)
-		return m, tea.Quit
-
-	case messages.OpenWorkspacesMsg:
-		m.view = viewWorkspaces
-		m.workspacesView = workspacesview.New()
-		m.workspacesView.SetSize(m.width, m.height-1)
-		if msg.AddMode {
-			return m, m.workspacesView.InitAddMode()
-		}
-		return m, m.workspacesView.Init()
-
+		return m, tea.Quit, true
 	case messages.OpenLocalEditorMsg:
-		if msg.Err != nil {
-			_ = tmux.DisplayMessage(fmt.Sprintf("open_local_editor error: %v", msg.Err))
-			return m, tea.Quit
-		}
-		if msg.Fallback != "" {
-			_ = tmux.DisplayMessage(fmt.Sprintf("bridge unavailable, run manually: %s", msg.Fallback))
-			return m, tea.Quit
-		}
-		_ = tmux.DisplayMessage("opened local editor")
-		return m, tea.Quit
+		return m.handleOpenLocalEditor(msg)
 	}
+	return m, nil, false
+}
 
-	return m.routeToView(msg)
+func (m Model) applyWindowSize(msg tea.WindowSizeMsg) Model {
+	m.width = msg.Width
+	m.height = msg.Height
+	m.sessions.SetSize(m.width, m.height-1)
+	m.windows.SetSize(m.width, m.height-1)
+	m.worktreeView.SetSize(m.width, m.height-1)
+	m.agentsView.SetSize(m.width, m.height-1)
+	m.agentABView.SetSize(m.width, m.height-1)
+	m.workspacesView.SetSize(m.width, m.height-1)
+	m.palette.SetSize(m.width, m.height)
+	return m
+}
+
+func (m Model) handleTogglePalette() (tea.Model, tea.Cmd, bool) {
+	if m.mode == ModePalette {
+		return m, tea.Quit, true
+	}
+	m.paletteActive = !m.paletteActive
+	if m.paletteActive {
+		m.palette.Reset()
+	}
+	return m, nil, true
+}
+
+func (m Model) handleSwitchView(msg messages.SwitchViewMsg) (tea.Model, tea.Cmd, bool) {
+	switch msg.View {
+	case "sessions":
+		if m.paletteReturn {
+			return m, m.returnToPalette(), true
+		}
+		m.view = viewSessions
+		return m, nil, true
+	case "worktrees":
+		m.view = viewWorktrees
+		return m, m.worktreeView.Init(), true
+	case "agents":
+		m.view = viewAgents
+		return m, nil, true
+	}
+	return m, nil, true
+}
+
+func (m Model) handleOpenWorkspaces(msg messages.OpenWorkspacesMsg) (tea.Model, tea.Cmd, bool) {
+	m.view = viewWorkspaces
+	m.workspacesView = workspacesview.New()
+	m.workspacesView.SetSize(m.width, m.height-1)
+	if msg.AddMode {
+		return m, m.workspacesView.InitAddMode(), true
+	}
+	return m, m.workspacesView.Init(), true
+}
+
+func (m Model) handleBackFromAgentAB() (tea.Model, tea.Cmd, bool) {
+	if m.paletteReturn {
+		return m, m.returnToPalette(), true
+	}
+	m.view = m.returnView
+	if m.view == viewAgentAB {
+		m.view = viewSessions
+	}
+	return m, nil, true
+}
+
+func (m Model) handleOpenLocalEditor(msg messages.OpenLocalEditorMsg) (tea.Model, tea.Cmd, bool) {
+	if msg.Err != nil {
+		_ = tmux.DisplayMessage(fmt.Sprintf("open_local_editor error: %v", msg.Err))
+		return m, tea.Quit, true
+	}
+	if msg.Fallback != "" {
+		_ = tmux.DisplayMessage(fmt.Sprintf("bridge unavailable, run manually: %s", msg.Fallback))
+		return m, tea.Quit, true
+	}
+	_ = tmux.DisplayMessage("opened local editor")
+	return m, tea.Quit, true
 }
 
 // handleKeyMsg processes keyboard input.
@@ -302,113 +333,146 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 // should route the original message to the active view.
 func (m Model) handleKeyMsg(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 	if m.paletteActive {
-		switch msg.String() {
-		case "esc":
-			if m.mode == ModePalette {
-				return m, tea.Quit, true
-			}
-			m.paletteActive = false
-			return m, nil, true
-		case "ctrl+c":
-			return m, tea.Quit, true
-		}
-		var cmd tea.Cmd
-		m.palette, cmd = m.palette.Update(msg)
-		return m, cmd, true
+		return m.handlePaletteKey(msg)
 	}
 
-	isEditing := m.sessions.IsEditing() || m.worktreeView.IsEditing() || (m.view == viewAgentAB && m.agentABView.IsEditing()) || (m.view == viewWorkspaces && m.workspacesView.IsEditing())
+	isEditing := m.isEditing()
 	switch msg.String() {
 	case "ctrl+c":
 		return m, tea.Quit, true
 	case "q":
-		if !isEditing {
-			if m.view == viewWorkspaces {
-				return m, nil, false
-			}
-			return m, tea.Quit, true
-		}
+		return m.handleQuitKey(isEditing)
 	case "ctrl+p":
-		if !isEditing {
-			m.paletteActive = true
-			m.palette.Reset()
-			return m, nil, true
-		}
+		return m.handleOpenPaletteKey(isEditing)
 	case "w":
-		if !isEditing && m.view != viewWorktrees && m.view != viewWorkspaces {
-			m.view = viewWorktrees
-			return m, m.worktreeView.Init(), true
-		}
+		return m.handleWorktreeKey(isEditing)
 	case "a":
-		if !isEditing && m.view != viewAgents && m.view != viewWorkspaces {
-			m.view = viewAgents
-			return m, nil, true
-		}
+		return m.handleAgentsKey(isEditing)
 	case "esc":
-		// The workspaces view owns its own esc semantics (detail→projects
-		// back-nav, then quit). Let it consume the key first before the
-		// paletteReturn / view-switch / quit guards below, so that internal
-		// navigation keeps working even when the dashboard was opened from
-		// the palette (paletteReturn=true).
-		if m.view == viewWorkspaces && !m.workspacesView.IsEditing() {
-			model, cmd := m.workspacesView.Update(msg)
-			m.workspacesView = model.(workspacesview.Model)
-			if cmd == nil {
-				// View consumed esc internally (collapsed detail→projects).
-				return m, nil, true
-			}
-			// View returned tea.Quit → user pressed esc from projects column.
-			if m.paletteReturn {
-				return m, m.returnToPalette(), true
-			}
-			if m.mode == ModeWorkspaces {
-				return m, cmd, true
-			}
-			m.view = viewSessions
-			return m, nil, true
-		}
-		if m.paletteReturn && !isEditing {
-			return m, m.returnToPalette(), true
-		}
-		switch m.view {
-		case viewWindows:
-			if m.mode == ModeWindows {
-				return m, tea.Quit, true
-			}
-			m.view = viewSessions
-			return m, nil, true
-		case viewWorktrees:
-			if m.mode == ModeWorktrees {
-				return m, tea.Quit, true
-			}
-			m.view = viewSessions
-			return m, nil, true
-		case viewAgents:
-			if m.mode == ModeAgents {
-				return m, tea.Quit, true
-			}
-			m.view = viewSessions
-			return m, nil, true
-		case viewAgentAB:
-			return m, func() tea.Msg {
-				return messages.BackFromAgentABMsg{}
-			}, true
-		case viewWorkspaces:
-			// The non-editing case is handled above (detail→projects
-			// back-nav + custom quit). When IsEditing() is true we let the
-			// workspaces view cancel its own modal (filter / search /
-			// newBranch / confirm / agentPicker) by falling through to
-			// routeToView instead of quitting the app.
-			return m, nil, false
-		default:
-			if m.sessions.IsEditing() {
-				// esc in sessions editing → falls through to sessions.Update
-			} else {
-				return m, tea.Quit, true
-			}
-		}
+		return m.handleEscKey(msg, isEditing)
 	}
 	return m, nil, false
+}
+
+func (m Model) handlePaletteKey(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	switch msg.String() {
+	case "esc":
+		if m.mode == ModePalette {
+			return m, tea.Quit, true
+		}
+		m.paletteActive = false
+		return m, nil, true
+	case "ctrl+c":
+		return m, tea.Quit, true
+	}
+	var cmd tea.Cmd
+	m.palette, cmd = m.palette.Update(msg)
+	return m, cmd, true
+}
+
+func (m Model) isEditing() bool {
+	if m.sessions.IsEditing() || m.worktreeView.IsEditing() {
+		return true
+	}
+	if m.view == viewAgentAB && m.agentABView.IsEditing() {
+		return true
+	}
+	if m.view == viewWorkspaces && m.workspacesView.IsEditing() {
+		return true
+	}
+	return false
+}
+
+func (m Model) handleQuitKey(isEditing bool) (Model, tea.Cmd, bool) {
+	if isEditing {
+		return m, nil, false
+	}
+	if m.view == viewWorkspaces {
+		return m, nil, false
+	}
+	return m, tea.Quit, true
+}
+
+func (m Model) handleOpenPaletteKey(isEditing bool) (Model, tea.Cmd, bool) {
+	if isEditing {
+		return m, nil, false
+	}
+	m.paletteActive = true
+	m.palette.Reset()
+	return m, nil, true
+}
+
+func (m Model) handleWorktreeKey(isEditing bool) (Model, tea.Cmd, bool) {
+	if isEditing || m.view == viewWorktrees || m.view == viewWorkspaces {
+		return m, nil, false
+	}
+	m.view = viewWorktrees
+	return m, m.worktreeView.Init(), true
+}
+
+func (m Model) handleAgentsKey(isEditing bool) (Model, tea.Cmd, bool) {
+	if isEditing || m.view == viewAgents || m.view == viewWorkspaces {
+		return m, nil, false
+	}
+	m.view = viewAgents
+	return m, nil, true
+}
+
+// handleEscKey implements esc semantics. Workspaces owns its own esc handling
+// (detail→projects back-nav, then quit), so it is delegated first.
+func (m Model) handleEscKey(msg tea.KeyMsg, isEditing bool) (Model, tea.Cmd, bool) {
+	if m.view == viewWorkspaces && !m.workspacesView.IsEditing() {
+		return m.handleEscWorkspaces(msg)
+	}
+	if m.paletteReturn && !isEditing {
+		return m, m.returnToPalette(), true
+	}
+	return m.handleEscByView()
+}
+
+func (m Model) handleEscWorkspaces(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	model, cmd := m.workspacesView.Update(msg)
+	m.workspacesView = model.(workspacesview.Model)
+	if cmd == nil {
+		return m, nil, true
+	}
+	if m.paletteReturn {
+		return m, m.returnToPalette(), true
+	}
+	if m.mode == ModeWorkspaces {
+		return m, cmd, true
+	}
+	m.view = viewSessions
+	return m, nil, true
+}
+
+func (m Model) handleEscByView() (Model, tea.Cmd, bool) {
+	switch m.view {
+	case viewWindows:
+		return m.escWithMode(ModeWindows)
+	case viewWorktrees:
+		return m.escWithMode(ModeWorktrees)
+	case viewAgents:
+		return m.escWithMode(ModeAgents)
+	case viewAgentAB:
+		return m, func() tea.Msg { return messages.BackFromAgentABMsg{} }, true
+	case viewWorkspaces:
+		// IsEditing() path: let the view cancel its own modal.
+		return m, nil, false
+	default:
+		if m.sessions.IsEditing() {
+			return m, nil, false
+		}
+		return m, tea.Quit, true
+	}
+}
+
+func (m Model) escWithMode(startMode Mode) (Model, tea.Cmd, bool) {
+	if m.mode == startMode {
+		return m, tea.Quit, true
+	}
+	m.view = viewSessions
+	return m, nil, true
 }
 
 // routeToView forwards a message to the active view.
@@ -489,176 +553,206 @@ func (m Model) executeCommand(id string) (tea.Model, tea.Cmd) {
 	recency.RecordCommand(id)
 	m.paletteReturn = true
 
+	if updated, cmd, handled := m.execSessionCommand(id); handled {
+		return updated, cmd
+	}
+	if updated, cmd, handled := m.execWorktreeCommand(id); handled {
+		return updated, cmd
+	}
+	if updated, cmd, handled := m.execAgentCommand(id); handled {
+		return updated, cmd
+	}
+	if updated, cmd, handled := m.execEditorCommand(id); handled {
+		return updated, cmd
+	}
+	if updated, cmd, handled := m.execToolCommand(id); handled {
+		return updated, cmd
+	}
+	if updated, cmd, handled := m.execViewCommand(id); handled {
+		return updated, cmd
+	}
+	return m, nil
+}
+
+func (m Model) execSessionCommand(id string) (tea.Model, tea.Cmd, bool) {
 	switch id {
-	// Session commands
 	case "switch_session":
 		m.paletteReturn = false
 		m.view = viewSessions
-		return m, m.sessions.Reload()
+		return m, m.sessions.Reload(), true
 	case "open_workspace":
-		return m, func() tea.Msg {
-			return messages.OpenWorkspacesMsg{}
-		}
+		return m, openWorkspacesCmd(false), true
 	case "add_workspace":
-		return m, func() tea.Msg {
-			return messages.OpenWorkspacesMsg{AddMode: true}
-		}
+		return m, openWorkspacesCmd(true), true
 	case "kill_session":
-		m.view = viewSessions
-		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}
-		m.pendingKey = &km
-		return m, m.sessions.Reload()
+		return m.sessionsWithPendingRune('d'), m.sessions.Reload(), true
 	case "kill_current_session":
-		return m, func() tea.Msg {
-			current, err := tmux.CurrentSession()
-			if err != nil || current == "" {
-				return tea.QuitMsg{}
-			}
-			sessions, _ := tmux.ListSessions()
-			for _, s := range sessions {
-				if s.Name != current {
-					_ = tmux.SwitchClient(s.Name)
-					break
-				}
-			}
-			_ = tmux.KillSession(current)
-			return tea.QuitMsg{}
-		}
+		return m, killCurrentSessionCmd(), true
 	case "rename_session":
-		m.view = viewSessions
-		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'r'}}
-		m.pendingKey = &km
-		return m, m.sessions.Reload()
+		return m.sessionsWithPendingRune('r'), m.sessions.Reload(), true
+	}
+	return m, nil, false
+}
 
-	// Worktree commands — switch to worktrees view and simulate keys
+func (m Model) execWorktreeCommand(id string) (tea.Model, tea.Cmd, bool) {
+	switch id {
 	case "wt_switch":
 		m.view = viewWorktrees
-		return m, m.worktreeView.Init()
+		return m, m.worktreeView.Init(), true
 	case "wt_create":
-		m.view = viewWorktrees
-		cmd := m.worktreeView.Init()
-		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'n'}}
-		var cmd2 tea.Cmd
-		m.worktreeView, cmd2 = m.worktreeView.Update(km)
-		return m, tea.Batch(cmd, cmd2)
+		return m.worktreesWithInjectedRune('n')
 	case "wt_create_describe":
-		m.view = viewWorktrees
-		cmd := m.worktreeView.Init()
-		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'N'}}
-		var cmd2 tea.Cmd
-		m.worktreeView, cmd2 = m.worktreeView.Update(km)
-		return m, tea.Batch(cmd, cmd2)
+		return m.worktreesWithInjectedRune('N')
 	case "wt_remove":
-		m.view = viewWorktrees
-		cmd := m.worktreeView.Init()
-		km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'d'}}
-		var cmd2 tea.Cmd
-		m.worktreeView, cmd2 = m.worktreeView.Update(km)
-		return m, tea.Batch(cmd, cmd2)
+		return m.worktreesWithInjectedRune('d')
 	case "wt_merge":
-		return m, func() tea.Msg {
-			return messages.RunPopupMsg{Command: "wt merge", Width: "80%", Height: "80%"}
-		}
+		return m, popupCmd("wt merge", "80%", "80%"), true
 	case "wt_commit":
-		return m, func() tea.Msg {
-			return messages.RunPopupMsg{Command: "wt step commit", Width: "80%", Height: "80%"}
-		}
+		return m, popupCmd("wt step commit", "80%", "80%"), true
+	}
+	return m, nil, false
+}
 
-	// Agent commands — launch directly
+func (m Model) execAgentCommand(id string) (tea.Model, tea.Cmd, bool) {
+	switch id {
 	case "launch_claude":
-		return m, func() tea.Msg {
-			return messages.LaunchAgentMsg{AgentID: "claude", ModeID: "default", Target: "pane"}
-		}
+		return m, launchAgentCmd("claude"), true
 	case "launch_gemini":
-		return m, func() tea.Msg {
-			return messages.LaunchAgentMsg{AgentID: "gemini", ModeID: "default", Target: "pane"}
-		}
+		return m, launchAgentCmd("gemini"), true
 	case "launch_codex":
-		return m, func() tea.Msg {
-			return messages.LaunchAgentMsg{AgentID: "codex", ModeID: "default", Target: "pane"}
-		}
+		return m, launchAgentCmd("codex"), true
 	case "launch_aichat":
-		return m, func() tea.Msg {
-			return messages.LaunchAgentMsg{AgentID: "aichat", ModeID: "default", Target: "pane"}
-		}
+		return m, launchAgentCmd("aichat"), true
 	case "launch_opencode":
-		return m, func() tea.Msg {
-			return messages.LaunchAgentMsg{AgentID: "opencode", ModeID: "default", Target: "pane"}
-		}
+		return m, launchAgentCmd("opencode"), true
 	case "agent_ab":
-		return m, func() tea.Msg {
-			return messages.OpenAgentABMsg{Source: "palette"}
-		}
+		return m, func() tea.Msg { return messages.OpenAgentABMsg{Source: "palette"} }, true
+	}
+	return m, nil, false
+}
 
-	// Editor commands
-	case "open_local_editor":
-		return m, func() tea.Msg {
-			path, err := openlocal.ResolveCurrentSessionPath()
-			if err != nil {
-				return messages.OpenLocalEditorMsg{Err: err}
-			}
+func (m Model) execEditorCommand(id string) (tea.Model, tea.Cmd, bool) {
+	if id == "open_local_editor" {
+		return m, openLocalEditorCmd(), true
+	}
+	return m, nil, false
+}
 
-			editor := openlocal.ResolveEditor()
-
-			if !openlocal.IsSSH() {
-				bin, args := openlocal.LocalEditorCommand(editor, path)
-				cmd := exec.Command(bin, args...)
-				if err := cmd.Start(); err != nil {
-					return messages.OpenLocalEditorMsg{
-						Err: fmt.Errorf("open editor: %w", err),
-					}
-				}
-				go func() { _ = cmd.Wait() }()
-				return messages.OpenLocalEditorMsg{}
-			}
-
-			host := openlocal.ResolveSSHHost()
-			if host == "" {
-				return messages.OpenLocalEditorMsg{
-					Err: fmt.Errorf("SSH host not configured: set KITMUX_SSH_HOST or run from a session with a cached host"),
-				}
-			}
-
-			_ = openlocal.CacheSSHHost(host)
-
-			socketPath := openlocal.ResolveSocketPath()
-
-			req := openlocal.Request{
-				Editor: editor,
-				Host:   host,
-				Path:   path,
-			}
-
-			if err := openlocal.SendOpenRequest(socketPath, req); err != nil {
-				fallback := openlocal.FallbackCommand(editor, host, path)
-				return messages.OpenLocalEditorMsg{Fallback: fallback}
-			}
-
-			return messages.OpenLocalEditorMsg{}
-		}
-
-	// Tool commands
+func (m Model) execToolCommand(id string) (tea.Model, tea.Cmd, bool) {
+	switch id {
 	case "tool_lazygit":
-		return m, func() tea.Msg {
-			return messages.RunPopupMsg{Command: "lazygit", Width: "100%", Height: "100%"}
-		}
+		return m, popupCmd("lazygit", "100%", "100%"), true
 	case "tool_lumen_diff":
-		return m, func() tea.Msg {
-			return messages.RunPopupMsg{Command: "lumen diff", Width: "100%", Height: "100%"}
-		}
+		return m, popupCmd("lumen diff", "100%", "100%"), true
+	}
+	return m, nil, false
+}
 
-	// View commands
+func (m Model) execViewCommand(id string) (tea.Model, tea.Cmd, bool) {
+	switch id {
 	case "view_sessions":
 		m.view = viewSessions
-		return m, nil
+		return m, nil, true
 	case "view_worktrees":
 		m.view = viewWorktrees
-		return m, m.worktreeView.Init()
+		return m, m.worktreeView.Init(), true
 	case "view_agents":
 		m.view = viewAgents
-		return m, nil
+		return m, nil, true
 	}
-	return m, nil
+	return m, nil, false
+}
+
+func (m Model) sessionsWithPendingRune(r rune) Model {
+	m.view = viewSessions
+	km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+	m.pendingKey = &km
+	return m
+}
+
+func (m Model) worktreesWithInjectedRune(r rune) (tea.Model, tea.Cmd, bool) {
+	m.view = viewWorktrees
+	cmd := m.worktreeView.Init()
+	km := tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{r}}
+	var cmd2 tea.Cmd
+	m.worktreeView, cmd2 = m.worktreeView.Update(km)
+	return m, tea.Batch(cmd, cmd2), true
+}
+
+func openWorkspacesCmd(addMode bool) tea.Cmd {
+	return func() tea.Msg {
+		return messages.OpenWorkspacesMsg{AddMode: addMode}
+	}
+}
+
+func popupCmd(command, width, height string) tea.Cmd {
+	return func() tea.Msg {
+		return messages.RunPopupMsg{Command: command, Width: width, Height: height}
+	}
+}
+
+func launchAgentCmd(agentID string) tea.Cmd {
+	return func() tea.Msg {
+		return messages.LaunchAgentMsg{AgentID: agentID, ModeID: "default", Target: "pane"}
+	}
+}
+
+func killCurrentSessionCmd() tea.Cmd {
+	return func() tea.Msg {
+		current, err := tmux.CurrentSession()
+		if err != nil || current == "" {
+			return tea.QuitMsg{}
+		}
+		sessionList, _ := tmux.ListSessions()
+		for _, s := range sessionList {
+			if s.Name != current {
+				_ = tmux.SwitchClient(s.Name)
+				break
+			}
+		}
+		_ = tmux.KillSession(current)
+		return tea.QuitMsg{}
+	}
+}
+
+func openLocalEditorCmd() tea.Cmd {
+	return func() tea.Msg {
+		path, err := openlocal.ResolveCurrentSessionPath()
+		if err != nil {
+			return messages.OpenLocalEditorMsg{Err: err}
+		}
+		editor := openlocal.ResolveEditor()
+		if !openlocal.IsSSH() {
+			return localEditorLaunch(editor, path)
+		}
+		return remoteEditorLaunch(editor, path)
+	}
+}
+
+func localEditorLaunch(editor, path string) tea.Msg {
+	bin, args := openlocal.LocalEditorCommand(editor, path)
+	cmd := exec.Command(bin, args...)
+	if err := cmd.Start(); err != nil {
+		return messages.OpenLocalEditorMsg{Err: fmt.Errorf("open editor: %w", err)}
+	}
+	go func() { _ = cmd.Wait() }()
+	return messages.OpenLocalEditorMsg{}
+}
+
+func remoteEditorLaunch(editor, path string) tea.Msg {
+	host := openlocal.ResolveSSHHost()
+	if host == "" {
+		return messages.OpenLocalEditorMsg{
+			Err: fmt.Errorf("SSH host not configured: set KITMUX_SSH_HOST or run from a session with a cached host"),
+		}
+	}
+	_ = openlocal.CacheSSHHost(host)
+	socketPath := openlocal.ResolveSocketPath()
+	req := openlocal.Request{Editor: editor, Host: host, Path: path}
+	if err := openlocal.SendOpenRequest(socketPath, req); err != nil {
+		return messages.OpenLocalEditorMsg{Fallback: openlocal.FallbackCommand(editor, host, path)}
+	}
+	return messages.OpenLocalEditorMsg{}
 }
 
 func (m Model) launchAgent(msg messages.LaunchAgentMsg) (tea.Model, tea.Cmd) {

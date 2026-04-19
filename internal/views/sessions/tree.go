@@ -50,13 +50,31 @@ func BuildTree(sessions []tmux.Session, repoRoots map[string]string) []*TreeNode
 		repoRoots = make(map[string]string)
 	}
 
-	// Build activity lookup
 	activityOf := make(map[string]int64, len(sessions))
 	for _, s := range sessions {
 		activityOf[s.Name] = s.Activity
 	}
 
-	// Sort: -main/-master first within same prefix, then by activity desc, then lexicographic.
+	sorted := sortSessionsForGrouping(sessions)
+	sesMap := make(map[string]tmux.Session, len(sorted))
+	for _, s := range sorted {
+		sesMap[s.Name] = s
+	}
+
+	repoGroups, noRepo := splitByRepoRoot(sorted, repoRoots)
+
+	roots := buildRepoRoots(repoGroups)
+	roots = append(roots, buildNoRepoRoots(noRepo, sesMap, activityOf)...)
+
+	sort.SliceStable(roots, func(i, j int) bool {
+		return roots[i].Activity > roots[j].Activity
+	})
+	return roots
+}
+
+// sortSessionsForGrouping returns sessions ordered so that -main/-master sink
+// to the top of their prefix group, falling back to activity descending.
+func sortSessionsForGrouping(sessions []tmux.Session) []tmux.Session {
 	sorted := make([]tmux.Session, len(sessions))
 	copy(sorted, sessions)
 	sort.SliceStable(sorted, func(i, j int) bool {
@@ -66,106 +84,134 @@ func BuildTree(sessions []tmux.Session, repoRoots map[string]string) []*TreeNode
 		}
 		return sorted[i].Activity > sorted[j].Activity
 	})
+	return sorted
+}
 
-	// Build session lookup
-	sesMap := make(map[string]tmux.Session)
-	for _, s := range sorted {
-		sesMap[s.Name] = s
-	}
-
-	// Group sessions by repo root
+// splitByRepoRoot partitions sessions between those mapped to a repo root and
+// those that have no mapping (handled by the name-prefix fallback).
+func splitByRepoRoot(sorted []tmux.Session, repoRoots map[string]string) (map[string][]tmux.Session, []tmux.Session) {
 	repoGroups := make(map[string][]tmux.Session)
 	var noRepo []tmux.Session
 	for _, s := range sorted {
-		root := repoRoots[s.Name]
-		if root != "" {
+		if root := repoRoots[s.Name]; root != "" {
 			repoGroups[root] = append(repoGroups[root], s)
 		} else {
 			noRepo = append(noRepo, s)
 		}
 	}
+	return repoGroups, noRepo
+}
 
+func buildRepoRoots(repoGroups map[string][]tmux.Session) []*TreeNode {
 	var roots []*TreeNode
-
 	for _, repoRoot := range sortedKeys(repoGroups) {
 		group := repoGroups[repoRoot]
-
 		if len(group) == 1 {
-			s := group[0]
-			roots = append(roots, &TreeNode{
-				Kind:        KindSession,
-				Name:        s.Name,
-				SessionName: s.Name,
-				Windows:     s.Windows,
-				Attached:    s.Attached,
-				Activity:    s.Activity,
-				Depth:       0,
-			})
+			roots = append(roots, newSessionRoot(group[0]))
 			continue
 		}
-
-		groupName := filepath.Base(repoRoot)
-
-		var rootSession *tmux.Session
-		var children []tmux.Session
-		for i := range group {
-			if normalize(group[i].Name) == normalize(groupName) {
-				rootSession = &group[i]
-			} else {
-				children = append(children, group[i])
-			}
-		}
-
-		// Sort children: main/master first, then by activity desc
-		sort.SliceStable(children, func(i, j int) bool {
-			mi, mj := isMainBranch(children[i].Name), isMainBranch(children[j].Name)
-			if mi != mj {
-				return mi
-			}
-			return children[i].Activity > children[j].Activity
-		})
-
-		var parent *TreeNode
-		if rootSession != nil {
-			parent = &TreeNode{
-				Kind:        KindSession,
-				Name:        groupName,
-				SessionName: rootSession.Name,
-				Windows:     rootSession.Windows,
-				Attached:    rootSession.Attached,
-				Activity:    rootSession.Activity,
-				Expanded:    true,
-				Depth:       0,
-			}
-		} else {
-			parent = &TreeNode{
-				Kind:     KindGroupHeader,
-				Name:     groupName,
-				Expanded: true,
-				Depth:    0,
-			}
-		}
-
-		for _, cs := range children {
-			childName := trimNormalizedPrefix(cs.Name, groupName)
-			child := &TreeNode{
-				Kind:        KindSession,
-				Name:        childName,
-				SessionName: cs.Name,
-				Windows:     cs.Windows,
-				Attached:    cs.Attached,
-				Activity:    cs.Activity,
-				Depth:       1,
-			}
-			parent.Children = append(parent.Children, child)
-			if cs.Activity > parent.Activity {
-				parent.Activity = cs.Activity
-			}
-		}
-		roots = append(roots, parent)
+		roots = append(roots, buildRepoGroupNode(repoRoot, group))
 	}
+	return roots
+}
 
-	// Process no-repo sessions with findRealParent fallback
+func buildRepoGroupNode(repoRoot string, group []tmux.Session) *TreeNode {
+	groupName := filepath.Base(repoRoot)
+	rootSession, children := pickRepoGroupRoot(group, groupName)
+
+	sort.SliceStable(children, func(i, j int) bool {
+		mi, mj := isMainBranch(children[i].Name), isMainBranch(children[j].Name)
+		if mi != mj {
+			return mi
+		}
+		return children[i].Activity > children[j].Activity
+	})
+
+	parent := newRepoGroupParent(groupName, rootSession)
+	for _, cs := range children {
+		parent.Children = append(parent.Children, &TreeNode{
+			Kind:        KindSession,
+			Name:        trimNormalizedPrefix(cs.Name, groupName),
+			SessionName: cs.Name,
+			Windows:     cs.Windows,
+			Attached:    cs.Attached,
+			Activity:    cs.Activity,
+			Depth:       1,
+		})
+		if cs.Activity > parent.Activity {
+			parent.Activity = cs.Activity
+		}
+	}
+	return parent
+}
+
+func pickRepoGroupRoot(group []tmux.Session, groupName string) (*tmux.Session, []tmux.Session) {
+	var rootSession *tmux.Session
+	var children []tmux.Session
+	for i := range group {
+		if normalize(group[i].Name) == normalize(groupName) {
+			rootSession = &group[i]
+		} else {
+			children = append(children, group[i])
+		}
+	}
+	return rootSession, children
+}
+
+func newRepoGroupParent(groupName string, rootSession *tmux.Session) *TreeNode {
+	if rootSession != nil {
+		return &TreeNode{
+			Kind:        KindSession,
+			Name:        groupName,
+			SessionName: rootSession.Name,
+			Windows:     rootSession.Windows,
+			Attached:    rootSession.Attached,
+			Activity:    rootSession.Activity,
+			Expanded:    true,
+			Depth:       0,
+		}
+	}
+	return &TreeNode{
+		Kind:     KindGroupHeader,
+		Name:     groupName,
+		Expanded: true,
+		Depth:    0,
+	}
+}
+
+func newSessionRoot(s tmux.Session) *TreeNode {
+	return &TreeNode{
+		Kind:        KindSession,
+		Name:        s.Name,
+		SessionName: s.Name,
+		Windows:     s.Windows,
+		Attached:    s.Attached,
+		Activity:    s.Activity,
+		Depth:       0,
+	}
+}
+
+// buildNoRepoRoots groups sessions without a repo root using name-prefix heuristics.
+func buildNoRepoRoots(noRepo []tmux.Session, sesMap map[string]tmux.Session, activityOf map[string]int64) []*TreeNode {
+	parentOf, childrenOf := computeNoRepoParents(noRepo)
+	processed := make(map[string]bool)
+	var roots []*TreeNode
+	for _, s := range noRepo {
+		if processed[s.Name] || parentOf[s.Name] != "" {
+			continue
+		}
+		if len(childrenOf[s.Name]) > 0 {
+			roots = append(roots, buildNoRepoParent(s, childrenOf[s.Name], sesMap, activityOf, processed))
+			processed[s.Name] = true
+			continue
+		}
+		roots = append(roots, newSessionRoot(s))
+		processed[s.Name] = true
+	}
+	return roots
+}
+
+func computeNoRepoParents(noRepo []tmux.Session) (map[string]string, map[string][]string) {
 	normMap := make(map[string]string, len(noRepo))
 	nameSet := make(map[string]bool, len(noRepo))
 	for _, s := range noRepo {
@@ -185,70 +231,46 @@ func BuildTree(sessions []tmux.Session, repoRoots map[string]string) []*TreeNode
 			childrenOf[origParent] = append(childrenOf[origParent], s.Name)
 		}
 	}
+	return parentOf, childrenOf
+}
 
-	processed := make(map[string]bool)
-	for _, s := range noRepo {
-		if processed[s.Name] || parentOf[s.Name] != "" {
-			continue
-		}
-
-		if len(childrenOf[s.Name]) > 0 {
-			node := &TreeNode{
-				Kind:        KindSession,
-				Name:        s.Name,
-				SessionName: s.Name,
-				Windows:     s.Windows,
-				Attached:    s.Attached,
-				Activity:    s.Activity,
-				Expanded:    true,
-				Depth:       0,
-			}
-
-			// Sort children by activity desc
-			cnames := childrenOf[s.Name]
-			sort.SliceStable(cnames, func(i, j int) bool {
-				return activityOf[cnames[i]] > activityOf[cnames[j]]
-			})
-
-			for _, cname := range cnames {
-				cs := sesMap[cname]
-				node.Children = append(node.Children, &TreeNode{
-					Kind:        KindSession,
-					Name:        trimNormalizedPrefix(cname, normalize(s.Name)),
-					SessionName: cname,
-					Windows:     cs.Windows,
-					Attached:    cs.Attached,
-					Activity:    cs.Activity,
-					Depth:       1,
-				})
-				if cs.Activity > node.Activity {
-					node.Activity = cs.Activity
-				}
-				processed[cname] = true
-			}
-			roots = append(roots, node)
-			processed[s.Name] = true
-			continue
-		}
-
-		roots = append(roots, &TreeNode{
-			Kind:        KindSession,
-			Name:        s.Name,
-			SessionName: s.Name,
-			Windows:     s.Windows,
-			Attached:    s.Attached,
-			Activity:    s.Activity,
-			Depth:       0,
-		})
-		processed[s.Name] = true
+func buildNoRepoParent(
+	s tmux.Session,
+	cnames []string,
+	sesMap map[string]tmux.Session,
+	activityOf map[string]int64,
+	processed map[string]bool,
+) *TreeNode {
+	node := &TreeNode{
+		Kind:        KindSession,
+		Name:        s.Name,
+		SessionName: s.Name,
+		Windows:     s.Windows,
+		Attached:    s.Attached,
+		Activity:    s.Activity,
+		Expanded:    true,
+		Depth:       0,
 	}
-
-	// Sort all root nodes by most-recent activity (descending)
-	sort.SliceStable(roots, func(i, j int) bool {
-		return roots[i].Activity > roots[j].Activity
+	sort.SliceStable(cnames, func(i, j int) bool {
+		return activityOf[cnames[i]] > activityOf[cnames[j]]
 	})
-
-	return roots
+	for _, cname := range cnames {
+		cs := sesMap[cname]
+		node.Children = append(node.Children, &TreeNode{
+			Kind:        KindSession,
+			Name:        trimNormalizedPrefix(cname, normalize(s.Name)),
+			SessionName: cname,
+			Windows:     cs.Windows,
+			Attached:    cs.Attached,
+			Activity:    cs.Activity,
+			Depth:       1,
+		})
+		if cs.Activity > node.Activity {
+			node.Activity = cs.Activity
+		}
+		processed[cname] = true
+	}
+	return node
 }
 
 // sortedKeys returns map keys sorted alphabetically (used as fallback grouping order
@@ -375,14 +397,10 @@ func resolveRepoRoots(sessions []tmux.Session) map[string]string {
 // resolveRepoRootsIncremental reuses cached repo roots when the session path
 // hasn't changed, and only calls git for new or changed sessions.
 func resolveRepoRootsIncremental(sessions []tmux.Session, snap *cache.Snapshot, now time.Time) (map[string]string, time.Time) {
-	if snap == nil ||
-		len(snap.RepoRoots) == 0 ||
-		snap.RepoRootsRefreshedAt.IsZero() ||
-		now.Sub(snap.RepoRootsRefreshedAt) > repoRootsRevalidateTTL {
+	if !canReuseRepoRootsCache(snap, now) {
 		return resolveRepoRoots(sessions), now
 	}
 
-	// Build a path lookup from the cached sessions
 	cachedPaths := make(map[string]string, len(snap.Sessions))
 	for _, s := range snap.Sessions {
 		cachedPaths[s.Name] = s.Path
@@ -393,31 +411,52 @@ func resolveRepoRootsIncremental(sessions []tmux.Session, snap *cache.Snapshot, 
 		if s.Path == "" {
 			continue
 		}
-
-		// Reuse cached root if the session path hasn't changed
-		if cachedPath, ok := cachedPaths[s.Name]; ok && cachedPath == s.Path {
-			if root, ok := snap.RepoRoots[s.Name]; ok {
-				base := filepath.Base(root)
-				normName := normalize(s.Name)
-				normBase := normalize(base)
-				if normName == normBase || strings.HasPrefix(normName, normBase+"-") {
-					roots[s.Name] = root
-					continue
-				}
-			}
-		}
-
-		// Resolve fresh
-		root := resolveRepoRoot(s.Path)
-		if root == "" {
+		if root, ok := reuseCachedRepoRoot(s, cachedPaths, snap.RepoRoots); ok {
+			roots[s.Name] = root
 			continue
 		}
-		base := filepath.Base(root)
-		normName := normalize(s.Name)
-		normBase := normalize(base)
-		if normName == normBase || strings.HasPrefix(normName, normBase+"-") {
+		if root, ok := freshRepoRoot(s); ok {
 			roots[s.Name] = root
 		}
 	}
 	return roots, snap.RepoRootsRefreshedAt
+}
+
+func canReuseRepoRootsCache(snap *cache.Snapshot, now time.Time) bool {
+	if snap == nil || len(snap.RepoRoots) == 0 || snap.RepoRootsRefreshedAt.IsZero() {
+		return false
+	}
+	return now.Sub(snap.RepoRootsRefreshedAt) <= repoRootsRevalidateTTL
+}
+
+func reuseCachedRepoRoot(s tmux.Session, cachedPaths, cachedRoots map[string]string) (string, bool) {
+	cachedPath, ok := cachedPaths[s.Name]
+	if !ok || cachedPath != s.Path {
+		return "", false
+	}
+	root, ok := cachedRoots[s.Name]
+	if !ok {
+		return "", false
+	}
+	if !repoRootMatchesSessionName(root, s.Name) {
+		return "", false
+	}
+	return root, true
+}
+
+func freshRepoRoot(s tmux.Session) (string, bool) {
+	root := resolveRepoRoot(s.Path)
+	if root == "" {
+		return "", false
+	}
+	if !repoRootMatchesSessionName(root, s.Name) {
+		return "", false
+	}
+	return root, true
+}
+
+func repoRootMatchesSessionName(root, sessionName string) bool {
+	base := normalize(filepath.Base(root))
+	name := normalize(sessionName)
+	return name == base || strings.HasPrefix(name, base+"-")
 }

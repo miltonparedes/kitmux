@@ -61,87 +61,132 @@ func (m Model) Init() tea.Cmd { return nil }
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case windowsLoadedMsg:
-		// Only apply if it matches current session (avoid stale loads)
 		if msg.session == m.sessionName {
 			m.windows = msg.windows
 			m.clampCursor()
 		}
-
-	case tea.MouseMsg:
-		switch msg.Button {
-		case tea.MouseButtonLeft:
-			if msg.Action != tea.MouseActionRelease {
-				return m, nil
-			}
-			row := msg.Y
-			if row < 1 {
-				return m, nil
-			}
-			idx := m.scroll + (row - 1)
-			if idx < 0 || idx >= len(m.windows) {
-				return m, nil
-			}
-			w := m.windows[idx]
-			target := fmt.Sprintf("%s:%d", w.SessionName, w.Index)
-			return m, func() tea.Msg {
-				return messages.SwitchWindowMsg{Target: target}
-			}
-		case tea.MouseButtonWheelUp:
-			m.cursor--
-			m.clampCursor()
-			m.ensureVisible()
-		case tea.MouseButtonWheelDown:
-			m.cursor++
-			m.clampCursor()
-			m.ensureVisible()
-		}
 		return m, nil
-
+	case tea.MouseMsg:
+		return m.handleMouse(msg)
 	case tea.KeyMsg:
-		switch msg.String() {
-		case "j", "down":
-			m.cursor++
-			m.clampCursor()
-			m.ensureVisible()
-		case "k", "up":
-			m.cursor--
-			m.clampCursor()
-			m.ensureVisible()
-		case "g", "home":
-			m.cursor = 0
-			m.scroll = 0
-		case "G", "end":
-			m.cursor = len(m.windows) - 1
-			m.ensureVisible()
-
-		case "enter":
-			if w := m.selected(); w != nil {
-				target := fmt.Sprintf("%s:%d", w.SessionName, w.Index)
-				return m, func() tea.Msg {
-					return messages.SwitchWindowMsg{Target: target}
-				}
-			}
-
-		case "h", "left", "esc":
-			return m, func() tea.Msg {
-				return messages.BackToSessionsMsg{}
-			}
-
-		case "1", "2", "3", "4", "5", "6", "7", "8", "9",
-			"alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "alt+6", "alt+7", "alt+8", "alt+9":
-			if config.SuperKey == "none" && !msg.Alt || config.SuperKey == "alt" && msg.Alt {
-				idx := int(msg.Runes[0]-'0') - 1
-				if idx < len(m.windows) {
-					w := m.windows[idx]
-					target := fmt.Sprintf("%s:%d", w.SessionName, w.Index)
-					return m, func() tea.Msg {
-						return messages.SwitchWindowMsg{Target: target}
-					}
-				}
-			}
-		}
+		return m.handleKey(msg)
 	}
 	return m, nil
+}
+
+func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
+	switch msg.Button {
+	case tea.MouseButtonLeft:
+		return m.handleMouseLeft(msg)
+	case tea.MouseButtonWheelUp:
+		m.cursor--
+		m.clampCursor()
+		m.ensureVisible()
+	case tea.MouseButtonWheelDown:
+		m.cursor++
+		m.clampCursor()
+		m.ensureVisible()
+	}
+	return m, nil
+}
+
+func (m Model) handleMouseLeft(msg tea.MouseMsg) (Model, tea.Cmd) {
+	if msg.Action != tea.MouseActionRelease {
+		return m, nil
+	}
+	row := msg.Y
+	if row < 1 {
+		return m, nil
+	}
+	idx := m.scroll + (row - 1)
+	if idx < 0 || idx >= len(m.windows) {
+		return m, nil
+	}
+	return m, switchWindowCmd(m.windows[idx])
+}
+
+func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	if updated, handled := m.handleNav(msg); handled {
+		return updated, nil
+	}
+	if updated, cmd, handled := m.handleAction(msg); handled {
+		return updated, cmd
+	}
+	if updated, cmd, handled := m.handleDigit(msg); handled {
+		return updated, cmd
+	}
+	return m, nil
+}
+
+func (m Model) handleNav(msg tea.KeyMsg) (Model, bool) {
+	switch msg.String() {
+	case "j", "down":
+		m.cursor++
+		m.clampCursor()
+		m.ensureVisible()
+		return m, true
+	case "k", "up":
+		m.cursor--
+		m.clampCursor()
+		m.ensureVisible()
+		return m, true
+	case "g", "home":
+		m.cursor = 0
+		m.scroll = 0
+		return m, true
+	case "G", "end":
+		m.cursor = len(m.windows) - 1
+		m.ensureVisible()
+		return m, true
+	}
+	return m, false
+}
+
+func (m Model) handleAction(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	switch msg.String() {
+	case "enter":
+		if w := m.selected(); w != nil {
+			return m, switchWindowCmd(*w), true
+		}
+		return m, nil, true
+	case "h", "left", "esc":
+		return m, func() tea.Msg { return messages.BackToSessionsMsg{} }, true
+	}
+	return m, nil, false
+}
+
+func (m Model) handleDigit(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	switch msg.String() {
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9",
+		"alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "alt+6", "alt+7", "alt+8", "alt+9":
+	default:
+		return m, nil, false
+	}
+	if !digitJumpActive(msg) {
+		return m, nil, true
+	}
+	idx := int(msg.Runes[0]-'0') - 1
+	if idx >= 0 && idx < len(m.windows) {
+		return m, switchWindowCmd(m.windows[idx]), true
+	}
+	return m, nil, true
+}
+
+func digitJumpActive(msg tea.KeyMsg) bool {
+	if config.SuperKey == "none" && !msg.Alt {
+		return true
+	}
+	if config.SuperKey == "alt" && msg.Alt {
+		return true
+	}
+	return false
+}
+
+func switchWindowCmd(w tmux.Window) tea.Cmd {
+	target := fmt.Sprintf("%s:%d", w.SessionName, w.Index)
+	return func() tea.Msg {
+		return messages.SwitchWindowMsg{Target: target}
+	}
 }
 
 func (m Model) selected() *tmux.Window {

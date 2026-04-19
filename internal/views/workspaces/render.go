@@ -230,21 +230,8 @@ func (m Model) renderRightColumn(width, avail int) string {
 	if m.mode == modeNewBranch {
 		return m.renderNewBranchOverlay(width, avail)
 	}
-
 	var b strings.Builder
-	used := 0
-
-	title := " "
-	if p := m.selectedWorkspace(); p != nil {
-		title = p.Name
-	}
-	b.WriteString(columnHeader(title, m.focus == colDetail))
-	b.WriteString("\n")
-	used++
-	b.WriteString(rowSep(width))
-	b.WriteString("\n")
-	used++
-
+	used := m.writeRightColumnHeader(&b, width)
 	if len(m.workspaces) == 0 || m.detailItems == 0 {
 		b.WriteString(" " + theme.HelpStyle.Render("Select a workspace"))
 		b.WriteString("\n")
@@ -252,70 +239,98 @@ func (m Model) renderRightColumn(width, avail int) string {
 		padTo(&b, used, avail)
 		return b.String()
 	}
-
-	// Branches section
-	if len(m.branches) > 0 {
-		b.WriteString(" " + theme.TreeGroupHeader.Render("Branches"))
-		b.WriteString("\n")
-		used++
-
-		branchStart := m.detScroll
-		if branchStart > len(m.branches) {
-			branchStart = len(m.branches)
-		}
-		// Reserve at least 4 lines for the agents section if any.
-		reserve := 0
-		if len(m.agentEntries) > 0 {
-			reserve = 3
-		}
-		branchBudget := avail - used - reserve
-		if branchBudget < 1 {
-			branchBudget = 1
-		}
-		shown := 0
-		for i := branchStart; i < len(m.branches); i++ {
-			if shown*2+1 > branchBudget {
-				break
-			}
-			br := m.branches[i]
-			selected := i == m.detCursor && m.focus == colDetail
-			b.WriteString(m.renderBranch(br, selected, width))
-			b.WriteString("\n")
-			used++
-			shown++
-			if i < len(m.branches)-1 && shown*2 < branchBudget {
-				b.WriteString(" " + rowSep(width-1))
-				b.WriteString("\n")
-				used++
-			}
-		}
-	} else {
-		b.WriteString(" " + theme.HelpStyle.Render("no branches"))
-		b.WriteString("\n")
-		used++
-	}
-
-	// Agents section
-	if len(m.agentEntries) > 0 && used < avail-1 {
-		b.WriteString("\n")
-		used++
-		b.WriteString(" " + theme.TreeGroupHeader.Render("Agents"))
-		b.WriteString("\n")
-		used++
-		for i, ae := range m.agentEntries {
-			if used >= avail {
-				break
-			}
-			detIdx := len(m.branches) + i
-			selected := detIdx == m.detCursor && m.focus == colDetail
-			b.WriteString(m.renderAgentEntry(ae, selected))
-			b.WriteString("\n")
-			used++
-		}
-	}
-
+	used = m.writeBranchesSection(&b, width, avail, used)
+	used = m.writeAgentsSection(&b, avail, used)
 	padTo(&b, used, avail)
 	return b.String()
+}
+
+func (m Model) writeRightColumnHeader(b *strings.Builder, width int) int {
+	title := " "
+	if p := m.selectedWorkspace(); p != nil {
+		title = p.Name
+	}
+	b.WriteString(columnHeader(title, m.focus == colDetail))
+	b.WriteString("\n")
+	b.WriteString(rowSep(width))
+	b.WriteString("\n")
+	return 2
+}
+
+func (m Model) writeBranchesSection(b *strings.Builder, width, avail, used int) int {
+	if len(m.branches) == 0 {
+		b.WriteString(" " + theme.HelpStyle.Render("no branches"))
+		b.WriteString("\n")
+		return used + 1
+	}
+	b.WriteString(" " + theme.TreeGroupHeader.Render("Branches"))
+	b.WriteString("\n")
+	used++
+
+	branchStart := m.detScroll
+	if branchStart > len(m.branches) {
+		branchStart = len(m.branches)
+	}
+	budget := m.branchBudget(avail, used)
+	return used + m.writeBranchRows(b, width, branchStart, budget)
+}
+
+func (m Model) branchBudget(avail, used int) int {
+	reserve := 0
+	if len(m.agentEntries) > 0 {
+		reserve = 3
+	}
+	budget := avail - used - reserve
+	if budget < 1 {
+		budget = 1
+	}
+	return budget
+}
+
+// writeBranchRows renders branch rows (item + separator) until budget is exhausted.
+// Returns the number of lines written.
+func (m Model) writeBranchRows(b *strings.Builder, width, start, budget int) int {
+	written := 0
+	shown := 0
+	for i := start; i < len(m.branches); i++ {
+		if shown*2+1 > budget {
+			break
+		}
+		br := m.branches[i]
+		selected := i == m.detCursor && m.focus == colDetail
+		b.WriteString(m.renderBranch(br, selected, width))
+		b.WriteString("\n")
+		written++
+		shown++
+		if i < len(m.branches)-1 && shown*2 < budget {
+			b.WriteString(" " + rowSep(width-1))
+			b.WriteString("\n")
+			written++
+		}
+	}
+	return written
+}
+
+func (m Model) writeAgentsSection(b *strings.Builder, avail, used int) int {
+	if len(m.agentEntries) == 0 || used >= avail-1 {
+		return used
+	}
+	b.WriteString("\n")
+	used++
+	b.WriteString(" " + theme.TreeGroupHeader.Render("Agents"))
+	b.WriteString("\n")
+	used++
+	for i, ae := range m.agentEntries {
+		if used >= avail {
+			break
+		}
+		detIdx := len(m.branches) + i
+		selected := detIdx == m.detCursor && m.focus == colDetail
+		b.WriteString(m.renderAgentEntry(ae, selected))
+		b.WriteString("\n")
+		used++
+	}
+	return used
 }
 
 func (m Model) renderNewBranchOverlay(width, avail int) string {
@@ -337,42 +352,56 @@ func (m Model) renderNewBranchOverlay(width, avail int) string {
 func (m Model) renderBranch(br branchEntry, selected bool, width int) string {
 	var left string
 	if br.IsSession {
-		meta := fmt.Sprintf("%dw", br.Windows)
-		if br.Attached {
-			meta += " " + theme.AttachedBadge.Render("●")
-		}
-		if br.Ahead > 0 {
-			meta += " " + theme.TreeMeta.Render(fmt.Sprintf("↑%d", br.Ahead))
-		}
-		if br.Behind > 0 {
-			meta += " " + theme.TreeMeta.Render(fmt.Sprintf("↓%d", br.Behind))
-		}
-		metaStr := theme.TreeMeta.Render(meta)
-		if selected {
-			left = fmt.Sprintf(" %s %s  %s", theme.PaletteItemSelected.Render("▸"),
-				theme.TreeNodeSelected.Render(br.Name), metaStr)
-		} else {
-			left = fmt.Sprintf("   %s  %s", theme.TreeNodeNormal.Render(br.Name), metaStr)
-		}
+		left = renderSessionBranchLeft(br, selected)
 	} else {
-		if selected {
-			left = fmt.Sprintf(" %s %s", theme.PaletteItemSelected.Render("▸"),
-				theme.TreeNodeSelected.Render(br.Name))
-		} else {
-			left = fmt.Sprintf("   %s", theme.HelpStyle.Render(br.Name))
-		}
+		left = renderInactiveBranchLeft(br, selected)
 	}
+	return joinBranchLine(left, branchDiffStats(br), width)
+}
 
-	right := branchDiffStats(br)
-	if right != "" && width > 0 {
-		leftW := lipgloss.Width(left)
-		rightW := lipgloss.Width(right)
-		gap := width - leftW - rightW - 1
-		if gap >= 2 {
-			return left + strings.Repeat(" ", gap) + right
-		}
+func renderSessionBranchLeft(br branchEntry, selected bool) string {
+	metaStr := theme.TreeMeta.Render(branchSessionMeta(br))
+	if selected {
+		return fmt.Sprintf(" %s %s  %s",
+			theme.PaletteItemSelected.Render("▸"),
+			theme.TreeNodeSelected.Render(br.Name),
+			metaStr)
 	}
-	return left
+	return fmt.Sprintf("   %s  %s", theme.TreeNodeNormal.Render(br.Name), metaStr)
+}
+
+func branchSessionMeta(br branchEntry) string {
+	meta := fmt.Sprintf("%dw", br.Windows)
+	if br.Attached {
+		meta += " " + theme.AttachedBadge.Render("●")
+	}
+	if br.Ahead > 0 {
+		meta += " " + theme.TreeMeta.Render(fmt.Sprintf("↑%d", br.Ahead))
+	}
+	if br.Behind > 0 {
+		meta += " " + theme.TreeMeta.Render(fmt.Sprintf("↓%d", br.Behind))
+	}
+	return meta
+}
+
+func renderInactiveBranchLeft(br branchEntry, selected bool) string {
+	if selected {
+		return fmt.Sprintf(" %s %s",
+			theme.PaletteItemSelected.Render("▸"),
+			theme.TreeNodeSelected.Render(br.Name))
+	}
+	return fmt.Sprintf("   %s", theme.HelpStyle.Render(br.Name))
+}
+
+func joinBranchLine(left, right string, width int) string {
+	if right == "" || width <= 0 {
+		return left
+	}
+	gap := width - lipgloss.Width(left) - lipgloss.Width(right) - 1
+	if gap < 2 {
+		return left
+	}
+	return left + strings.Repeat(" ", gap) + right
 }
 
 func branchDiffStats(br branchEntry) string {

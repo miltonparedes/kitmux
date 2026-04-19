@@ -27,78 +27,103 @@ func ResolveRepoRoots(sessions []tmux.Session) map[string]string {
 		return map[string]string{}
 	}
 
-	type bySession struct {
-		name string
-		path string
+	keep, uniquePaths := collectSessionPaths(sessions)
+
+	cached, _ := store.LoadRepoRootCache()
+	now := time.Now()
+	resolved, toResolve := reuseCachedRepoRoots(uniquePaths, cached, now)
+
+	if len(toResolve) > 0 {
+		newlyResolved := resolveRepoRootsParallel(toResolve)
+		for path, root := range newlyResolved {
+			resolved[path] = root
+		}
+		persistFreshRoots(newlyResolved, now)
 	}
+
+	return filterResolvedBySessionNames(keep, resolved)
+}
+
+type sessionPathEntry struct {
+	name string
+	path string
+}
+
+func collectSessionPaths(sessions []tmux.Session) ([]sessionPathEntry, map[string]struct{}) {
 	uniquePaths := make(map[string]struct{})
-	keep := make([]bySession, 0, len(sessions))
+	keep := make([]sessionPathEntry, 0, len(sessions))
 	for _, s := range sessions {
 		if s.Path == "" {
 			continue
 		}
-		keep = append(keep, bySession{name: s.Name, path: s.Path})
+		keep = append(keep, sessionPathEntry{name: s.Name, path: s.Path})
 		uniquePaths[s.Path] = struct{}{}
 	}
+	return keep, uniquePaths
+}
 
-	cached, _ := store.LoadRepoRootCache()
-	now := time.Now()
-
-	// Build the path→root map: reuse cache when fresh, otherwise enqueue.
+func reuseCachedRepoRoots(
+	uniquePaths map[string]struct{},
+	cached map[string]store.PathRepoRoot,
+	now time.Time,
+) (map[string]string, []string) {
 	resolved := make(map[string]string, len(uniquePaths))
 	var toResolve []string
 	for path := range uniquePaths {
-		if entry, ok := cached[path]; ok && !entry.RefreshedAt.IsZero() && now.Sub(entry.RefreshedAt) < repoRootCacheTTL {
+		entry, ok := cached[path]
+		if ok && !entry.RefreshedAt.IsZero() && now.Sub(entry.RefreshedAt) < repoRootCacheTTL {
 			resolved[path] = entry.RepoRoot
 			continue
 		}
 		toResolve = append(toResolve, path)
 	}
+	return resolved, toResolve
+}
 
-	// Resolve uncached paths in parallel.
-	if len(toResolve) > 0 {
-		var (
-			mu  sync.Mutex
-			wg  sync.WaitGroup
-			out = make(map[string]string, len(toResolve))
-		)
-		for _, path := range toResolve {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				root := ResolveRepoRoot(path)
-				mu.Lock()
-				out[path] = root
-				mu.Unlock()
-			}()
-		}
-		wg.Wait()
-		for path, root := range out {
-			resolved[path] = root
-		}
-		// Persist freshly resolved mappings (skip empty roots — those are
-		// non-git directories we don't want to re-try on every open).
-		persist := make(map[string]string, len(out))
-		for path, root := range out {
-			if root != "" {
-				persist[path] = root
-			}
-		}
-		if len(persist) > 0 {
-			_ = store.SaveRepoRoots(persist, now)
+func resolveRepoRootsParallel(paths []string) map[string]string {
+	var (
+		mu  sync.Mutex
+		wg  sync.WaitGroup
+		out = make(map[string]string, len(paths))
+	)
+	for _, path := range paths {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			root := ResolveRepoRoot(path)
+			mu.Lock()
+			out[path] = root
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+	return out
+}
+
+// persistFreshRoots writes freshly resolved mappings to the store, skipping
+// empty roots (non-git directories) so we don't re-try them on every open.
+func persistFreshRoots(resolved map[string]string, now time.Time) {
+	persist := make(map[string]string, len(resolved))
+	for path, root := range resolved {
+		if root != "" {
+			persist[path] = root
 		}
 	}
+	if len(persist) > 0 {
+		_ = store.SaveRepoRoots(persist, now)
+	}
+}
 
+func filterResolvedBySessionNames(keep []sessionPathEntry, resolved map[string]string) map[string]string {
 	roots := make(map[string]string, len(keep))
 	for _, s := range keep {
 		root := resolved[s.path]
 		if root == "" {
 			continue
 		}
-		base := filepath.Base(root)
-		normName := Normalize(s.name)
-		normBase := Normalize(base)
-		if normName == normBase || strings.HasPrefix(normName, normBase+"-") {
+		base := Normalize(filepath.Base(root))
+		name := Normalize(s.name)
+		if name == base || strings.HasPrefix(name, base+"-") {
 			roots[s.name] = root
 		}
 	}

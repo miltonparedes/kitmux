@@ -185,60 +185,71 @@ func (m Model) viewPicker() string {
 
 func renderNode(node *TreeNode, selected bool, width int) string {
 	if node.Kind == KindGroupHeader {
-		indicator := "▾"
-		if !node.Expanded {
-			indicator = "▸"
-		}
-		name := fmt.Sprintf("%s %s", indicator, node.Name)
-		if selected {
-			return " " + theme.TreeNodeSelected.Render(name)
-		}
-		return " " + theme.TreeGroupHeader.Render(name)
+		return renderGroupHeader(node, selected)
 	}
+	left := renderSessionLeft(node, selected)
+	right := renderDiffStats(node)
+	return joinSessionLine(left, right, width)
+}
 
+func renderGroupHeader(node *TreeNode, selected bool) string {
+	indicator := "▾"
+	if !node.Expanded {
+		indicator = "▸"
+	}
+	name := fmt.Sprintf("%s %s", indicator, node.Name)
+	if selected {
+		return " " + theme.TreeNodeSelected.Render(name)
+	}
+	return " " + theme.TreeGroupHeader.Render(name)
+}
+
+func renderSessionLeft(node *TreeNode, selected bool) string {
+	metaStr := theme.TreeMeta.Render(sessionMeta(node))
+	nameStr := styledSessionName(node.Name, selected)
+	if node.Depth > 0 {
+		connector := theme.TreeConnector.Render("┊ ")
+		return fmt.Sprintf(" %s%s  %s", connector, nameStr, metaStr)
+	}
+	return fmt.Sprintf(" %s  %s", nameStr, metaStr)
+}
+
+func sessionMeta(node *TreeNode) string {
 	meta := fmt.Sprintf("%dw", node.Windows)
 	if node.Attached {
 		meta += " " + theme.AttachedBadge.Render("●")
 	}
-	metaStr := theme.TreeMeta.Render(meta)
+	return meta
+}
 
-	var left string
-	if node.Depth > 0 {
-		connector := theme.TreeConnector.Render("┊ ")
-		if selected {
-			left = fmt.Sprintf(" %s%s  %s", connector, theme.TreeNodeSelected.Render(node.Name), metaStr)
-		} else {
-			left = fmt.Sprintf(" %s%s  %s", connector, theme.TreeNodeNormal.Render(node.Name), metaStr)
-		}
-	} else {
-		if selected {
-			left = fmt.Sprintf(" %s  %s", theme.TreeNodeSelected.Render(node.Name), metaStr)
-		} else {
-			left = fmt.Sprintf(" %s  %s", theme.TreeNodeNormal.Render(node.Name), metaStr)
-		}
+func styledSessionName(name string, selected bool) string {
+	if selected {
+		return theme.TreeNodeSelected.Render(name)
 	}
+	return theme.TreeNodeNormal.Render(name)
+}
 
-	// Right-justify diff stats
-	var right string
-	if node.Added > 0 || node.Deleted > 0 {
-		var parts []string
-		if node.Added > 0 {
-			parts = append(parts, theme.DiffAdded.Render(fmt.Sprintf("+%d", node.Added)))
-		}
-		if node.Deleted > 0 {
-			parts = append(parts, theme.DiffRemoved.Render(fmt.Sprintf("-%d", node.Deleted)))
-		}
-		right = strings.Join(parts, " ")
+func renderDiffStats(node *TreeNode) string {
+	if node.Added == 0 && node.Deleted == 0 {
+		return ""
 	}
+	var parts []string
+	if node.Added > 0 {
+		parts = append(parts, theme.DiffAdded.Render(fmt.Sprintf("+%d", node.Added)))
+	}
+	if node.Deleted > 0 {
+		parts = append(parts, theme.DiffRemoved.Render(fmt.Sprintf("-%d", node.Deleted)))
+	}
+	return strings.Join(parts, " ")
+}
 
-	if right != "" && width > 0 {
-		leftW := lipgloss.Width(left)
-		rightW := lipgloss.Width(right)
-		gap := width - 1 - leftW - rightW
-		if gap < 2 {
-			return left // no room, skip stats
-		}
-		return left + strings.Repeat(" ", gap) + right
+func joinSessionLine(left, right string, width int) string {
+	if right == "" || width <= 0 {
+		return left
 	}
-	return left
+	gap := width - 1 - lipgloss.Width(left) - lipgloss.Width(right)
+	if gap < 2 {
+		return left
+	}
+	return left + strings.Repeat(" ", gap) + right
 }
