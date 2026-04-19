@@ -3,7 +3,7 @@
 # Docs: https://lefthook.dev
 
 pre-commit:
-  parallel: true
+  parallel: false
   commands:
     golangci-lint:
       glob: "*.go"
