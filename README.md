@@ -1,173 +1,166 @@
 # kitmux
 
-Think [Raycast](https://www.raycast.com/), but for tmux — a command palette, session manager, worktree navigator, and AI agent launcher that lives inside your terminal.
+kitmux is a tmux command palette for moving around projects quickly.
 
-Fast, lightweight, and built in Go. Every operation is a command you can fuzzy-search from the palette, bind to a tmux key, or fire directly from the CLI.
-
-## Features
-
-- **Command palette** (`palette`) — fuzzy-search and run any command
-- **Session tree** (`sessions`) — browse, switch, rename, and kill tmux sessions
-- **Workspace dashboard** (`workspaces`) — browse registered repos, open or switch tmux sessions, inspect worktrees, and hide repos from the dashboard
-- **Window list** (`windows`) — switch windows in the current session
-- **Worktree manager** (`worktrees`) — list, create, switch, and remove git worktrees
-- **Agent launcher** (`agents`) — launch AI coding agents from your session directory
-- **A/B agent launch** (`agent_ab`) — launch Codex and Claude side-by-side with a shared prompt
-- **Open in local editor** (`open_local_editor`) — open remote sessions in your local editor via SSH (coming soon)
-- **Direct execution** (`run <id>`) — execute any palette command headlessly
-
-## Usage
-
-```
-kitmux <command> [options]
-
-Views:
-  sessions (s)    Session tree
-  palette  (p)    Command palette
-  worktrees (wt)  Worktree manager
-  agents   (a)    Agent launcher
-  workspaces (o)  Workspace dashboard
-  windows  (w)    Window list for current session
-
-Execute:
-  run <id>        Run a palette command by ID
-  commands        List all available command IDs
-  <id>            Shorthand for 'run <id>'
-
-Other:
-  completion      Generate shell autocompletion scripts
-
-Options:
-  --super KEY     Modifier for 1-9 jump (alt|none, default: none)
-```
-
-## tmux Bindings
-
-The command palette is the central hub — any operation can be bound as a tmux popup:
-
-```tmux
-# Command palette
-bind-key p display-popup -E -w 60% -h 80% "kitmux palette"
-
-# Session tree
-bind-key s display-popup -E -w 40% -h 80% "kitmux sessions"
-
-# Workspace dashboard
-bind-key o display-popup -E -w 60% -h 80% "kitmux workspaces"
-
-# Window list
-bind-key w display-popup -E -w 40% -h 60% "kitmux windows"
-
-# Direct agent launch
-bind-key C display-popup -E "kitmux launch_claude"
-
-# A/B launch (Codex + Claude)
-bind-key A display-popup -E "kitmux agent_ab"
-
-# Lazygit in popup
-bind-key g display-popup -E "kitmux tool_lazygit"
-```
-
-> **Tip: faster popups.** tmux uses `default-shell` to run popup commands.
-> If your shell is fish/zsh (~650ms startup), popups will feel sluggish. Set
-> `default-shell` to `/bin/sh` (~3ms) and use `default-command` for interactive
-> sessions:
->
-> ```tmux
-> set -g default-shell /bin/sh
-> set -g default-command "exec /path/to/fish"
-> ```
->
-> Popup commands like `kitmux palette` will now run via `/bin/sh -c` (instant),
-> while new panes and windows still start your preferred shell.
-
-## Workspace Dashboard
-
-`workspaces` is the repo-level dashboard for kitmux:
-
-- shows registered repositories and their active tmux sessions
-- lets you add repos from zoxide and open them directly
-- lets you inspect project worktrees before opening or creating a session
-- `d` only hides a workspace from the dashboard; it does not delete branches, worktrees, or other repo state
-
-## Open in Local Editor (coming soon)
-
-A bridge that lets you open remote tmux session directories in your local editor (Zed or VS Code) over SSH.
-
-**How it works:**
-
-1. A lightweight bridge server runs on your **local machine**, listening on a Unix socket.
-2. When you trigger `open_local_editor` from the palette on a **remote machine**, kitmux sends the current session path and SSH host to the bridge.
-3. The bridge launches your local editor with the appropriate remote connection (e.g., `zed ssh://host/path` or `code --remote ssh-remote+host path`).
-
-**Setup:**
-
-```sh
-# On your local machine — install the bridge as a macOS LaunchAgent
-kitmux bridge install
-
-# Or run it manually
-kitmux bridge serve
-```
-
-**Configuration:**
-
-| Environment variable | Description | Default |
-|---------------------|-------------|---------|
-| `KITMUX_EDITOR` | Editor to use (`zed` or `vscode`) | `zed` |
-| `KITMUX_SSH_HOST` | SSH host alias for the remote machine | auto-detected / cached |
-| `KITMUX_OPEN_EDITOR_SOCK` | Bridge Unix socket path | `/tmp/kitmux-bridge.sock` |
-
-## Requirements
-
-- Go 1.25+ (build only)
-- tmux
-
-## Recommended Dependencies
-
-kitmux shells out to external tools for most of its features. Install the ones you plan to use:
-
-**Core — highly recommended for the full experience:**
-
-| Tool | Features it unlocks |
-|------|-------------------|
-| [git](https://git-scm.com/) | Repo detection, branch info, worktree support |
-| [zoxide](https://github.com/ajeetdsouza/zoxide) | Workspace discovery — find and register project directories |
-| [worktrunk](https://github.com/max-sixty/worktrunk) (`wt`) | Worktree management — create, switch, and remove git worktrees |
-
-**AI agents — special support for these coding agents (others work too):**
-
-| Tool | Description |
-|------|-------------|
-| [Claude Code](https://docs.anthropic.com/en/docs/claude-code) | Anthropic's CLI coding agent |
-| [Codex](https://github.com/openai/codex) | OpenAI's CLI coding agent |
-| [Droid](https://docs.factory.ai/droid/overview) | Factory's CLI coding agent (coming soon) |
-
-**Extras:**
-
-| Tool | What it does |
-|------|-------------|
-| [lazygit](https://github.com/jesseduffield/lazygit) | Git TUI — launched via the `tool_lazygit` palette command |
-
-## A/B Mode Configuration
-
-`agent_ab` uses these optional environment variables:
-
-| Environment variable | Description | Default |
-|---------------------|-------------|---------|
-| `KITMUX_AB_CODEX_TEMPLATE` | Command template for Codex (`{prompt}` placeholder required) | `codex {prompt}` |
-| `KITMUX_AB_CLAUDE_TEMPLATE` | Command template for Claude (`{prompt}` placeholder required) | `claude {prompt}` |
-| `KITMUX_AB_PLAN_PREFIX` | Prefix added to prompt when plan mode is enabled | `/plan ` |
-| `KITMUX_AB_BASE_BRANCH` | Base branch used to create/reuse A/B worktrees | `main` |
+Open one popup, fuzzy-search what you want, and kitmux handles the tmux action:
+switch sessions, jump to windows, open worktrees, launch coding agents, or run
+project tools.
 
 ## Install
 
-```sh
-go install github.com/miltonparedes/kitmux@latest
-```
-
-Or build from source (requires [just](https://github.com/casey/just)):
+Install the first prerelease from GitHub Releases:
 
 ```sh
-just build
+VERSION=v0.1.0-rc.1
+OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+ARCH="$(uname -m)"
+
+case "$ARCH" in
+  x86_64) ARCH=amd64 ;;
+  arm64|aarch64) ARCH=arm64 ;;
+  *) echo "unsupported architecture: $ARCH" >&2; exit 1 ;;
+esac
+
+curl -L "https://github.com/miltonparedes/kitmux/releases/download/${VERSION}/kitmux_${VERSION#v}_${OS}_${ARCH}.tar.gz" | tar -xz
+sudo mv kitmux /usr/local/bin/kitmux
 ```
+
+Or download a specific artifact manually:
+
+```sh
+curl -L https://github.com/miltonparedes/kitmux/releases/download/v0.1.0-rc.1/kitmux_0.1.0-rc.1_darwin_arm64.tar.gz | tar -xz
+sudo mv kitmux /usr/local/bin/kitmux
+```
+
+Requirements:
+
+- tmux
+
+Optional tools unlock extra commands:
+
+- `git` for repo and branch detection
+- `zoxide` for discovering workspace directories
+- `wt` from [worktrunk](https://github.com/max-sixty/worktrunk) for worktree operations
+- `claude`, `codex`, `gemini`, `aichat`, or `opencode` for agent launch commands
+- `lazygit` for the lazygit popup
+
+## Quick Start
+
+Add one tmux binding:
+
+```tmux
+bind-key p display-popup -E -w 60% -h 80% "kitmux palette"
+```
+
+Reload tmux, press your tmux prefix and `p`, then search for a command.
+
+Useful commands:
+
+```sh
+kitmux palette      # command palette
+kitmux sessions     # session tree
+kitmux workspaces   # project dashboard
+kitmux worktrees    # git worktree manager
+kitmux agents       # coding agent launcher
+kitmux windows      # windows in the current session
+kitmux commands     # list command IDs
+kitmux run <id>     # run a palette command directly
+```
+
+Short aliases also work: `p`, `s`, `o`, `wt`, `a`, and `w`.
+
+## The Idea
+
+kitmux treats tmux as a project launcher:
+
+- sessions are grouped by repository
+- worktrees stay close to their parent project
+- palette commands can be used interactively or bound directly in tmux
+- agent commands start from the current session directory
+
+Most commands shell out to tools you already use. If an optional tool is not
+installed, only the command that needs it is affected.
+
+## tmux Bindings
+
+Start with the palette binding above. Add direct bindings for views or commands
+you use often:
+
+```tmux
+bind-key s display-popup -E -w 40% -h 80% "kitmux sessions"
+bind-key o display-popup -E -w 60% -h 80% "kitmux workspaces"
+bind-key w display-popup -E -w 40% -h 60% "kitmux windows"
+bind-key g display-popup -E "kitmux tool_lazygit"
+bind-key A display-popup -E "kitmux agent_ab"
+```
+
+tmux runs popup commands through `default-shell`. If popups feel slow because
+your shell has a heavy startup, use a lightweight default shell for tmux command
+execution:
+
+```tmux
+set -g default-shell /bin/sh
+set -g default-command "exec /path/to/your/shell"
+```
+
+## Workspaces
+
+`kitmux workspaces` is the repo dashboard. It shows registered repositories,
+active tmux sessions, and worktrees.
+
+From there you can:
+
+- add repos discovered by zoxide
+- open or switch to repo sessions
+- inspect and open worktrees
+- hide a repo from the dashboard
+
+Hiding a workspace only removes it from the dashboard. It does not delete the
+repo, branches, worktrees, or tmux state.
+
+## Agent A/B
+
+`kitmux agent_ab` opens Codex and Claude side-by-side with the same prompt.
+
+Optional environment variables:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `KITMUX_AB_CODEX_TEMPLATE` | `codex {prompt}` | Command template for Codex |
+| `KITMUX_AB_CLAUDE_TEMPLATE` | `claude {prompt}` | Command template for Claude |
+| `KITMUX_AB_PLAN_PREFIX` | `/plan ` | Prefix when plan mode is enabled |
+| `KITMUX_AB_BASE_BRANCH` | `main` | Base branch for A/B worktrees |
+
+## Local Editor Bridge
+
+`open_local_editor` is experimental. It is meant for remote tmux sessions where
+you want to open the current remote directory in a local editor over SSH.
+
+On your local machine:
+
+```sh
+kitmux bridge install
+```
+
+Or run the bridge manually:
+
+```sh
+kitmux bridge serve
+```
+
+Optional environment variables:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `KITMUX_EDITOR` | `zed` | `zed` or `vscode` |
+| `KITMUX_SSH_HOST` | auto-detected | SSH host alias for the remote machine |
+| `KITMUX_OPEN_EDITOR_SOCK` | `/tmp/kitmux-bridge.sock` | Bridge Unix socket path |
+
+## Release Artifacts
+
+GitHub releases publish tarballs for:
+
+- macOS arm64 and amd64
+- Linux arm64 and amd64
+
+Each tarball contains the `kitmux` binary and this README.
