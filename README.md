@@ -8,33 +8,32 @@ project tools.
 
 ## Install
 
-Install the first prerelease from GitHub Releases:
+Install the latest release from GitHub Releases:
 
 ```sh
-VERSION=v0.1.0-rc.1
-OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
-ARCH="$(uname -m)"
-
-case "$ARCH" in
-  x86_64) ARCH=amd64 ;;
-  arm64|aarch64) ARCH=arm64 ;;
-  *) echo "unsupported architecture: $ARCH" >&2; exit 1 ;;
-esac
-
-curl -L "https://github.com/miltonparedes/kitmux/releases/download/${VERSION}/kitmux_${VERSION#v}_${OS}_${ARCH}.tar.gz" | tar -xz
-sudo mv kitmux /usr/local/bin/kitmux
+curl -fsSL https://raw.githubusercontent.com/miltonparedes/kitmux/main/install.sh | sh
 ```
 
-Or download a specific artifact manually:
+By default, the script installs to `~/.local/bin`. To choose another directory:
 
 ```sh
-curl -L https://github.com/miltonparedes/kitmux/releases/download/v0.1.0-rc.1/kitmux_0.1.0-rc.1_darwin_arm64.tar.gz | tar -xz
-sudo mv kitmux /usr/local/bin/kitmux
+curl -fsSL https://raw.githubusercontent.com/miltonparedes/kitmux/main/install.sh | INSTALL_DIR="$HOME/bin" sh
+```
+
+To install a specific version:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/miltonparedes/kitmux/main/install.sh | KITMUX_VERSION=vX.Y.Z sh
 ```
 
 Requirements:
 
 - tmux
+
+Supported binaries:
+
+- macOS arm64 and amd64
+- Linux arm64 and amd64
 
 Optional tools unlock extra commands:
 
@@ -163,4 +162,4 @@ GitHub releases publish tarballs for:
 - macOS arm64 and amd64
 - Linux arm64 and amd64
 
-Each tarball contains the `kitmux` binary and this README.
+Each tarball contains the `kitmux` binary, this README, and `install.sh`.

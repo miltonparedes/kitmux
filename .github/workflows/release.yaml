@@ -19,6 +19,13 @@ jobs:
           go-version: "1.25"
       - name: Run tests
         run: go test -race ./...
+      - name: Check install script
+        run: |
+          sh -n install.sh
+          KITMUX_VERSION="${GITHUB_REF_NAME}" KITMUX_OS=darwin KITMUX_ARCH=x86_64 KITMUX_INSTALL_DRY_RUN=1 sh install.sh
+          KITMUX_VERSION="${GITHUB_REF_NAME}" KITMUX_OS=darwin KITMUX_ARCH=arm64 KITMUX_INSTALL_DRY_RUN=1 sh install.sh
+          KITMUX_VERSION="${GITHUB_REF_NAME}" KITMUX_OS=linux KITMUX_ARCH=x86_64 KITMUX_INSTALL_DRY_RUN=1 sh install.sh
+          KITMUX_VERSION="${GITHUB_REF_NAME}" KITMUX_OS=linux KITMUX_ARCH=aarch64 KITMUX_INSTALL_DRY_RUN=1 sh install.sh
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v6
         with:
