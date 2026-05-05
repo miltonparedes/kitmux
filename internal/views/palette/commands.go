@@ -179,5 +179,11 @@ func DefaultCommands() []Command {
 			Description: "Switch to agents view",
 			Category:    "View",
 		},
+		{
+			ID:          "view_workbench",
+			Title:       "Workbench",
+			Description: "Open the agent workbench",
+			Category:    "View",
+		},
 	}
 }
