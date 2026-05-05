@@ -87,6 +87,30 @@ type RunPopupMsg struct {
 	Command string
 	Width   string
 	Height  string
+	Stay    bool
+}
+
+// RunPaneCommandMsg runs a command in the current kitmux pane.
+type RunPaneCommandMsg struct {
+	Command string
+}
+
+// WorkbenchCommandDoneMsg signals that a pane command launched by Workbench exited.
+type WorkbenchCommandDoneMsg struct {
+	Err error
+}
+
+// SendPaneKeysMsg sends keys to a tmux pane without exiting kitmux.
+type SendPaneKeysMsg struct {
+	Target string
+	Keys   string
+}
+
+// LaunchWorkbenchAgentMsg launches an agent in a new tmux window from Workbench.
+type LaunchWorkbenchAgentMsg struct {
+	AgentID string
+	ModeID  string
+	Dir     string
 }
 
 // OpenLocalEditorMsg signals the result of the open-in-local-editor action.

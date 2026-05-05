@@ -18,6 +18,7 @@ import (
 	"github.com/miltonparedes/kitmux/internal/views/palette"
 	"github.com/miltonparedes/kitmux/internal/views/sessions"
 	"github.com/miltonparedes/kitmux/internal/views/windows"
+	workbenchview "github.com/miltonparedes/kitmux/internal/views/workbench"
 	workspacesview "github.com/miltonparedes/kitmux/internal/views/workspaces"
 	"github.com/miltonparedes/kitmux/internal/views/worktrees"
 	"github.com/miltonparedes/kitmux/internal/worktree"
@@ -34,6 +35,7 @@ const (
 	ModeWindows                // Windows for current session
 	ModeRun                    // Execute a palette command directly
 	ModeWorkspaces             // Workspaces dashboard
+	ModeWorkbench              // Agent workbench sidecar
 )
 
 type activeView int
@@ -45,6 +47,7 @@ const (
 	viewAgents                // Agent launcher
 	viewAgentAB               // A/B launcher form
 	viewWorkspaces            // Workspaces dashboard
+	viewWorkbench             // Agent workbench
 )
 
 type Model struct {
@@ -56,6 +59,7 @@ type Model struct {
 	agentsView     agentsview.Model
 	agentABView    agentabview.Model
 	workspacesView workspacesview.Model
+	workbenchView  workbenchview.Model
 	palette        palette.Model
 	paletteActive  bool
 	paletteReturn  bool        // return to palette after sub-action completes
@@ -65,6 +69,16 @@ type Model struct {
 	height         int
 	runCommandID   string // for ModeRun: the command to execute
 }
+
+var (
+	sendKeys                 = tmux.SendKeys
+	splitWindow              = tmux.SplitWindow
+	newWindowWithCommand     = tmux.NewWindowWithCommand
+	newWindowInDir           = tmux.NewWindowInDir
+	currentClientWidth       = tmux.CurrentClientWidth
+	splitWindowInDirPercent  = tmux.SplitWindowInDirPercent
+	agentWorkbenchTargetPane = "!"
+)
 
 func New(mode Mode, opts ...Option) Model {
 	m := Model{
@@ -76,6 +90,7 @@ func New(mode Mode, opts ...Option) Model {
 		agentsView:     agentsview.New(),
 		agentABView:    agentabview.New(),
 		workspacesView: workspacesview.New(),
+		workbenchView:  workbenchview.New(),
 		palette:        palette.New(),
 	}
 	for _, opt := range opts {
@@ -93,6 +108,8 @@ func New(mode Mode, opts ...Option) Model {
 		m.view = viewWindows
 	case ModeWorkspaces:
 		m.view = viewWorkspaces
+	case ModeWorkbench:
+		m.view = viewWorkbench
 	}
 	return m
 }
@@ -126,6 +143,8 @@ func (m Model) Init() tea.Cmd {
 			return m.agentABView.Init()
 		case viewWorkspaces:
 			return m.workspacesView.Init()
+		case viewWorkbench:
+			return m.workbenchView.Init()
 		default:
 			return m.sessions.Init()
 		}
@@ -149,7 +168,13 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	if updated, cmd, handled := m.dispatchNavigation(msg); handled {
 		return updated, cmd
 	}
-	if updated, cmd, handled := m.dispatchAction(msg); handled {
+	if updated, cmd, handled := m.dispatchWorktreeAction(msg); handled {
+		return updated, cmd
+	}
+	if updated, cmd, handled := m.dispatchAgentAction(msg); handled {
+		return updated, cmd
+	}
+	if updated, cmd, handled := m.dispatchPaneAction(msg); handled {
 		return updated, cmd
 	}
 	return m.routeToView(msg)
@@ -212,8 +237,7 @@ func (m Model) dispatchNavigation(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	return m, nil, false
 }
 
-// dispatchAction handles side-effect messages (create/kill/launch/popup/editor).
-func (m Model) dispatchAction(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
+func (m Model) dispatchWorktreeAction(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case messages.CreateSessionInDirMsg:
 		_ = tmux.NewSessionInDir(msg.Name, msg.Dir)
@@ -230,9 +254,17 @@ func (m Model) dispatchAction(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		return m, m.worktreeView.Reload(), true
 	case messages.ReloadWorktreesMsg:
 		return m, m.worktreeView.Reload(), true
+	}
+	return m, nil, false
+}
+
+func (m Model) dispatchAgentAction(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
+	switch msg := msg.(type) {
 	case messages.LaunchAgentMsg:
 		updated, cmd := m.launchAgent(msg)
 		return updated, cmd, true
+	case messages.LaunchWorkbenchAgentMsg:
+		return m, m.launchWorkbenchAgent(msg), true
 	case messages.OpenAgentABMsg:
 		m.returnView = m.view
 		m.view = viewAgentAB
@@ -243,9 +275,23 @@ func (m Model) dispatchAction(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case messages.LaunchAgentABMsg:
 		updated, cmd := m.launchAgentAB(msg)
 		return updated, cmd, true
+	}
+	return m, nil, false
+}
+
+func (m Model) dispatchPaneAction(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
+	switch msg := msg.(type) {
 	case messages.RunPopupMsg:
 		_ = tmux.DisplayPopup(msg.Command, msg.Width, msg.Height)
+		if msg.Stay || m.mode == ModeWorkbench {
+			return m, nil, true
+		}
 		return m, tea.Quit, true
+	case messages.RunPaneCommandMsg:
+		return m, runPaneCommand(msg.Command), true
+	case messages.SendPaneKeysMsg:
+		_ = sendKeys(msg.Target, msg.Keys)
+		return m, nil, true
 	case messages.OpenLocalEditorMsg:
 		return m.handleOpenLocalEditor(msg)
 	}
@@ -261,6 +307,7 @@ func (m Model) applyWindowSize(msg tea.WindowSizeMsg) Model {
 	m.agentsView.SetSize(m.width, m.height-1)
 	m.agentABView.SetSize(m.width, m.height-1)
 	m.workspacesView.SetSize(m.width, m.height-1)
+	m.workbenchView.SetSize(m.width, m.height-1)
 	m.palette.SetSize(m.width, m.height)
 	return m
 }
@@ -279,6 +326,14 @@ func (m Model) handleTogglePalette() (tea.Model, tea.Cmd, bool) {
 func (m Model) handleSwitchView(msg messages.SwitchViewMsg) (tea.Model, tea.Cmd, bool) {
 	switch msg.View {
 	case "sessions":
+		if m.mode == ModeWorkbench {
+			if m.view == viewWorkbench {
+				m.view = viewSessions
+				return m, nil, true
+			}
+			m.view = viewWorkbench
+			return m, m.workbenchView.Init(), true
+		}
 		if m.paletteReturn {
 			return m, m.returnToPalette(), true
 		}
@@ -290,6 +345,9 @@ func (m Model) handleSwitchView(msg messages.SwitchViewMsg) (tea.Model, tea.Cmd,
 	case "agents":
 		m.view = viewAgents
 		return m, nil, true
+	case "workbench":
+		m.view = viewWorkbench
+		return m, m.workbenchView.Init(), true
 	}
 	return m, nil, true
 }
@@ -318,13 +376,25 @@ func (m Model) handleBackFromAgentAB() (tea.Model, tea.Cmd, bool) {
 func (m Model) handleOpenLocalEditor(msg messages.OpenLocalEditorMsg) (tea.Model, tea.Cmd, bool) {
 	if msg.Err != nil {
 		_ = tmux.DisplayMessage(fmt.Sprintf("open_local_editor error: %v", msg.Err))
+		if m.mode == ModeWorkbench {
+			m.paletteReturn = false
+			return m, nil, true
+		}
 		return m, tea.Quit, true
 	}
 	if msg.Fallback != "" {
 		_ = tmux.DisplayMessage(fmt.Sprintf("bridge unavailable, run manually: %s", msg.Fallback))
+		if m.mode == ModeWorkbench {
+			m.paletteReturn = false
+			return m, nil, true
+		}
 		return m, tea.Quit, true
 	}
 	_ = tmux.DisplayMessage("opened local editor")
+	if m.mode == ModeWorkbench {
+		m.paletteReturn = false
+		return m, nil, true
+	}
 	return m, tea.Quit, true
 }
 
@@ -380,6 +450,9 @@ func (m Model) isEditing() bool {
 	if m.view == viewWorkspaces && m.workspacesView.IsEditing() {
 		return true
 	}
+	if m.view == viewWorkbench && m.workbenchView.IsEditing() {
+		return true
+	}
 	return false
 }
 
@@ -424,6 +497,11 @@ func (m Model) handleEscKey(msg tea.KeyMsg, isEditing bool) (Model, tea.Cmd, boo
 	if m.view == viewWorkspaces && !m.workspacesView.IsEditing() {
 		return m.handleEscWorkspaces(msg)
 	}
+	if m.view == viewWorkbench && m.workbenchView.IsEditing() {
+		var cmd tea.Cmd
+		m.workbenchView, cmd = m.workbenchView.Update(msg)
+		return m, cmd, true
+	}
 	if m.paletteReturn && !isEditing {
 		return m, m.returnToPalette(), true
 	}
@@ -447,6 +525,10 @@ func (m Model) handleEscWorkspaces(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 }
 
 func (m Model) handleEscByView() (Model, tea.Cmd, bool) {
+	if m.mode == ModeWorkbench && m.view != viewWorkbench {
+		m.view = viewWorkbench
+		return m, m.workbenchView.Init(), true
+	}
 	switch m.view {
 	case viewWindows:
 		return m.escWithMode(ModeWindows)
@@ -459,6 +541,8 @@ func (m Model) handleEscByView() (Model, tea.Cmd, bool) {
 	case viewWorkspaces:
 		// IsEditing() path: let the view cancel its own modal.
 		return m, nil, false
+	case viewWorkbench:
+		return m.escWithMode(ModeWorkbench)
 	default:
 		if m.sessions.IsEditing() {
 			return m, nil, false
@@ -480,30 +564,11 @@ func (m Model) routeToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	switch m.view {
 	case viewSessions:
-		m.sessions, cmd = m.sessions.Update(msg)
-		if m.pendingKey != nil && m.sessions.ConsumeLoaded() {
-			km := *m.pendingKey
-			m.pendingKey = nil
-			var cmd2 tea.Cmd
-			m.sessions, cmd2 = m.sessions.Update(km)
-			cmd = tea.Batch(cmd, cmd2)
-		}
-		if m.paletteReturn && !m.sessions.IsEditing() {
-			if cmd != nil {
-				return m, cmd
-			}
-			return m, m.returnToPalette()
-		}
+		return m.routeToSessions(msg)
 	case viewWindows:
 		m.windows, cmd = m.windows.Update(msg)
 	case viewWorktrees:
-		m.worktreeView, cmd = m.worktreeView.Update(msg)
-		if m.paletteReturn && !m.worktreeView.IsEditing() {
-			if cmd != nil {
-				return m, cmd
-			}
-			return m, m.returnToPalette()
-		}
+		return m.routeToWorktrees(msg)
 	case viewAgents:
 		m.agentsView, cmd = m.agentsView.Update(msg)
 	case viewAgentAB:
@@ -512,6 +577,51 @@ func (m Model) routeToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var model tea.Model
 		model, cmd = m.workspacesView.Update(msg)
 		m.workspacesView = model.(workspacesview.Model)
+	case viewWorkbench:
+		m.workbenchView, cmd = m.workbenchView.Update(msg)
+	}
+	return m, cmd
+}
+
+func (m Model) routeToSessions(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.sessions, cmd = m.sessions.Update(msg)
+	if m.mode == ModeWorkbench {
+		if _, ok := msg.(messages.BackToSessionsMsg); ok {
+			m.view = viewWorkbench
+			return m, m.workbenchView.Init()
+		}
+	}
+	if m.pendingKey != nil && m.sessions.ConsumeLoaded() {
+		km := *m.pendingKey
+		m.pendingKey = nil
+		var pendingCmd tea.Cmd
+		m.sessions, pendingCmd = m.sessions.Update(km)
+		cmd = tea.Batch(cmd, pendingCmd)
+	}
+	if m.paletteReturn && !m.sessions.IsEditing() {
+		if cmd != nil {
+			return m, cmd
+		}
+		return m, m.returnToPalette()
+	}
+	return m, cmd
+}
+
+func (m Model) routeToWorktrees(msg tea.Msg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	m.worktreeView, cmd = m.worktreeView.Update(msg)
+	if m.mode == ModeWorkbench {
+		if _, ok := msg.(messages.SwitchViewMsg); ok {
+			m.view = viewWorkbench
+			return m, m.workbenchView.Init()
+		}
+	}
+	if m.paletteReturn && !m.worktreeView.IsEditing() {
+		if cmd != nil {
+			return m, cmd
+		}
+		return m, m.returnToPalette()
 	}
 	return m, cmd
 }
@@ -532,6 +642,8 @@ func (m Model) View() string {
 		return m.agentABView.View()
 	case viewWorkspaces:
 		return m.workspacesView.View()
+	case viewWorkbench:
+		return m.workbenchView.View()
 	default:
 		return m.sessions.View()
 	}
@@ -659,6 +771,9 @@ func (m Model) execViewCommand(id string) (tea.Model, tea.Cmd, bool) {
 	case "view_agents":
 		m.view = viewAgents
 		return m, nil, true
+	case "view_workbench":
+		m.view = viewWorkbench
+		return m, m.workbenchView.Init(), true
 	}
 	return m, nil, false
 }
@@ -695,6 +810,12 @@ func launchAgentCmd(agentID string) tea.Cmd {
 	return func() tea.Msg {
 		return messages.LaunchAgentMsg{AgentID: agentID, ModeID: "default", Target: "pane"}
 	}
+}
+
+func runPaneCommand(command string) tea.Cmd {
+	return tea.ExecProcess(exec.Command("sh", "-lc", command), func(err error) tea.Msg {
+		return messages.WorkbenchCommandDoneMsg{Err: err}
+	})
 }
 
 func killCurrentSessionCmd() tea.Cmd {
@@ -769,16 +890,75 @@ func (m Model) launchAgent(msg messages.LaunchAgentMsg) (tea.Model, tea.Cmd) {
 			command := a.FullCommand(mode)
 			switch msg.Target {
 			case "split":
-				_ = tmux.SplitWindow(command)
+				_ = splitWindow(command)
 			case "window":
-				_ = tmux.NewWindowWithCommand(a.Name, command)
+				_ = newWindowWithCommand(a.Name, command)
 			default: // "pane"
-				_ = tmux.SendKeys("!", command)
+				_ = sendKeys("!", command)
+				_ = m.openAgentWorkbench()
 			}
 			return m, tea.Quit
 		}
 	}
 	return m, tea.Quit
+}
+
+func (m Model) openAgentWorkbench() error {
+	return openWorkbenchSplit("", agentWorkbenchTargetPane)
+}
+
+func openWorkbenchSplit(dir, targetPane string) error {
+	if !shouldOpenAgentWorkbench() {
+		return nil
+	}
+	_, err := splitWindowInDirPercent(
+		targetPane,
+		dir,
+		config.WorkbenchCommand(),
+		config.AgentWorkbenchRatio(),
+	)
+	if err != nil {
+		return err
+	}
+	return nil
+}
+
+func (m Model) launchWorkbenchAgent(msg messages.LaunchWorkbenchAgentMsg) tea.Cmd {
+	return func() tea.Msg {
+		agentsList := agents.DefaultAgents()
+		for _, a := range agentsList {
+			if a.ID != msg.AgentID {
+				continue
+			}
+			for _, mode := range a.Modes {
+				if mode.ID != msg.ModeID {
+					continue
+				}
+				paneID, err := newWindowInDir(a.ID, msg.Dir, a.FullCommand(mode))
+				if err != nil {
+					return messages.WorkbenchCommandDoneMsg{Err: err}
+				}
+				_ = openWorkbenchSplit(msg.Dir, paneID)
+				return messages.WorkbenchCommandDoneMsg{}
+			}
+		}
+		return messages.WorkbenchCommandDoneMsg{}
+	}
+}
+
+func shouldOpenAgentWorkbench() bool {
+	switch config.AgentWorkbench() {
+	case "always":
+		return true
+	case "off":
+		return false
+	default:
+		width, err := currentClientWidth()
+		if err != nil {
+			return false
+		}
+		return width >= config.AgentWorkbenchMinWidth()
+	}
 }
 
 func (m Model) launchAgentAB(msg messages.LaunchAgentABMsg) (tea.Model, tea.Cmd) {
