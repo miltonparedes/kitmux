@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/miltonparedes/kitmux/internal/agentlaunch"
 	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/app/messages"
 	"github.com/miltonparedes/kitmux/internal/config"
@@ -70,15 +71,7 @@ type Model struct {
 	runCommandID   string // for ModeRun: the command to execute
 }
 
-var (
-	sendKeys                 = tmux.SendKeys
-	splitWindow              = tmux.SplitWindow
-	newWindowWithCommand     = tmux.NewWindowWithCommand
-	newWindowInDir           = tmux.NewWindowInDir
-	currentClientWidth       = tmux.CurrentClientWidth
-	splitWindowInDirPercent  = tmux.SplitWindowInDirPercent
-	agentWorkbenchTargetPane = "!"
-)
+var agentLaunchOps = agentlaunch.DefaultOps()
 
 func New(mode Mode, opts ...Option) Model {
 	m := Model{
@@ -290,7 +283,7 @@ func (m Model) dispatchPaneAction(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case messages.RunPaneCommandMsg:
 		return m, runPaneCommand(msg.Command), true
 	case messages.SendPaneKeysMsg:
-		_ = sendKeys(msg.Target, msg.Keys)
+		_ = agentLaunchOps.SendKeys(msg.Target, msg.Keys)
 		return m, nil, true
 	case messages.OpenLocalEditorMsg:
 		return m.handleOpenLocalEditor(msg)
@@ -727,6 +720,10 @@ func (m Model) execWorktreeCommand(id string) (tea.Model, tea.Cmd, bool) {
 
 func (m Model) execAgentCommand(id string) (tea.Model, tea.Cmd, bool) {
 	switch id {
+	case "launch_droid":
+		return m, launchAgentCmd("droid"), true
+	case "launch_codex_cloud":
+		return m, launchAgentCmd("codex-cloud"), true
 	case "launch_claude":
 		return m, launchAgentCmd("claude"), true
 	case "launch_gemini":
@@ -877,88 +874,35 @@ func remoteEditorLaunch(editor, path string) tea.Msg {
 }
 
 func (m Model) launchAgent(msg messages.LaunchAgentMsg) (tea.Model, tea.Cmd) {
-	// Find the agent and mode
-	agentsList := agents.DefaultAgents()
-	for _, a := range agentsList {
-		if a.ID != msg.AgentID {
-			continue
-		}
-		for _, mode := range a.Modes {
-			if mode.ID != msg.ModeID {
-				continue
-			}
-			command := a.FullCommand(mode)
-			switch msg.Target {
-			case "split":
-				_ = splitWindow(command)
-			case "window":
-				_ = newWindowWithCommand(a.Name, command)
-			default: // "pane"
-				_ = sendKeys("!", command)
-				_ = m.openAgentWorkbench()
-			}
-			return m, tea.Quit
-		}
+	a, ok := agents.Find(msg.AgentID)
+	if !ok {
+		return m, tea.Quit
 	}
+	mode, ok := agents.FindMode(a, msg.ModeID)
+	if !ok {
+		return m, tea.Quit
+	}
+	_ = agentlaunch.LaunchCurrent(a, mode, agentlaunch.Target(msg.Target), appAgentLaunchOps())
 	return m, tea.Quit
-}
-
-func (m Model) openAgentWorkbench() error {
-	return openWorkbenchSplit("", agentWorkbenchTargetPane)
-}
-
-func openWorkbenchSplit(dir, targetPane string) error {
-	if !shouldOpenAgentWorkbench() {
-		return nil
-	}
-	_, err := splitWindowInDirPercent(
-		targetPane,
-		dir,
-		config.WorkbenchCommand(),
-		config.AgentWorkbenchRatio(),
-	)
-	if err != nil {
-		return err
-	}
-	return nil
 }
 
 func (m Model) launchWorkbenchAgent(msg messages.LaunchWorkbenchAgentMsg) tea.Cmd {
 	return func() tea.Msg {
-		agentsList := agents.DefaultAgents()
-		for _, a := range agentsList {
-			if a.ID != msg.AgentID {
-				continue
-			}
-			for _, mode := range a.Modes {
-				if mode.ID != msg.ModeID {
-					continue
-				}
-				paneID, err := newWindowInDir(a.ID, msg.Dir, a.FullCommand(mode))
-				if err != nil {
-					return messages.WorkbenchCommandDoneMsg{Err: err}
-				}
-				_ = openWorkbenchSplit(msg.Dir, paneID)
-				return messages.WorkbenchCommandDoneMsg{}
-			}
+		a, ok := agents.Find(msg.AgentID)
+		if !ok {
+			return messages.WorkbenchCommandDoneMsg{}
 		}
-		return messages.WorkbenchCommandDoneMsg{}
+		mode, ok := agents.FindMode(a, msg.ModeID)
+		if !ok {
+			return messages.WorkbenchCommandDoneMsg{}
+		}
+		err := agentlaunch.LaunchWorkbenchWindow(a, mode, msg.Dir, appAgentLaunchOps())
+		return messages.WorkbenchCommandDoneMsg{Err: err}
 	}
 }
 
-func shouldOpenAgentWorkbench() bool {
-	switch config.AgentWorkbench() {
-	case "always":
-		return true
-	case "off":
-		return false
-	default:
-		width, err := currentClientWidth()
-		if err != nil {
-			return false
-		}
-		return width >= config.AgentWorkbenchMinWidth()
-	}
+func appAgentLaunchOps() agentlaunch.Ops {
+	return agentLaunchOps
 }
 
 func (m Model) launchAgentAB(msg messages.LaunchAgentABMsg) (tea.Model, tea.Cmd) {

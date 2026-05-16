@@ -179,6 +179,28 @@ func NewWindowInSession(session, name, dir, command string) error {
 	return exec.Command("tmux", args...).Run()
 }
 
+func NewWindowInSessionPaneID(session, name, dir, command string) (string, error) {
+	args := []string{
+		"new-window", "-d",
+		"-P", "-F", "#{pane_id}",
+		"-t", session + ":",
+	}
+	if name != "" {
+		args = append(args, "-n", name)
+	}
+	if dir != "" {
+		args = append(args, "-c", dir)
+	}
+	if command != "" {
+		args = append(args, command)
+	}
+	out, err := exec.Command("tmux", args...).Output()
+	if err != nil {
+		return "", fmt.Errorf("new-window: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 func SplitWindowInDir(targetPane, dir, command string) (string, error) {
 	args := []string{
 		"split-window", "-h",

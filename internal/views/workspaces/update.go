@@ -9,12 +9,15 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/sahilm/fuzzy"
 
+	"github.com/miltonparedes/kitmux/internal/agentlaunch"
 	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/tmux"
 	wsreg "github.com/miltonparedes/kitmux/internal/workspaces"
 	wsdata "github.com/miltonparedes/kitmux/internal/workspaces/data"
 	"github.com/miltonparedes/kitmux/internal/worktree"
 )
+
+var workspaceAgentLaunchOps = agentlaunch.DefaultOps()
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -1142,19 +1145,16 @@ func attachSessionAndAgent(project, branch string, wt worktree.Worktree, agent *
 }
 
 func spawnAgentForSession(sessName, worktreePath string, agent agents.Agent, mode agents.AgentMode, freshSession bool) error {
-	command := agent.FullCommand(mode)
-	if freshSession {
-		// new-session already created window 0; reuse it so the layout stays minimal.
-		winTarget := sessName + ":0"
-		_ = tmux.RenameWindow(winTarget, agent.ID)
-		_ = tmux.SendKeys(winTarget, command)
-		return nil
-	}
-	winName := uniqueWindowName(sessName, agent.ID)
-	if err := tmux.NewWindowInSession(sessName, winName, worktreePath, command); err != nil {
-		return fmt.Errorf("tmux new-window failed: %w", err)
-	}
-	return nil
+	return agentlaunch.LaunchInSession(agentlaunch.SessionRequest{
+		SessionName:   sessName,
+		WindowName:    uniqueWindowName(sessName, agent.ID),
+		Dir:           worktreePath,
+		Agent:         agent,
+		Mode:          mode,
+		Target:        agentlaunch.TargetWindow,
+		FreshSession:  freshSession,
+		OpenWorkbench: true,
+	}, workspaceAgentLaunchOps)
 }
 
 // ensureSessionForPath returns the tmux session that already points at
@@ -1185,7 +1185,6 @@ func (m Model) attachAgentToBranch(br branchEntry, agent agents.Agent, mode agen
 		return nil
 	}
 	proj := m.workspaces[m.wsCursor]
-	command := agent.FullCommand(mode)
 	dir := br.Path
 	if dir == "" {
 		dir = proj.Path
@@ -1204,29 +1203,46 @@ func (m Model) attachAgentToBranch(br branchEntry, agent agents.Agent, mode agen
 			}
 			sessName = resolved
 			if fresh {
-				winTarget := sessName + ":0"
-				_ = tmux.RenameWindow(winTarget, agent.ID)
-				_ = tmux.SendKeys(winTarget, command)
+				_ = launchWorkspaceSessionAgent(sessName, "", dir, agent, mode, target, true)
 				_ = tmux.SwitchClient(sessName)
 				return switchDoneMsg{}
 			}
 			// Fell through to the reused-session path below.
 		}
 
-		switch target {
-		case agentTargetSplit:
-			if _, err := tmux.SplitWindowInDir(sessName+":", dir, command); err != nil {
-				return toastMsg{text: "tmux split-window failed: " + err.Error(), level: toastError}
-			}
-		default:
-			winName := uniqueWindowName(sessName, agent.ID)
-			if err := tmux.NewWindowInSession(sessName, winName, dir, command); err != nil {
-				return toastMsg{text: "tmux new-window failed: " + err.Error(), level: toastError}
-			}
+		winName := uniqueWindowName(sessName, agent.ID)
+		if err := launchWorkspaceSessionAgent(sessName, winName, dir, agent, mode, target, false); err != nil {
+			return toastMsg{text: err.Error(), level: toastError}
 		}
 		_ = tmux.SwitchClient(sessName)
 		return switchDoneMsg{}
 	}
+}
+
+func launchWorkspaceSessionAgent(
+	sessName, winName, dir string,
+	agent agents.Agent,
+	mode agents.AgentMode,
+	target agentTarget,
+	freshSession bool,
+) error {
+	return agentlaunch.LaunchInSession(agentlaunch.SessionRequest{
+		SessionName:   sessName,
+		WindowName:    winName,
+		Dir:           dir,
+		Agent:         agent,
+		Mode:          mode,
+		Target:        launchTarget(target),
+		FreshSession:  freshSession,
+		OpenWorkbench: true,
+	}, workspaceAgentLaunchOps)
+}
+
+func launchTarget(target agentTarget) agentlaunch.Target {
+	if target == agentTargetSplit {
+		return agentlaunch.TargetSplit
+	}
+	return agentlaunch.TargetWindow
 }
 
 // uniqueWindowName returns a window name that does not collide with an

@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/miltonparedes/kitmux/internal/agentlaunch"
 	"github.com/miltonparedes/kitmux/internal/app/messages"
 	"github.com/miltonparedes/kitmux/internal/cache"
 	"github.com/miltonparedes/kitmux/internal/store"
@@ -148,42 +149,33 @@ type launchCalls struct {
 func stubAgentLaunch(t *testing.T, width int, widthErr error) *launchCalls {
 	t.Helper()
 
-	originalSendKeys := sendKeys
-	originalSplitWindow := splitWindow
-	originalNewWindowWithCommand := newWindowWithCommand
-	originalNewWindowInDir := newWindowInDir
-	originalCurrentClientWidth := currentClientWidth
-	originalSplitWindowInDirPercent := splitWindowInDirPercent
+	originalOps := agentLaunchOps
 	t.Cleanup(func() {
-		sendKeys = originalSendKeys
-		splitWindow = originalSplitWindow
-		newWindowWithCommand = originalNewWindowWithCommand
-		newWindowInDir = originalNewWindowInDir
-		currentClientWidth = originalCurrentClientWidth
-		splitWindowInDirPercent = originalSplitWindowInDirPercent
+		agentLaunchOps = originalOps
 	})
 
 	calls := &launchCalls{}
-	sendKeys = func(_, keys string) error {
+	agentLaunchOps = agentlaunch.Ops{}
+	agentLaunchOps.SendKeys = func(_, keys string) error {
 		calls.sent = keys
 		return nil
 	}
-	splitWindow = func(command string) error {
+	agentLaunchOps.SplitWindow = func(command string) error {
 		calls.split = command
 		return nil
 	}
-	newWindowWithCommand = func(_, _ string) error {
+	agentLaunchOps.NewWindowWithCommand = func(_, _ string) error {
 		return nil
 	}
-	newWindowInDir = func(_, dir, command string) (string, error) {
+	agentLaunchOps.NewWindowInDir = func(_, dir, command string) (string, error) {
 		calls.windowDir = dir
 		calls.windowCommand = command
 		return "%9", nil
 	}
-	currentClientWidth = func() (int, error) {
+	agentLaunchOps.CurrentClientWidth = func() (int, error) {
 		return width, widthErr
 	}
-	splitWindowInDirPercent = func(_, _, command string, percent int) (string, error) {
+	agentLaunchOps.SplitWindowInDirPercent = func(_, _, command string, percent int) (string, error) {
 		calls.workbenchCommand = command
 		calls.workbenchRatio = percent
 		return "%2", nil

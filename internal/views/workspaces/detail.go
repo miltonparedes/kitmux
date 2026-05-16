@@ -178,10 +178,7 @@ func sortBranchesMainFirst(entries []branchEntry, tieBreakByName bool) {
 
 // detectAgents finds running agent panes scoped to a workspace path.
 func detectAgents(panes []tmux.Pane, workspacePath string, repoRoots map[string]string, sessions []tmux.Session) []agentEntry {
-	agentCommands := make(map[string]agents.Agent)
-	for _, a := range agents.DefaultAgents() {
-		agentCommands[a.Command] = a
-	}
+	agentCommands := agents.CommandMap()
 
 	sessPathMap := make(map[string]string, len(sessions))
 	for _, s := range sessions {

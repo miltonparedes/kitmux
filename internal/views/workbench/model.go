@@ -491,16 +491,9 @@ func addZoxideDirs(add func(string)) {
 }
 
 func filterActivityPanes(panes []tmux.Pane) []tmux.Pane {
-	commands := map[string]bool{
-		"claude":   true,
-		"codex":    true,
-		"gemini":   true,
-		"aichat":   true,
-		"opencode": true,
-	}
 	filtered := make([]tmux.Pane, 0, len(panes))
 	for _, pane := range panes {
-		if commands[pane.Command] {
+		if agents.IsAgentCommand(pane.Command) {
 			filtered = append(filtered, pane)
 		}
 	}

@@ -210,7 +210,7 @@ func TestLaunchAgentFlowSelectsAgentAfterDirectory(t *testing.T) {
 	if !ok {
 		t.Fatalf("expected LaunchWorkbenchAgentMsg, got %T", msg)
 	}
-	if launch.AgentID != "claude" || launch.ModeID != "default" || launch.Dir != "/tmp/current" {
+	if launch.AgentID != "droid" || launch.ModeID != "default" || launch.Dir != "/tmp/current" {
 		t.Fatalf("unexpected launch: %+v", launch)
 	}
 }
