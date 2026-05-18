@@ -2,10 +2,10 @@ package workbench
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 
 	"github.com/miltonparedes/kitmux/internal/theme"
-	"github.com/miltonparedes/kitmux/internal/tmux"
 )
 
 func (m Model) View() string {
@@ -17,58 +17,29 @@ func (m Model) View() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(" " + theme.TreeNodeSelected.Render("Summary"))
-	b.WriteString("   " + theme.HelpStyle.Render("Review"))
-	b.WriteString("   " + theme.HelpStyle.Render("+"))
+	b.WriteString(" " + theme.TreeNodeSelected.Render("Activity"))
+	b.WriteString("   " + theme.HelpStyle.Render("agents + changes"))
 	b.WriteString("\n\n")
 
-	b.WriteString(section("Progress") + "\n")
-	b.WriteString(renderProgress(m.panes) + "\n\n")
-
-	b.WriteString(section("Branch details") + "\n")
-	b.WriteString(renderBranch(m.project) + "\n")
 	b.WriteString(renderChanges(m.project) + "\n")
-	b.WriteString(renderProjectStats(m.project) + "\n\n")
-
-	b.WriteString(section("Artifacts") + "\n")
-	for _, line := range renderArtifacts(m.project) {
-		b.WriteString(line + "\n")
-	}
 	b.WriteString("\n")
+	b.WriteString(section("Activity") + "\n")
+	linesUsed := 5
+	for _, line := range m.visibleActivityLines() {
+		b.WriteString(line + "\n")
+		linesUsed++
+	}
 
-	b.WriteString(section("Sources") + "\n")
-	b.WriteString(renderSources(m.project) + "\n\n")
+	b.WriteString("\n")
+	linesUsed++
 
 	b.WriteString(section("Tools") + "\n")
-	linesUsed := m.firstActionRow()
+	linesUsed++
 	for i, action := range m.actions {
 		selected := i == m.cursor
-		b.WriteString(renderAction(action, selected))
+		b.WriteString(renderAction(i, action, selected))
 		b.WriteString("\n")
 		linesUsed += actionRowHeight
-	}
-
-	b.WriteString("\n")
-	b.WriteString(theme.HelpStyle.Render(" Activity") + "\n")
-	linesUsed += 2
-
-	if len(m.panes) == 0 {
-		b.WriteString(theme.HelpStyle.Render(" no active agents detected"))
-		b.WriteString("\n")
-		linesUsed++
-	} else {
-		maxActivity := m.height - linesUsed - 2
-		if maxActivity < 1 {
-			maxActivity = 1
-		}
-		for i, pane := range m.panes {
-			if i >= maxActivity {
-				break
-			}
-			b.WriteString(renderPane(pane))
-			b.WriteString("\n")
-			linesUsed++
-		}
 	}
 
 	for linesUsed < m.height-2 {
@@ -81,7 +52,7 @@ func (m Model) View() string {
 		sepW = 1
 	}
 	b.WriteString(" " + theme.TreeConnector.Render(strings.Repeat("─", sepW)) + "\n")
-	b.WriteString(theme.HelpStyle.Render(" ⏎ run  r refresh  esc close"))
+	b.WriteString(theme.HelpStyle.Render(" 1-9 tool  ⏎ run  r refresh  esc close"))
 	return b.String()
 }
 
@@ -143,35 +114,20 @@ func section(title string) string {
 	return " " + theme.HelpStyle.Render(title)
 }
 
-func renderProgress(panes []tmux.Pane) string {
-	if len(panes) == 0 {
-		return " " + theme.HelpStyle.Render("No active agent progress")
-	}
-	label := "agent"
-	if len(panes) != 1 {
-		label = "agents"
-	}
-	return fmt.Sprintf(" %s", theme.TreeNodeNormal.Render(fmt.Sprintf("%d active %s", len(panes), label)))
-}
-
-func renderBranch(stats projectStats) string {
-	if stats.Err != "" {
-		return " " + theme.HelpStyle.Render(stats.Err)
-	}
-	return fmt.Sprintf(" %s  %s",
-		theme.TreeMeta.Render("branch"),
-		theme.TreeNodeNormal.Render(stats.Branch),
-	)
-}
-
 func renderChanges(stats projectStats) string {
 	if stats.Err != "" {
-		return " " + theme.HelpStyle.Render("Changes unavailable")
+		return " " + theme.TreeMeta.Render("Git") + " " + theme.HelpStyle.Render(stats.Err)
 	}
-	if stats.Staged == 0 && stats.Unstaged == 0 && stats.Untracked == 0 {
-		return " " + theme.TreeMeta.Render("changes") + " " + theme.TreeNodeNormal.Render("clean")
+	if stats.Added == 0 && stats.Deleted == 0 && stats.Staged == 0 && stats.Unstaged == 0 && stats.Untracked == 0 {
+		return " " + theme.TreeMeta.Render("Git") + " " + theme.TreeNodeNormal.Render("clean")
 	}
 	var parts []string
+	if stats.Added > 0 {
+		parts = append(parts, theme.DiffAdded.Render(fmt.Sprintf("+%d", stats.Added)))
+	}
+	if stats.Deleted > 0 {
+		parts = append(parts, theme.DiffRemoved.Render(fmt.Sprintf("-%d", stats.Deleted)))
+	}
 	if stats.Staged > 0 {
 		parts = append(parts, fmt.Sprintf("%d staged", stats.Staged))
 	}
@@ -181,83 +137,75 @@ func renderChanges(stats projectStats) string {
 	if stats.Untracked > 0 {
 		parts = append(parts, fmt.Sprintf("%d untracked", stats.Untracked))
 	}
-	return " " + theme.TreeMeta.Render("changes") + " " + theme.TreeNodeNormal.Render(strings.Join(parts, ", "))
+	return " " + theme.TreeMeta.Render("Git") + " " + theme.TreeNodeNormal.Render(strings.Join(parts, ", "))
 }
 
-func renderProjectStats(stats projectStats) string {
-	if stats.Err != "" {
-		return " " + theme.HelpStyle.Render("Stats unavailable")
+func renderAction(index int, a action, selected bool) string {
+	prefix := " "
+	if index < 9 {
+		prefix = theme.TreeMeta.Render(fmt.Sprintf("%d", index+1))
 	}
-	diff := ""
-	if stats.Added > 0 || stats.Deleted > 0 {
-		diff = fmt.Sprintf("  %s", theme.HelpStyle.Render(fmt.Sprintf("+%d -%d", stats.Added, stats.Deleted)))
-	}
-	return fmt.Sprintf(" %s  %s files  %s lines%s",
-		theme.TreeMeta.Render(stats.Name),
-		formatInt(stats.Files),
-		formatInt(stats.Lines),
-		diff,
-	)
-}
-
-func renderArtifacts(stats projectStats) []string {
-	if stats.Err != "" {
-		return []string{" " + theme.HelpStyle.Render("No artifacts")}
-	}
-	if len(stats.ChangedFiles) == 0 {
-		return []string{" " + theme.HelpStyle.Render("No changed files")}
-	}
-	limit := 2
-	lines := make([]string, 0, limit)
-	for i, file := range stats.ChangedFiles {
-		if i >= limit {
-			break
-		}
-		lines = append(lines, " "+theme.TreeNodeNormal.Render(file))
-	}
-	if extra := len(stats.ChangedFiles) - limit; extra > 0 {
-		lines = append(lines, " "+theme.HelpStyle.Render(fmt.Sprintf("+%d more", extra)))
-	}
-	return lines
-}
-
-func renderSources(stats projectStats) string {
-	if stats.Err != "" {
-		return " " + theme.HelpStyle.Render("Git unavailable") + "  " + theme.TreeNodeNormal.Render("tmux")
-	}
-	return " " + theme.TreeNodeNormal.Render("Git") + "  " + theme.TreeNodeNormal.Render("tmux")
-}
-
-func renderAction(a action, selected bool) string {
 	if selected {
-		return fmt.Sprintf(" %s\n   %s",
+		return fmt.Sprintf("%s%s\n   %s",
+			prefix,
 			theme.TreeNodeSelected.Render("▸ "+a.title),
 			theme.HelpStyle.Render(a.description),
 		)
 	}
-	return fmt.Sprintf(" %s\n   %s",
+	return fmt.Sprintf("%s%s\n   %s",
+		prefix,
 		theme.TreeNodeNormal.Render("  "+a.title),
 		theme.HelpStyle.Render(a.description),
 	)
 }
 
-func renderPane(pane tmux.Pane) string {
-	return fmt.Sprintf(" %s %s",
-		theme.TreeMeta.Render(fmt.Sprintf("%s:%d.%d", pane.SessionName, pane.WindowIndex, pane.PaneIndex)),
-		theme.TreeNodeNormal.Render(pane.Command),
-	)
+func renderActivity(activities []agentActivity) []string {
+	if len(activities) == 0 {
+		return []string{" " + theme.HelpStyle.Render("No active agents detected")}
+	}
+	lines := make([]string, 0, len(activities)*2)
+	for _, activity := range activities {
+		pane := activity.Pane
+		target := fmt.Sprintf("%s:%d.%d", pane.SessionName, pane.WindowIndex, pane.PaneIndex)
+		status := string(activity.Status)
+		if activity.NeedsInput {
+			status = "needs input"
+		}
+		lines = append(lines, fmt.Sprintf(" %s %s  %s",
+			theme.TreeMeta.Render(status),
+			theme.TreeNodeNormal.Render(pane.Command),
+			theme.HelpStyle.Render(target),
+		))
+		detail := activity.Description
+		if pane.Path != "" {
+			detail = shortPath(pane.Path)
+		}
+		if detail != "" {
+			lines = append(lines, "   "+theme.HelpStyle.Render(detail))
+		}
+	}
+	return lines
 }
 
-func formatInt(value int) string {
-	raw := fmt.Sprintf("%d", value)
-	if len(raw) <= 3 {
-		return raw
+func (m Model) visibleActivityLines() []string {
+	lines := renderActivity(m.activities)
+	maxRows := m.height - 10 - len(m.actions)*actionRowHeight
+	if maxRows < 1 {
+		maxRows = 1
 	}
-	var parts []string
-	for len(raw) > 3 {
-		parts = append([]string{raw[len(raw)-3:]}, parts...)
-		raw = raw[:len(raw)-3]
+	if len(lines) <= maxRows {
+		return lines
 	}
-	parts = append([]string{raw}, parts...)
-	return strings.Join(parts, ",")
+	visible := append([]string{}, lines[:maxRows]...)
+	visible = append(visible, " "+theme.HelpStyle.Render(fmt.Sprintf("+%d more", len(lines)-maxRows)))
+	return visible
+}
+
+func shortPath(path string) string {
+	dir := filepath.Base(path)
+	parent := filepath.Base(filepath.Dir(path))
+	if parent == "." || parent == string(filepath.Separator) || parent == "" {
+		return dir
+	}
+	return filepath.Join(parent, dir)
 }

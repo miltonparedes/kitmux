@@ -1,8 +1,6 @@
 package workbench
 
 import (
-	"bytes"
-	"io/fs"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -11,18 +9,15 @@ import (
 )
 
 type projectStats struct {
-	Name         string
-	Path         string
-	Branch       string
-	Files        int
-	Lines        int
-	Added        int
-	Deleted      int
-	Staged       int
-	Unstaged     int
-	Untracked    int
-	ChangedFiles []string
-	Err          string
+	Name      string
+	Path      string
+	Branch    string
+	Added     int
+	Deleted   int
+	Staged    int
+	Unstaged  int
+	Untracked int
+	Err       string
 }
 
 func loadProjectStats() projectStats {
@@ -35,21 +30,17 @@ func loadProjectStats() projectStats {
 		return projectStats{Name: filepath.Base(path), Path: path, Err: "not a git repo"}
 	}
 	branch, _ := gitOutput(root, "rev-parse", "--abbrev-ref", "HEAD")
-	files := gitFiles(root)
 	added, deleted := gitDiffLines(root)
-	staged, unstaged, untracked, changed := gitStatus(root)
+	staged, unstaged, untracked := gitStatus(root)
 	return projectStats{
-		Name:         filepath.Base(root),
-		Path:         root,
-		Branch:       branch,
-		Files:        len(files),
-		Lines:        countTextLines(root, files),
-		Added:        added,
-		Deleted:      deleted,
-		Staged:       staged,
-		Unstaged:     unstaged,
-		Untracked:    untracked,
-		ChangedFiles: changed,
+		Name:      filepath.Base(root),
+		Path:      root,
+		Branch:    branch,
+		Added:     added,
+		Deleted:   deleted,
+		Staged:    staged,
+		Unstaged:  unstaged,
+		Untracked: untracked,
 	}
 }
 
@@ -73,21 +64,6 @@ func gitOutput(dir string, args ...string) (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
-func gitFiles(root string) []string {
-	out, err := exec.Command("git", "-C", root, "ls-files", "-z").Output()
-	if err != nil {
-		return nil
-	}
-	parts := bytes.Split(bytes.TrimRight(out, "\x00"), []byte{0})
-	files := make([]string, 0, len(parts))
-	for _, part := range parts {
-		if len(part) > 0 {
-			files = append(files, string(part))
-		}
-	}
-	return files
-}
-
 func gitDiffLines(root string) (int, int) {
 	out, err := exec.Command("git", "-C", root, "diff", "--numstat").Output()
 	if err != nil {
@@ -109,12 +85,11 @@ func gitDiffLines(root string) (int, int) {
 	return added, deleted
 }
 
-func gitStatus(root string) (staged, unstaged, untracked int, changed []string) {
+func gitStatus(root string) (staged, unstaged, untracked int) {
 	out, err := exec.Command("git", "-C", root, "status", "--porcelain").Output()
 	if err != nil {
-		return 0, 0, 0, nil
+		return 0, 0, 0
 	}
-	seen := make(map[string]bool)
 	for _, line := range strings.Split(strings.TrimRight(string(out), "\r\n"), "\n") {
 		if len(line) < 3 {
 			continue
@@ -129,45 +104,6 @@ func gitStatus(root string) (staged, unstaged, untracked int, changed []string) 
 				unstaged++
 			}
 		}
-		file := strings.TrimSpace(line[3:])
-		if idx := strings.LastIndex(file, " -> "); idx >= 0 {
-			file = file[idx+4:]
-		}
-		if file != "" && !seen[file] {
-			changed = append(changed, file)
-			seen[file] = true
-		}
 	}
-	return staged, unstaged, untracked, changed
-}
-
-func countTextLines(root string, files []string) int {
-	total := 0
-	for _, file := range files {
-		if strings.Contains(file, "..") || filepath.IsAbs(file) {
-			continue
-		}
-		path := filepath.Join(root, file)
-		cleanRoot, err := filepath.Abs(root)
-		if err != nil {
-			continue
-		}
-		cleanPath, err := filepath.Abs(path)
-		if err != nil || !strings.HasPrefix(cleanPath, cleanRoot+string(os.PathSeparator)) {
-			continue
-		}
-		data, err := readTextFile(cleanPath)
-		if err != nil || bytes.Contains(data, []byte{0}) {
-			continue
-		}
-		total += bytes.Count(data, []byte{'\n'})
-		if len(data) > 0 && data[len(data)-1] != '\n' {
-			total++
-		}
-	}
-	return total
-}
-
-func readTextFile(path string) ([]byte, error) {
-	return fs.ReadFile(os.DirFS(filepath.Dir(path)), filepath.Base(path))
+	return staged, unstaged, untracked
 }

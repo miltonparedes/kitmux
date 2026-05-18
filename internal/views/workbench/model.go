@@ -4,6 +4,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/app/messages"
+	"github.com/miltonparedes/kitmux/internal/config"
 	"github.com/miltonparedes/kitmux/internal/tmux"
 	workspacesreg "github.com/miltonparedes/kitmux/internal/workspaces"
 	"github.com/miltonparedes/kitmux/internal/worktree"
@@ -50,13 +52,27 @@ type dirEntry struct {
 	Path string
 }
 
-const actionRowHeight = 2
+type activityStatus string
+
+const (
+	actionRowHeight          = 2
+	workbenchRefreshInterval = 2 * time.Second
+
+	activityStatusActive activityStatus = "active"
+)
+
+type agentActivity struct {
+	Pane        tmux.Pane
+	Status      activityStatus
+	NeedsInput  bool
+	Description string
+}
 
 // Model is the compact agent sidecar panel.
 type Model struct {
-	actions []action
-	project projectStats
-	panes   []tmux.Pane
+	actions    []action
+	project    projectStats
+	activities []agentActivity
 
 	mode     mode
 	cursor   int
@@ -87,6 +103,8 @@ type dirsLoadedMsg struct {
 	dirs []dirEntry
 }
 
+type workbenchRefreshMsg struct{}
+
 func New() Model {
 	ti := textinput.New()
 	ti.Prompt = "> "
@@ -109,7 +127,7 @@ func New() Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.Reload(), m.LoadProject())
+	return tea.Batch(m.Reload(), m.LoadProject(), refreshWorkbench())
 }
 
 func (m *Model) SetSize(w, h int) {
@@ -138,7 +156,7 @@ func (m Model) LoadProject() tea.Cmd {
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case panesLoadedMsg:
-		m.panes = filterActivityPanes(msg.panes)
+		m.activities = buildAgentActivities(filterActivityPanes(msg.panes))
 		return m, nil
 	case projectStatsLoadedMsg:
 		m.project = msg.stats
@@ -149,6 +167,8 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m, nil
 	case messages.WorkbenchCommandDoneMsg:
 		return m, tea.Batch(m.Reload(), m.LoadProject())
+	case workbenchRefreshMsg:
+		return m, tea.Batch(m.Reload(), m.LoadProject(), refreshWorkbench())
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
 	case tea.KeyMsg:
@@ -191,6 +211,9 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case modeAgentPicker:
 		return m.handleAgentPickerKey(msg)
 	}
+	if updated, cmd, ok := m.handleActionDigit(msg); ok {
+		return updated, cmd
+	}
 	switch msg.String() {
 	case "j", "down":
 		m.cursor++
@@ -219,6 +242,38 @@ func (m Model) handleKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		return m, tea.Quit
 	}
 	return m, nil
+}
+
+func (m Model) handleActionDigit(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
+	switch msg.String() {
+	case "1", "2", "3", "4", "5", "6", "7", "8", "9",
+		"alt+1", "alt+2", "alt+3", "alt+4", "alt+5", "alt+6", "alt+7", "alt+8", "alt+9":
+	default:
+		return m, nil, false
+	}
+	if !digitActionActive(msg) {
+		return m, nil, true
+	}
+	idx := int(msg.Runes[0]-'0') - 1
+	if idx < 0 || idx >= len(m.actions) {
+		return m, nil, true
+	}
+	m.cursor = idx
+	if a, ok := m.selectedAction(); ok && a.kind == actionLaunchAgent {
+		updated := m.startAgentLaunch()
+		return updated, tea.Batch(textinput.Blink, updated.loadDirs()), true
+	}
+	return m, m.selectedCmd(), true
+}
+
+func digitActionActive(msg tea.KeyMsg) bool {
+	if config.SuperKey == "none" && !msg.Alt {
+		return true
+	}
+	if config.SuperKey == "alt" && msg.Alt {
+		return true
+	}
+	return false
 }
 
 func (m Model) handleDirPickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -332,17 +387,7 @@ func (m Model) rowToCursor(row int) (int, bool) {
 }
 
 func (m Model) firstActionRow() int {
-	return 16 + m.artifactRows()
-}
-
-func (m Model) artifactRows() int {
-	if m.project.Err != "" || len(m.project.ChangedFiles) == 0 {
-		return 1
-	}
-	if len(m.project.ChangedFiles) > 2 {
-		return 3
-	}
-	return len(m.project.ChangedFiles)
+	return 8 + len(m.visibleActivityLines())
 }
 
 func (m Model) selectableCount() int {
@@ -498,4 +543,22 @@ func filterActivityPanes(panes []tmux.Pane) []tmux.Pane {
 		}
 	}
 	return filtered
+}
+
+func buildAgentActivities(panes []tmux.Pane) []agentActivity {
+	activities := make([]agentActivity, 0, len(panes))
+	for _, pane := range panes {
+		activities = append(activities, agentActivity{
+			Pane:        pane,
+			Status:      activityStatusActive,
+			Description: "waiting for hook events",
+		})
+	}
+	return activities
+}
+
+func refreshWorkbench() tea.Cmd {
+	return tea.Tick(workbenchRefreshInterval, func(time.Time) tea.Msg {
+		return workbenchRefreshMsg{}
+	})
 }

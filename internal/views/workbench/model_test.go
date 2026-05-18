@@ -7,6 +7,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/miltonparedes/kitmux/internal/app/messages"
+	"github.com/miltonparedes/kitmux/internal/config"
 	"github.com/miltonparedes/kitmux/internal/tmux"
 )
 
@@ -96,27 +97,32 @@ func TestModelFiltersAgentActivity(t *testing.T) {
 		{SessionName: "repo", WindowIndex: 1, PaneIndex: 1, Command: "codex"},
 	}})
 
-	if len(m.panes) != 1 {
-		t.Fatalf("expected one agent pane, got %d", len(m.panes))
+	if len(m.activities) != 1 {
+		t.Fatalf("expected one agent activity, got %d", len(m.activities))
 	}
-	if m.panes[0].Command != "codex" {
-		t.Fatalf("expected codex pane, got %q", m.panes[0].Command)
+	if m.activities[0].Pane.Command != "codex" {
+		t.Fatalf("expected codex pane, got %q", m.activities[0].Pane.Command)
+	}
+	if m.activities[0].Status != activityStatusActive {
+		t.Fatalf("expected active status, got %q", m.activities[0].Status)
 	}
 }
 
 func TestViewRendersBasicWorkbench(t *testing.T) {
 	m := New()
 	m.SetSize(80, 20)
-	m.project = projectStats{Name: "kitmux", Branch: "main", Files: 10, Lines: 200}
+	m.project = projectStats{Name: "kitmux", Branch: "main"}
 	out := m.View()
 
-	for _, want := range []string{"Summary", "Progress", "Branch details", "Artifacts", "Sources", "Tools", "Launch Agent", "Activity"} {
+	for _, want := range []string{"Activity", "agents + changes", "Git", "Tools", "1▸ Launch Agent", "1-9 tool"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected view to contain %q:\n%s", want, out)
 		}
 	}
-	if strings.Contains(out, "Quick agents") {
-		t.Fatalf("expected quick agents section to be removed:\n%s", out)
+	for _, removed := range []string{"Summary", "Review", "Progress", "Branch details", "Artifacts", "Sources", "lines"} {
+		if strings.Contains(out, removed) {
+			t.Fatalf("expected %q to be removed:\n%s", removed, out)
+		}
 	}
 }
 
@@ -165,22 +171,70 @@ func TestViewRendersSummaryDetails(t *testing.T) {
 	m := New()
 	m.SetSize(90, 28)
 	m.project = projectStats{
-		Name:         "kitmux",
-		Branch:       "agent-workbench",
-		Files:        42,
-		Lines:        1200,
-		Added:        10,
-		Deleted:      2,
-		Unstaged:     7,
-		Untracked:    3,
-		ChangedFiles: []string{"README.md", "internal/app/app.go", "internal/views/workbench/render.go"},
+		Name:      "kitmux",
+		Branch:    "agent-workbench",
+		Added:     10,
+		Deleted:   2,
+		Unstaged:  7,
+		Untracked: 3,
+	}
+	m.activities = []agentActivity{
+		{
+			Pane:        tmux.Pane{SessionName: "repo", WindowIndex: 1, PaneIndex: 1, Command: "codex", Path: "/home/user/kitmux"},
+			Status:      activityStatusActive,
+			Description: "waiting for hook events",
+		},
 	}
 
 	out := m.View()
-	for _, want := range []string{"agent-workbench", "7 unstaged", "3 untracked", "README.md", "+1 more", "1,200 lines"} {
+	for _, want := range []string{"+10", "-2", "7 unstaged", "3 untracked", "active", "codex", "repo:1.1", "user/kitmux"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected view to contain %q:\n%s", want, out)
 		}
+	}
+	for _, removed := range []string{"agent-workbench", "README.md", "1,200 lines"} {
+		if strings.Contains(out, removed) {
+			t.Fatalf("expected %q not to be rendered:\n%s", removed, out)
+		}
+	}
+}
+
+func TestDigitRunsToolAction(t *testing.T) {
+	m := New()
+
+	_, cmd := m.Update(key("3"))
+	if cmd == nil {
+		t.Fatal("expected digit to produce command")
+	}
+	msg := cmd()
+	run, ok := msg.(messages.RunPopupMsg)
+	if !ok {
+		t.Fatalf("expected RunPopupMsg, got %T", msg)
+	}
+	if run.Command != "lazygit" {
+		t.Fatalf("expected lazygit, got %q", run.Command)
+	}
+}
+
+func TestAltDigitRunsToolActionWhenConfigured(t *testing.T) {
+	original := config.SuperKey
+	config.SuperKey = "alt"
+	t.Cleanup(func() {
+		config.SuperKey = original
+	})
+	m := New()
+
+	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("3"), Alt: true})
+	if cmd == nil {
+		t.Fatal("expected alt digit to produce command")
+	}
+	msg := cmd()
+	run, ok := msg.(messages.RunPopupMsg)
+	if !ok {
+		t.Fatalf("expected RunPopupMsg, got %T", msg)
+	}
+	if run.Command != "lazygit" {
+		t.Fatalf("expected lazygit, got %q", run.Command)
 	}
 }
 
