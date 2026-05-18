@@ -3,3 +3,4 @@ coverage.out
 dist/
 .factory
 .claude
+**/.DS_Store
