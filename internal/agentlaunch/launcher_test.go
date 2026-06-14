@@ -6,9 +6,9 @@ import (
 	"github.com/miltonparedes/kitmux/internal/agents"
 )
 
-func TestLaunchInSessionFreshSessionOpensWorkbench(t *testing.T) {
-	t.Setenv("KITMUX_AGENT_WORKBENCH", "always")
-	t.Setenv("KITMUX_WORKBENCH_COMMAND", "kitmux workbench")
+func TestLaunchInSessionFreshSessionOpensSidepanel(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_SIDEPANEL", "always")
+	t.Setenv("KITMUX_SIDEPANEL_COMMAND", "kitmux sidepanel")
 
 	calls := &launchCalls{}
 	err := LaunchInSession(sessionReq(true, TargetWindow), stubOps(calls))
@@ -22,12 +22,12 @@ func TestLaunchInSessionFreshSessionOpensWorkbench(t *testing.T) {
 		t.Fatalf("expected droid sent to window 0, got target=%q keys=%q", calls.sentTarget, calls.sentKeys)
 	}
 	if calls.sidepanelTarget != "kitmux-main:0" || calls.sidepanelDir != "/repo" {
-		t.Fatalf("expected workbench beside reused pane, got target=%q dir=%q", calls.sidepanelTarget, calls.sidepanelDir)
+		t.Fatalf("expected sidepanel beside reused pane, got target=%q dir=%q", calls.sidepanelTarget, calls.sidepanelDir)
 	}
 }
 
-func TestLaunchInSessionWindowOpensWorkbenchFromPaneID(t *testing.T) {
-	t.Setenv("KITMUX_AGENT_WORKBENCH", "always")
+func TestLaunchInSessionWindowOpensSidepanelFromPaneID(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_SIDEPANEL", "always")
 
 	calls := &launchCalls{}
 	err := LaunchInSession(sessionReq(false, TargetWindow), stubOps(calls))
@@ -38,12 +38,12 @@ func TestLaunchInSessionWindowOpensWorkbenchFromPaneID(t *testing.T) {
 		t.Fatalf("unexpected window launch: name=%q dir=%q command=%q", calls.windowName, calls.windowDir, calls.windowCommand)
 	}
 	if calls.sidepanelTarget != "%9" {
-		t.Fatalf("expected workbench target %%9, got %q", calls.sidepanelTarget)
+		t.Fatalf("expected sidepanel target %%9, got %q", calls.sidepanelTarget)
 	}
 }
 
-func TestLaunchInSessionSplitOpensWorkbenchFromPaneID(t *testing.T) {
-	t.Setenv("KITMUX_AGENT_WORKBENCH", "always")
+func TestLaunchInSessionSplitOpensSidepanelFromPaneID(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_SIDEPANEL", "always")
 
 	calls := &launchCalls{}
 	err := LaunchInSession(sessionReq(false, TargetSplit), stubOps(calls))
@@ -54,12 +54,12 @@ func TestLaunchInSessionSplitOpensWorkbenchFromPaneID(t *testing.T) {
 		t.Fatalf("unexpected split launch: target=%q command=%q", calls.splitTarget, calls.splitCommand)
 	}
 	if calls.sidepanelTarget != "%7" {
-		t.Fatalf("expected workbench target %%7, got %q", calls.sidepanelTarget)
+		t.Fatalf("expected sidepanel target %%7, got %q", calls.sidepanelTarget)
 	}
 }
 
-func TestLaunchInSessionHonorsWorkbenchOff(t *testing.T) {
-	t.Setenv("KITMUX_AGENT_WORKBENCH", "off")
+func TestLaunchInSessionHonorsSidepanelOff(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_SIDEPANEL", "off")
 
 	calls := &launchCalls{}
 	err := LaunchInSession(sessionReq(false, TargetWindow), stubOps(calls))
@@ -67,7 +67,7 @@ func TestLaunchInSessionHonorsWorkbenchOff(t *testing.T) {
 		t.Fatalf("launch: %v", err)
 	}
 	if calls.sidepanelCommand != "" {
-		t.Fatalf("expected no workbench split, got %q", calls.sidepanelCommand)
+		t.Fatalf("expected no sidepanel split, got %q", calls.sidepanelCommand)
 	}
 }
 

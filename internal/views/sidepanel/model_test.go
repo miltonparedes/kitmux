@@ -35,7 +35,7 @@ func TestModelNavigationAndPopupAction(t *testing.T) {
 		t.Fatalf("expected lazygit command, got %q", run.Command)
 	}
 	if !run.Stay {
-		t.Fatal("expected popup to keep workbench alive")
+		t.Fatal("expected popup to keep sidepanel alive")
 	}
 }
 
@@ -108,13 +108,13 @@ func TestModelFiltersAgentActivity(t *testing.T) {
 	}
 }
 
-func TestViewRendersBasicWorkbench(t *testing.T) {
+func TestViewRendersBasicSidepanel(t *testing.T) {
 	m := New()
 	m.SetSize(80, 20)
 	m.project = projectStats{Name: "kitmux", Branch: "main"}
 	out := m.View()
 
-	for _, want := range []string{"Activity", "agents + changes", "Git", "Tools", "1▸ Launch Agent", "1-9 tool"} {
+	for _, want := range []string{"Sidepanel", "agents · git · actions", "Git", "Actions", "1▸ Launch Agent", "1-9 action"} {
 		if !strings.Contains(out, want) {
 			t.Fatalf("expected view to contain %q:\n%s", want, out)
 		}
@@ -172,7 +172,7 @@ func TestViewRendersSummaryDetails(t *testing.T) {
 	m.SetSize(90, 28)
 	m.project = projectStats{
 		Name:      "kitmux",
-		Branch:    "agent-workbench",
+		Branch:    "agent-sidepanel",
 		Added:     10,
 		Deleted:   2,
 		Unstaged:  7,
@@ -192,7 +192,7 @@ func TestViewRendersSummaryDetails(t *testing.T) {
 			t.Fatalf("expected view to contain %q:\n%s", want, out)
 		}
 	}
-	for _, removed := range []string{"agent-workbench", "README.md", "1,200 lines"} {
+	for _, removed := range []string{"agent-sidepanel", "README.md", "1,200 lines"} {
 		if strings.Contains(out, removed) {
 			t.Fatalf("expected %q not to be rendered:\n%s", removed, out)
 		}

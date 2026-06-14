@@ -51,9 +51,6 @@ const (
 	viewSidepanel             // Agent sidepanel
 )
 
-// ModeWorkbench is kept as a compatibility alias for older callers.
-const ModeWorkbench = ModeSidepanel
-
 type Model struct {
 	mode           Mode
 	view           activeView
@@ -341,7 +338,7 @@ func (m Model) handleSwitchView(msg messages.SwitchViewMsg) (tea.Model, tea.Cmd,
 	case "agents":
 		m.view = viewAgents
 		return m, nil, true
-	case "sidepanel", "workbench":
+	case "sidepanel":
 		m.view = viewSidepanel
 		return m, m.sidepanelView.Init(), true
 	}
@@ -771,7 +768,7 @@ func (m Model) execViewCommand(id string) (tea.Model, tea.Cmd, bool) {
 	case "view_agents":
 		m.view = viewAgents
 		return m, nil, true
-	case "view_sidepanel", "view_workbench":
+	case "view_sidepanel":
 		m.view = viewSidepanel
 		return m, m.sidepanelView.Init(), true
 	}

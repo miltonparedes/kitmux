@@ -100,8 +100,6 @@ type SidepanelCommandDoneMsg struct {
 	Err error
 }
 
-type WorkbenchCommandDoneMsg = SidepanelCommandDoneMsg
-
 // SendPaneKeysMsg sends keys to a tmux pane without exiting kitmux.
 type SendPaneKeysMsg struct {
 	Target string
@@ -114,8 +112,6 @@ type LaunchSidepanelAgentMsg struct {
 	ModeID  string
 	Dir     string
 }
-
-type LaunchWorkbenchAgentMsg = LaunchSidepanelAgentMsg
 
 // OpenLocalEditorMsg signals the result of the open-in-local-editor action.
 type OpenLocalEditorMsg struct {

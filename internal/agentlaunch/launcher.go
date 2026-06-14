@@ -38,7 +38,6 @@ type SessionRequest struct {
 	Target        Target
 	FreshSession  bool
 	OpenSidepanel bool
-	OpenWorkbench bool
 }
 
 func DefaultOps() Ops {
@@ -78,10 +77,6 @@ func LaunchSidepanelWindow(agent agents.Agent, mode agents.AgentMode, dir string
 		return err
 	}
 	return OpenSidepanelSplit(dir, paneID, ops)
-}
-
-func LaunchWorkbenchWindow(agent agents.Agent, mode agents.AgentMode, dir string, ops Ops) error {
-	return LaunchSidepanelWindow(agent, mode, dir, ops)
 }
 
 func LaunchInSession(req SessionRequest, ops Ops) error {
@@ -127,10 +122,6 @@ func OpenSidepanelSplit(dir, targetPane string, ops Ops) error {
 	return err
 }
 
-func OpenWorkbenchSplit(dir, targetPane string, ops Ops) error {
-	return OpenSidepanelSplit(dir, targetPane, ops)
-}
-
 func ShouldOpenSidepanel(ops Ops) bool {
 	ops = ops.withDefaults()
 	switch config.AgentSidepanel() {
@@ -147,12 +138,8 @@ func ShouldOpenSidepanel(ops Ops) bool {
 	}
 }
 
-func ShouldOpenWorkbench(ops Ops) bool {
-	return ShouldOpenSidepanel(ops)
-}
-
 func openSidepanelIfRequested(req SessionRequest, dir, targetPane string, ops Ops) error {
-	if !req.OpenSidepanel && !req.OpenWorkbench {
+	if !req.OpenSidepanel {
 		return nil
 	}
 	return OpenSidepanelSplit(dir, targetPane, ops)

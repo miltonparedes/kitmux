@@ -24,25 +24,7 @@ func FindCommand(id string) (Command, bool) {
 			return cmd, true
 		}
 	}
-	for _, cmd := range LegacyCommands() {
-		if cmd.ID == id {
-			return cmd, true
-		}
-	}
 	return Command{}, false
-}
-
-// LegacyCommands returns compatibility command IDs that should remain runnable
-// but are no longer shown in the main palette.
-func LegacyCommands() []Command {
-	return []Command{
-		{
-			ID:          "view_workbench",
-			Title:       "Workbench",
-			Description: "Open the agent sidepanel",
-			Category:    "View",
-		},
-	}
 }
 
 // DefaultCommands returns the built-in command registry.

@@ -39,7 +39,7 @@ func ABBaseBranch() string {
 }
 
 func AgentSidepanel() string {
-	value := strings.ToLower(envOrDefault("KITMUX_AGENT_SIDEPANEL", envOrDefault("KITMUX_AGENT_WORKBENCH", defaultAgentSidepanel)))
+	value := strings.ToLower(envOrDefault("KITMUX_AGENT_SIDEPANEL", defaultAgentSidepanel))
 	switch value {
 	case "auto", "always", "off":
 		return value
@@ -49,11 +49,11 @@ func AgentSidepanel() string {
 }
 
 func AgentSidepanelMinWidth() int {
-	return envIntOrDefault("KITMUX_AGENT_SIDEPANEL_MIN_WIDTH", envIntOrDefault("KITMUX_AGENT_WORKBENCH_MIN_WIDTH", defaultAgentSidepanelMinWidth))
+	return envIntOrDefault("KITMUX_AGENT_SIDEPANEL_MIN_WIDTH", defaultAgentSidepanelMinWidth)
 }
 
 func AgentSidepanelRatio() int {
-	value := envIntOrDefault("KITMUX_AGENT_SIDEPANEL_RATIO", envIntOrDefault("KITMUX_AGENT_WORKBENCH_RATIO", defaultAgentSidepanelRatio))
+	value := envIntOrDefault("KITMUX_AGENT_SIDEPANEL_RATIO", defaultAgentSidepanelRatio)
 	if value < 10 || value > 90 {
 		return defaultAgentSidepanelRatio
 	}
@@ -61,23 +61,7 @@ func AgentSidepanelRatio() int {
 }
 
 func SidepanelCommand() string {
-	return envOrDefault("KITMUX_SIDEPANEL_COMMAND", envOrDefault("KITMUX_WORKBENCH_COMMAND", defaultSidepanelCommand))
-}
-
-func AgentWorkbench() string {
-	return AgentSidepanel()
-}
-
-func AgentWorkbenchMinWidth() int {
-	return AgentSidepanelMinWidth()
-}
-
-func AgentWorkbenchRatio() int {
-	return AgentSidepanelRatio()
-}
-
-func WorkbenchCommand() string {
-	return SidepanelCommand()
+	return envOrDefault("KITMUX_SIDEPANEL_COMMAND", defaultSidepanelCommand)
 }
 
 func envOrDefault(key, fallback string) string {

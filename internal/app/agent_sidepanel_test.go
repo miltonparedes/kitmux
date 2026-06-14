@@ -13,10 +13,10 @@ import (
 	"github.com/miltonparedes/kitmux/internal/tmux"
 )
 
-func TestLaunchAgentAutoWorkbenchWhenWide(t *testing.T) {
-	t.Setenv("KITMUX_AGENT_WORKBENCH", "auto")
-	t.Setenv("KITMUX_AGENT_WORKBENCH_MIN_WIDTH", "160")
-	t.Setenv("KITMUX_WORKBENCH_COMMAND", "")
+func TestLaunchAgentAutoSidepanelWhenWide(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_SIDEPANEL", "auto")
+	t.Setenv("KITMUX_AGENT_SIDEPANEL_MIN_WIDTH", "160")
+	t.Setenv("KITMUX_SIDEPANEL_COMMAND", "")
 
 	calls := stubAgentLaunch(t, 200, nil)
 
@@ -26,17 +26,17 @@ func TestLaunchAgentAutoWorkbenchWhenWide(t *testing.T) {
 	if calls.sent != "codex" {
 		t.Fatalf("expected codex to be sent, got %q", calls.sent)
 	}
-	if calls.sidepanelCommand != "kitmux workbench" {
-		t.Fatalf("expected workbench split, got %q", calls.sidepanelCommand)
+	if calls.sidepanelCommand != "kitmux sidepanel" {
+		t.Fatalf("expected sidepanel split, got %q", calls.sidepanelCommand)
 	}
 	if calls.sidepanelRatio != 30 {
-		t.Fatalf("expected 30%% workbench split, got %d", calls.sidepanelRatio)
+		t.Fatalf("expected 30%% sidepanel split, got %d", calls.sidepanelRatio)
 	}
 }
 
-func TestLaunchAgentAutoWorkbenchSkipsWhenNarrow(t *testing.T) {
-	t.Setenv("KITMUX_AGENT_WORKBENCH", "auto")
-	t.Setenv("KITMUX_AGENT_WORKBENCH_MIN_WIDTH", "160")
+func TestLaunchAgentAutoSidepanelSkipsWhenNarrow(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_SIDEPANEL", "auto")
+	t.Setenv("KITMUX_AGENT_SIDEPANEL_MIN_WIDTH", "160")
 
 	calls := stubAgentLaunch(t, 120, nil)
 
@@ -47,25 +47,25 @@ func TestLaunchAgentAutoWorkbenchSkipsWhenNarrow(t *testing.T) {
 		t.Fatalf("expected codex to be sent, got %q", calls.sent)
 	}
 	if calls.sidepanelCommand != "" {
-		t.Fatalf("expected no workbench split, got %q", calls.sidepanelCommand)
+		t.Fatalf("expected no sidepanel split, got %q", calls.sidepanelCommand)
 	}
 }
 
-func TestLaunchAgentAlwaysWorkbenchIgnoresWidthError(t *testing.T) {
-	t.Setenv("KITMUX_AGENT_WORKBENCH", "always")
+func TestLaunchAgentAlwaysSidepanelIgnoresWidthError(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_SIDEPANEL", "always")
 
 	calls := stubAgentLaunch(t, 0, errors.New("no tmux"))
 
 	m := New(ModeAgents)
 	m.launchAgent(messages.LaunchAgentMsg{AgentID: "codex", ModeID: "default", Target: "pane"})
 
-	if calls.sidepanelCommand != "kitmux workbench" {
-		t.Fatalf("expected workbench split, got %q", calls.sidepanelCommand)
+	if calls.sidepanelCommand != "kitmux sidepanel" {
+		t.Fatalf("expected sidepanel split, got %q", calls.sidepanelCommand)
 	}
 }
 
-func TestLaunchAgentOffNeverStartsWorkbench(t *testing.T) {
-	t.Setenv("KITMUX_AGENT_WORKBENCH", "off")
+func TestLaunchAgentOffNeverStartsSidepanel(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_SIDEPANEL", "off")
 
 	calls := stubAgentLaunch(t, 240, nil)
 
@@ -73,12 +73,12 @@ func TestLaunchAgentOffNeverStartsWorkbench(t *testing.T) {
 	m.launchAgent(messages.LaunchAgentMsg{AgentID: "codex", ModeID: "default", Target: "pane"})
 
 	if calls.sidepanelCommand != "" {
-		t.Fatalf("expected no workbench split, got %q", calls.sidepanelCommand)
+		t.Fatalf("expected no sidepanel split, got %q", calls.sidepanelCommand)
 	}
 }
 
-func TestLaunchAgentExplicitSplitDoesNotStartWorkbench(t *testing.T) {
-	t.Setenv("KITMUX_AGENT_WORKBENCH", "always")
+func TestLaunchAgentExplicitSplitDoesNotStartSidepanel(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_SIDEPANEL", "always")
 
 	calls := stubAgentLaunch(t, 240, nil)
 
@@ -89,11 +89,11 @@ func TestLaunchAgentExplicitSplitDoesNotStartWorkbench(t *testing.T) {
 		t.Fatalf("expected explicit split command codex, got %q", calls.split)
 	}
 	if calls.sidepanelCommand != "" {
-		t.Fatalf("expected no workbench split, got %q", calls.sidepanelCommand)
+		t.Fatalf("expected no sidepanel split, got %q", calls.sidepanelCommand)
 	}
 }
 
-func TestWorkbenchEditorResultKeepsPaneAlive(t *testing.T) {
+func TestSidepanelEditorResultKeepsPaneAlive(t *testing.T) {
 	m := New(ModeSidepanel)
 
 	_, cmd, handled := m.handleOpenLocalEditor(messages.OpenLocalEditorMsg{})
@@ -101,11 +101,11 @@ func TestWorkbenchEditorResultKeepsPaneAlive(t *testing.T) {
 		t.Fatal("expected editor result to be handled")
 	}
 	if cmd != nil {
-		t.Fatal("expected workbench editor result to keep pane alive")
+		t.Fatal("expected sidepanel editor result to keep pane alive")
 	}
 }
 
-func TestWorkbenchEscReturnsFromAuxView(t *testing.T) {
+func TestSidepanelEscReturnsFromAuxView(t *testing.T) {
 	m := New(ModeSidepanel)
 	m.view = viewAgents
 
@@ -118,7 +118,7 @@ func TestWorkbenchEscReturnsFromAuxView(t *testing.T) {
 	}
 }
 
-func TestWorkbenchEscCancelsLaunchPickerWithoutQuitting(t *testing.T) {
+func TestSidepanelEscCancelsLaunchPickerWithoutQuitting(t *testing.T) {
 	m := New(ModeSidepanel)
 	m.sidepanelView = m.sidepanelView.StartAgentLaunchForTest()
 
@@ -130,7 +130,7 @@ func TestWorkbenchEscCancelsLaunchPickerWithoutQuitting(t *testing.T) {
 		t.Fatal("expected no quit command")
 	}
 	if updated.sidepanelView.IsEditing() {
-		t.Fatal("expected workbench picker to be cancelled")
+		t.Fatal("expected sidepanel picker to be cancelled")
 	}
 	if updated.view != viewSidepanel {
 		t.Fatalf("expected viewSidepanel, got %v", updated.view)
@@ -183,9 +183,9 @@ func stubAgentLaunch(t *testing.T, width int, widthErr error) *launchCalls {
 	return calls
 }
 
-func TestWorkbenchLaunchAgentCreatesWindowAndSplitWhenWide(t *testing.T) {
-	t.Setenv("KITMUX_AGENT_WORKBENCH", "auto")
-	t.Setenv("KITMUX_AGENT_WORKBENCH_MIN_WIDTH", "160")
+func TestSidepanelLaunchAgentCreatesWindowAndSplitWhenWide(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_SIDEPANEL", "auto")
+	t.Setenv("KITMUX_AGENT_SIDEPANEL_MIN_WIDTH", "160")
 
 	calls := stubAgentLaunch(t, 220, nil)
 	m := New(ModeSidepanel)
@@ -200,17 +200,17 @@ func TestWorkbenchLaunchAgentCreatesWindowAndSplitWhenWide(t *testing.T) {
 	if calls.windowCommand != "codex" {
 		t.Fatalf("expected codex command, got %q", calls.windowCommand)
 	}
-	if calls.sidepanelCommand != "kitmux workbench" {
-		t.Fatalf("expected workbench split, got %q", calls.sidepanelCommand)
+	if calls.sidepanelCommand != "kitmux sidepanel" {
+		t.Fatalf("expected sidepanel split, got %q", calls.sidepanelCommand)
 	}
 	if calls.sidepanelRatio != 30 {
-		t.Fatalf("expected 30%% workbench split, got %d", calls.sidepanelRatio)
+		t.Fatalf("expected 30%% sidepanel split, got %d", calls.sidepanelRatio)
 	}
 }
 
-func TestWorkbenchLaunchAgentSkipsSplitWhenNarrow(t *testing.T) {
-	t.Setenv("KITMUX_AGENT_WORKBENCH", "auto")
-	t.Setenv("KITMUX_AGENT_WORKBENCH_MIN_WIDTH", "160")
+func TestSidepanelLaunchAgentSkipsSplitWhenNarrow(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_SIDEPANEL", "auto")
+	t.Setenv("KITMUX_AGENT_SIDEPANEL_MIN_WIDTH", "160")
 
 	calls := stubAgentLaunch(t, 100, nil)
 	m := New(ModeSidepanel)
@@ -219,7 +219,7 @@ func TestWorkbenchLaunchAgentSkipsSplitWhenNarrow(t *testing.T) {
 		t.Fatalf("expected aichat command, got %q", calls.windowCommand)
 	}
 	if calls.sidepanelCommand != "" {
-		t.Fatalf("expected no workbench split, got %q", calls.sidepanelCommand)
+		t.Fatalf("expected no sidepanel split, got %q", calls.sidepanelCommand)
 	}
 }
 

@@ -13,8 +13,8 @@ import (
 	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/app/messages"
 	"github.com/miltonparedes/kitmux/internal/config"
-	"github.com/miltonparedes/kitmux/internal/views/palette"
 	"github.com/miltonparedes/kitmux/internal/tmux"
+	"github.com/miltonparedes/kitmux/internal/views/palette"
 	workspacesreg "github.com/miltonparedes/kitmux/internal/workspaces"
 	"github.com/miltonparedes/kitmux/internal/worktree"
 )
