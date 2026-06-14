@@ -13,12 +13,36 @@ type Command struct {
 
 // IsValidCommand returns true if the given ID matches a registered command.
 func IsValidCommand(id string) bool {
+	_, ok := FindCommand(id)
+	return ok
+}
+
+// FindCommand returns a registered command by ID.
+func FindCommand(id string) (Command, bool) {
 	for _, cmd := range DefaultCommands() {
 		if cmd.ID == id {
-			return true
+			return cmd, true
 		}
 	}
-	return false
+	for _, cmd := range LegacyCommands() {
+		if cmd.ID == id {
+			return cmd, true
+		}
+	}
+	return Command{}, false
+}
+
+// LegacyCommands returns compatibility command IDs that should remain runnable
+// but are no longer shown in the main palette.
+func LegacyCommands() []Command {
+	return []Command{
+		{
+			ID:          "view_workbench",
+			Title:       "Workbench",
+			Description: "Open the agent sidepanel",
+			Category:    "View",
+		},
+	}
 }
 
 // DefaultCommands returns the built-in command registry.
@@ -192,9 +216,9 @@ func DefaultCommands() []Command {
 			Category:    "View",
 		},
 		{
-			ID:          "view_workbench",
-			Title:       "Workbench",
-			Description: "Open the agent workbench",
+			ID:          "view_sidepanel",
+			Title:       "Sidepanel",
+			Description: "Open the agent sidepanel",
 			Category:    "View",
 		},
 	}

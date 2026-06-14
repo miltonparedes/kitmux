@@ -1,4 +1,4 @@
-package workbench
+package sidepanel
 
 import (
 	"os/exec"
@@ -13,6 +13,7 @@ import (
 	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/app/messages"
 	"github.com/miltonparedes/kitmux/internal/config"
+	"github.com/miltonparedes/kitmux/internal/views/palette"
 	"github.com/miltonparedes/kitmux/internal/tmux"
 	workspacesreg "github.com/miltonparedes/kitmux/internal/workspaces"
 	"github.com/miltonparedes/kitmux/internal/worktree"
@@ -56,7 +57,7 @@ type activityStatus string
 
 const (
 	actionRowHeight          = 2
-	workbenchRefreshInterval = 2 * time.Second
+	sidepanelRefreshInterval = 2 * time.Second
 
 	activityStatusActive activityStatus = "active"
 )
@@ -68,7 +69,7 @@ type agentActivity struct {
 	Description string
 }
 
-// Model is the compact agent sidecar panel.
+// Model is the compact agent sidepanel.
 type Model struct {
 	actions    []action
 	project    projectStats
@@ -103,7 +104,7 @@ type dirsLoadedMsg struct {
 	dirs []dirEntry
 }
 
-type workbenchRefreshMsg struct{}
+type sidepanelRefreshMsg struct{}
 
 func New() Model {
 	ti := textinput.New()
@@ -114,11 +115,11 @@ func New() Model {
 	return Model{
 		actions: []action{
 			{title: "Launch Agent", description: "Choose directory and agent", kind: actionLaunchAgent},
-			{title: "Editor", description: "Open current session locally", kind: actionExecuteCommand, value: "open_local_editor"},
-			{title: "Lazygit", description: "Open lazygit popup", kind: actionRunPopup, value: "lazygit"},
-			{title: "Lumen Diff", description: "Open lumen diff popup", kind: actionRunPopup, value: "lumen diff"},
-			{title: "Worktrees", description: "Open worktree manager", kind: actionSwitchView, value: "worktrees"},
-			{title: "Sessions", description: "Open session tree", kind: actionSwitchView, value: "sessions"},
+			commandAction("open_local_editor"),
+			popupAction("tool_lazygit", "lazygit"),
+			popupAction("tool_lumen_diff", "lumen diff"),
+			viewAction("worktrees", "view_worktrees"),
+			viewAction("sessions", "view_sessions"),
 		},
 		dirInput:       ti,
 		agentList:      agentList,
@@ -127,7 +128,7 @@ func New() Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(m.Reload(), m.LoadProject(), refreshWorkbench())
+	return tea.Batch(m.Reload(), m.LoadProject(), refreshSidepanel())
 }
 
 func (m *Model) SetSize(w, h int) {
@@ -165,10 +166,10 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.dirs = msg.dirs
 		m.refilterDirs()
 		return m, nil
-	case messages.WorkbenchCommandDoneMsg:
+	case messages.SidepanelCommandDoneMsg:
 		return m, tea.Batch(m.Reload(), m.LoadProject())
-	case workbenchRefreshMsg:
-		return m, tea.Batch(m.Reload(), m.LoadProject(), refreshWorkbench())
+	case sidepanelRefreshMsg:
+		return m, tea.Batch(m.Reload(), m.LoadProject(), refreshSidepanel())
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
 	case tea.KeyMsg:
@@ -342,7 +343,7 @@ func (m Model) handleAgentPickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 		mode := a.Modes[m.agentModeIndex[m.agentCursor]]
 		m.mode = modeNormal
 		return m, func() tea.Msg {
-			return messages.LaunchWorkbenchAgentMsg{AgentID: a.ID, ModeID: mode.ID, Dir: m.selectedDir.Path}
+			return messages.LaunchSidepanelAgentMsg{AgentID: a.ID, ModeID: mode.ID, Dir: m.selectedDir.Path}
 		}
 	}
 	return m, nil
@@ -549,16 +550,54 @@ func buildAgentActivities(panes []tmux.Pane) []agentActivity {
 	activities := make([]agentActivity, 0, len(panes))
 	for _, pane := range panes {
 		activities = append(activities, agentActivity{
-			Pane:        pane,
-			Status:      activityStatusActive,
-			Description: "waiting for hook events",
+			Pane:   pane,
+			Status: activityStatusActive,
 		})
 	}
 	return activities
 }
 
-func refreshWorkbench() tea.Cmd {
-	return tea.Tick(workbenchRefreshInterval, func(time.Time) tea.Msg {
-		return workbenchRefreshMsg{}
+func refreshSidepanel() tea.Cmd {
+	return tea.Tick(sidepanelRefreshInterval, func(time.Time) tea.Msg {
+		return sidepanelRefreshMsg{}
 	})
+}
+
+func commandAction(id string) action {
+	cmd, ok := palette.FindCommand(id)
+	if !ok {
+		return action{title: id, kind: actionExecuteCommand, value: id}
+	}
+	return action{
+		title:       cmd.Title,
+		description: cmd.Description,
+		kind:        actionExecuteCommand,
+		value:       id,
+	}
+}
+
+func popupAction(id, command string) action {
+	cmd, ok := palette.FindCommand(id)
+	if !ok {
+		return action{title: command, kind: actionRunPopup, value: command}
+	}
+	return action{
+		title:       cmd.Title,
+		description: cmd.Description,
+		kind:        actionRunPopup,
+		value:       command,
+	}
+}
+
+func viewAction(view, id string) action {
+	cmd, ok := palette.FindCommand(id)
+	if !ok {
+		return action{title: view, kind: actionSwitchView, value: view}
+	}
+	return action{
+		title:       strings.TrimSuffix(cmd.Title, " View"),
+		description: cmd.Description,
+		kind:        actionSwitchView,
+		value:       view,
+	}
 }

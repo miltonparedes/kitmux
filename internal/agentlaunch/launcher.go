@@ -37,6 +37,7 @@ type SessionRequest struct {
 	Mode          agents.AgentMode
 	Target        Target
 	FreshSession  bool
+	OpenSidepanel bool
 	OpenWorkbench bool
 }
 
@@ -66,17 +67,21 @@ func LaunchCurrent(agent agents.Agent, mode agents.AgentMode, target Target, ops
 		if err := ops.SendKeys(CurrentPaneTarget, command); err != nil {
 			return err
 		}
-		return OpenWorkbenchSplit("", CurrentPaneTarget, ops)
+		return OpenSidepanelSplit("", CurrentPaneTarget, ops)
 	}
 }
 
-func LaunchWorkbenchWindow(agent agents.Agent, mode agents.AgentMode, dir string, ops Ops) error {
+func LaunchSidepanelWindow(agent agents.Agent, mode agents.AgentMode, dir string, ops Ops) error {
 	ops = ops.withDefaults()
 	paneID, err := ops.NewWindowInDir(agent.ID, dir, agent.FullCommand(mode))
 	if err != nil {
 		return err
 	}
-	return OpenWorkbenchSplit(dir, paneID, ops)
+	return OpenSidepanelSplit(dir, paneID, ops)
+}
+
+func LaunchWorkbenchWindow(agent agents.Agent, mode agents.AgentMode, dir string, ops Ops) error {
+	return LaunchSidepanelWindow(agent, mode, dir, ops)
 }
 
 func LaunchInSession(req SessionRequest, ops Ops) error {
@@ -89,7 +94,7 @@ func LaunchInSession(req SessionRequest, ops Ops) error {
 		if err := ops.SendKeys(target, command); err != nil {
 			return err
 		}
-		return openWorkbenchIfRequested(req, req.Dir, target, ops)
+		return openSidepanelIfRequested(req, req.Dir, target, ops)
 	}
 
 	switch req.Target {
@@ -98,33 +103,37 @@ func LaunchInSession(req SessionRequest, ops Ops) error {
 		if err != nil {
 			return fmt.Errorf("tmux split-window failed: %w", err)
 		}
-		return openWorkbenchIfRequested(req, req.Dir, paneID, ops)
+		return openSidepanelIfRequested(req, req.Dir, paneID, ops)
 	default:
 		paneID, err := ops.NewWindowInSession(req.SessionName, req.WindowName, req.Dir, command)
 		if err != nil {
 			return fmt.Errorf("tmux new-window failed: %w", err)
 		}
-		return openWorkbenchIfRequested(req, req.Dir, paneID, ops)
+		return openSidepanelIfRequested(req, req.Dir, paneID, ops)
 	}
 }
 
-func OpenWorkbenchSplit(dir, targetPane string, ops Ops) error {
+func OpenSidepanelSplit(dir, targetPane string, ops Ops) error {
 	ops = ops.withDefaults()
-	if !ShouldOpenWorkbench(ops) {
+	if !ShouldOpenSidepanel(ops) {
 		return nil
 	}
 	_, err := ops.SplitWindowInDirPercent(
 		targetPane,
 		dir,
-		config.WorkbenchCommand(),
-		config.AgentWorkbenchRatio(),
+		config.SidepanelCommand(),
+		config.AgentSidepanelRatio(),
 	)
 	return err
 }
 
-func ShouldOpenWorkbench(ops Ops) bool {
+func OpenWorkbenchSplit(dir, targetPane string, ops Ops) error {
+	return OpenSidepanelSplit(dir, targetPane, ops)
+}
+
+func ShouldOpenSidepanel(ops Ops) bool {
 	ops = ops.withDefaults()
-	switch config.AgentWorkbench() {
+	switch config.AgentSidepanel() {
 	case "always":
 		return true
 	case "off":
@@ -134,15 +143,19 @@ func ShouldOpenWorkbench(ops Ops) bool {
 		if err != nil {
 			return false
 		}
-		return width >= config.AgentWorkbenchMinWidth()
+		return width >= config.AgentSidepanelMinWidth()
 	}
 }
 
-func openWorkbenchIfRequested(req SessionRequest, dir, targetPane string, ops Ops) error {
-	if !req.OpenWorkbench {
+func ShouldOpenWorkbench(ops Ops) bool {
+	return ShouldOpenSidepanel(ops)
+}
+
+func openSidepanelIfRequested(req SessionRequest, dir, targetPane string, ops Ops) error {
+	if !req.OpenSidepanel && !req.OpenWorkbench {
 		return nil
 	}
-	return OpenWorkbenchSplit(dir, targetPane, ops)
+	return OpenSidepanelSplit(dir, targetPane, ops)
 }
 
 func (ops Ops) withDefaults() Ops {

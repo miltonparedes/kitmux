@@ -21,8 +21,8 @@ func TestLaunchInSessionFreshSessionOpensWorkbench(t *testing.T) {
 	if calls.sentTarget != "kitmux-main:0" || calls.sentKeys != "droid" {
 		t.Fatalf("expected droid sent to window 0, got target=%q keys=%q", calls.sentTarget, calls.sentKeys)
 	}
-	if calls.workbenchTarget != "kitmux-main:0" || calls.workbenchDir != "/repo" {
-		t.Fatalf("expected workbench beside reused pane, got target=%q dir=%q", calls.workbenchTarget, calls.workbenchDir)
+	if calls.sidepanelTarget != "kitmux-main:0" || calls.sidepanelDir != "/repo" {
+		t.Fatalf("expected workbench beside reused pane, got target=%q dir=%q", calls.sidepanelTarget, calls.sidepanelDir)
 	}
 }
 
@@ -37,8 +37,8 @@ func TestLaunchInSessionWindowOpensWorkbenchFromPaneID(t *testing.T) {
 	if calls.windowName != "droid" || calls.windowDir != "/repo" || calls.windowCommand != "droid" {
 		t.Fatalf("unexpected window launch: name=%q dir=%q command=%q", calls.windowName, calls.windowDir, calls.windowCommand)
 	}
-	if calls.workbenchTarget != "%9" {
-		t.Fatalf("expected workbench target %%9, got %q", calls.workbenchTarget)
+	if calls.sidepanelTarget != "%9" {
+		t.Fatalf("expected workbench target %%9, got %q", calls.sidepanelTarget)
 	}
 }
 
@@ -53,8 +53,8 @@ func TestLaunchInSessionSplitOpensWorkbenchFromPaneID(t *testing.T) {
 	if calls.splitTarget != "kitmux-main:" || calls.splitCommand != "droid" {
 		t.Fatalf("unexpected split launch: target=%q command=%q", calls.splitTarget, calls.splitCommand)
 	}
-	if calls.workbenchTarget != "%7" {
-		t.Fatalf("expected workbench target %%7, got %q", calls.workbenchTarget)
+	if calls.sidepanelTarget != "%7" {
+		t.Fatalf("expected workbench target %%7, got %q", calls.sidepanelTarget)
 	}
 }
 
@@ -66,8 +66,8 @@ func TestLaunchInSessionHonorsWorkbenchOff(t *testing.T) {
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}
-	if calls.workbenchCommand != "" {
-		t.Fatalf("expected no workbench split, got %q", calls.workbenchCommand)
+	if calls.sidepanelCommand != "" {
+		t.Fatalf("expected no workbench split, got %q", calls.sidepanelCommand)
 	}
 }
 
@@ -80,9 +80,9 @@ type launchCalls struct {
 	windowCommand    string
 	splitTarget      string
 	splitCommand     string
-	workbenchTarget  string
-	workbenchDir     string
-	workbenchCommand string
+	sidepanelTarget  string
+	sidepanelDir     string
+	sidepanelCommand string
 }
 
 func sessionReq(fresh bool, target Target) SessionRequest {
@@ -94,7 +94,7 @@ func sessionReq(fresh bool, target Target) SessionRequest {
 		Mode:          agents.AgentMode{ID: "default", Name: "Default"},
 		Target:        target,
 		FreshSession:  fresh,
-		OpenWorkbench: true,
+		OpenSidepanel: true,
 	}
 }
 
@@ -117,9 +117,9 @@ func stubOps(calls *launchCalls) Ops {
 			return "%7", nil
 		},
 		SplitWindowInDirPercent: func(target, dir, command string, _ int) (string, error) {
-			calls.workbenchTarget = target
-			calls.workbenchDir = dir
-			calls.workbenchCommand = command
+			calls.sidepanelTarget = target
+			calls.sidepanelDir = dir
+			calls.sidepanelCommand = command
 			return "%8", nil
 		},
 		CurrentClientWidth: func() (int, error) { return 240, nil },

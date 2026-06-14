@@ -1,4 +1,4 @@
-package workbench
+package sidepanel
 
 import (
 	"os"

@@ -18,8 +18,8 @@ import (
 	agentsview "github.com/miltonparedes/kitmux/internal/views/agents"
 	"github.com/miltonparedes/kitmux/internal/views/palette"
 	"github.com/miltonparedes/kitmux/internal/views/sessions"
+	sidepanelview "github.com/miltonparedes/kitmux/internal/views/sidepanel"
 	"github.com/miltonparedes/kitmux/internal/views/windows"
-	workbenchview "github.com/miltonparedes/kitmux/internal/views/workbench"
 	workspacesview "github.com/miltonparedes/kitmux/internal/views/workspaces"
 	"github.com/miltonparedes/kitmux/internal/views/worktrees"
 	"github.com/miltonparedes/kitmux/internal/worktree"
@@ -36,7 +36,7 @@ const (
 	ModeWindows                // Windows for current session
 	ModeRun                    // Execute a palette command directly
 	ModeWorkspaces             // Workspaces dashboard
-	ModeWorkbench              // Agent workbench sidecar
+	ModeSidepanel              // Agent sidepanel
 )
 
 type activeView int
@@ -48,8 +48,11 @@ const (
 	viewAgents                // Agent launcher
 	viewAgentAB               // A/B launcher form
 	viewWorkspaces            // Workspaces dashboard
-	viewWorkbench             // Agent workbench
+	viewSidepanel             // Agent sidepanel
 )
+
+// ModeWorkbench is kept as a compatibility alias for older callers.
+const ModeWorkbench = ModeSidepanel
 
 type Model struct {
 	mode           Mode
@@ -60,7 +63,7 @@ type Model struct {
 	agentsView     agentsview.Model
 	agentABView    agentabview.Model
 	workspacesView workspacesview.Model
-	workbenchView  workbenchview.Model
+	sidepanelView  sidepanelview.Model
 	palette        palette.Model
 	paletteActive  bool
 	paletteReturn  bool        // return to palette after sub-action completes
@@ -83,7 +86,7 @@ func New(mode Mode, opts ...Option) Model {
 		agentsView:     agentsview.New(),
 		agentABView:    agentabview.New(),
 		workspacesView: workspacesview.New(),
-		workbenchView:  workbenchview.New(),
+		sidepanelView:  sidepanelview.New(),
 		palette:        palette.New(),
 	}
 	for _, opt := range opts {
@@ -101,8 +104,8 @@ func New(mode Mode, opts ...Option) Model {
 		m.view = viewWindows
 	case ModeWorkspaces:
 		m.view = viewWorkspaces
-	case ModeWorkbench:
-		m.view = viewWorkbench
+	case ModeSidepanel:
+		m.view = viewSidepanel
 	}
 	return m
 }
@@ -136,8 +139,8 @@ func (m Model) Init() tea.Cmd {
 			return m.agentABView.Init()
 		case viewWorkspaces:
 			return m.workspacesView.Init()
-		case viewWorkbench:
-			return m.workbenchView.Init()
+		case viewSidepanel:
+			return m.sidepanelView.Init()
 		default:
 			return m.sessions.Init()
 		}
@@ -256,8 +259,8 @@ func (m Model) dispatchAgentAction(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	case messages.LaunchAgentMsg:
 		updated, cmd := m.launchAgent(msg)
 		return updated, cmd, true
-	case messages.LaunchWorkbenchAgentMsg:
-		return m, m.launchWorkbenchAgent(msg), true
+	case messages.LaunchSidepanelAgentMsg:
+		return m, m.launchSidepanelAgent(msg), true
 	case messages.OpenAgentABMsg:
 		m.returnView = m.view
 		m.view = viewAgentAB
@@ -276,7 +279,7 @@ func (m Model) dispatchPaneAction(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case messages.RunPopupMsg:
 		_ = tmux.DisplayPopup(msg.Command, msg.Width, msg.Height)
-		if msg.Stay || m.mode == ModeWorkbench {
+		if msg.Stay || m.mode == ModeSidepanel {
 			return m, nil, true
 		}
 		return m, tea.Quit, true
@@ -300,7 +303,7 @@ func (m Model) applyWindowSize(msg tea.WindowSizeMsg) Model {
 	m.agentsView.SetSize(m.width, m.height-1)
 	m.agentABView.SetSize(m.width, m.height-1)
 	m.workspacesView.SetSize(m.width, m.height-1)
-	m.workbenchView.SetSize(m.width, m.height-1)
+	m.sidepanelView.SetSize(m.width, m.height-1)
 	m.palette.SetSize(m.width, m.height)
 	return m
 }
@@ -319,13 +322,13 @@ func (m Model) handleTogglePalette() (tea.Model, tea.Cmd, bool) {
 func (m Model) handleSwitchView(msg messages.SwitchViewMsg) (tea.Model, tea.Cmd, bool) {
 	switch msg.View {
 	case "sessions":
-		if m.mode == ModeWorkbench {
-			if m.view == viewWorkbench {
+		if m.mode == ModeSidepanel {
+			if m.view == viewSidepanel {
 				m.view = viewSessions
 				return m, nil, true
 			}
-			m.view = viewWorkbench
-			return m, m.workbenchView.Init(), true
+			m.view = viewSidepanel
+			return m, m.sidepanelView.Init(), true
 		}
 		if m.paletteReturn {
 			return m, m.returnToPalette(), true
@@ -338,9 +341,9 @@ func (m Model) handleSwitchView(msg messages.SwitchViewMsg) (tea.Model, tea.Cmd,
 	case "agents":
 		m.view = viewAgents
 		return m, nil, true
-	case "workbench":
-		m.view = viewWorkbench
-		return m, m.workbenchView.Init(), true
+	case "sidepanel", "workbench":
+		m.view = viewSidepanel
+		return m, m.sidepanelView.Init(), true
 	}
 	return m, nil, true
 }
@@ -369,7 +372,7 @@ func (m Model) handleBackFromAgentAB() (tea.Model, tea.Cmd, bool) {
 func (m Model) handleOpenLocalEditor(msg messages.OpenLocalEditorMsg) (tea.Model, tea.Cmd, bool) {
 	if msg.Err != nil {
 		_ = tmux.DisplayMessage(fmt.Sprintf("open_local_editor error: %v", msg.Err))
-		if m.mode == ModeWorkbench {
+		if m.mode == ModeSidepanel {
 			m.paletteReturn = false
 			return m, nil, true
 		}
@@ -377,14 +380,14 @@ func (m Model) handleOpenLocalEditor(msg messages.OpenLocalEditorMsg) (tea.Model
 	}
 	if msg.Fallback != "" {
 		_ = tmux.DisplayMessage(fmt.Sprintf("bridge unavailable, run manually: %s", msg.Fallback))
-		if m.mode == ModeWorkbench {
+		if m.mode == ModeSidepanel {
 			m.paletteReturn = false
 			return m, nil, true
 		}
 		return m, tea.Quit, true
 	}
 	_ = tmux.DisplayMessage("opened local editor")
-	if m.mode == ModeWorkbench {
+	if m.mode == ModeSidepanel {
 		m.paletteReturn = false
 		return m, nil, true
 	}
@@ -443,7 +446,7 @@ func (m Model) isEditing() bool {
 	if m.view == viewWorkspaces && m.workspacesView.IsEditing() {
 		return true
 	}
-	if m.view == viewWorkbench && m.workbenchView.IsEditing() {
+	if m.view == viewSidepanel && m.sidepanelView.IsEditing() {
 		return true
 	}
 	return false
@@ -490,9 +493,9 @@ func (m Model) handleEscKey(msg tea.KeyMsg, isEditing bool) (Model, tea.Cmd, boo
 	if m.view == viewWorkspaces && !m.workspacesView.IsEditing() {
 		return m.handleEscWorkspaces(msg)
 	}
-	if m.view == viewWorkbench && m.workbenchView.IsEditing() {
+	if m.view == viewSidepanel && m.sidepanelView.IsEditing() {
 		var cmd tea.Cmd
-		m.workbenchView, cmd = m.workbenchView.Update(msg)
+		m.sidepanelView, cmd = m.sidepanelView.Update(msg)
 		return m, cmd, true
 	}
 	if m.paletteReturn && !isEditing {
@@ -518,9 +521,9 @@ func (m Model) handleEscWorkspaces(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 }
 
 func (m Model) handleEscByView() (Model, tea.Cmd, bool) {
-	if m.mode == ModeWorkbench && m.view != viewWorkbench {
-		m.view = viewWorkbench
-		return m, m.workbenchView.Init(), true
+	if m.mode == ModeSidepanel && m.view != viewSidepanel {
+		m.view = viewSidepanel
+		return m, m.sidepanelView.Init(), true
 	}
 	switch m.view {
 	case viewWindows:
@@ -534,8 +537,8 @@ func (m Model) handleEscByView() (Model, tea.Cmd, bool) {
 	case viewWorkspaces:
 		// IsEditing() path: let the view cancel its own modal.
 		return m, nil, false
-	case viewWorkbench:
-		return m.escWithMode(ModeWorkbench)
+	case viewSidepanel:
+		return m.escWithMode(ModeSidepanel)
 	default:
 		if m.sessions.IsEditing() {
 			return m, nil, false
@@ -570,8 +573,8 @@ func (m Model) routeToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var model tea.Model
 		model, cmd = m.workspacesView.Update(msg)
 		m.workspacesView = model.(workspacesview.Model)
-	case viewWorkbench:
-		m.workbenchView, cmd = m.workbenchView.Update(msg)
+	case viewSidepanel:
+		m.sidepanelView, cmd = m.sidepanelView.Update(msg)
 	}
 	return m, cmd
 }
@@ -579,10 +582,10 @@ func (m Model) routeToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) routeToSessions(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.sessions, cmd = m.sessions.Update(msg)
-	if m.mode == ModeWorkbench {
+	if m.mode == ModeSidepanel {
 		if _, ok := msg.(messages.BackToSessionsMsg); ok {
-			m.view = viewWorkbench
-			return m, m.workbenchView.Init()
+			m.view = viewSidepanel
+			return m, m.sidepanelView.Init()
 		}
 	}
 	if m.pendingKey != nil && m.sessions.ConsumeLoaded() {
@@ -604,10 +607,10 @@ func (m Model) routeToSessions(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) routeToWorktrees(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.worktreeView, cmd = m.worktreeView.Update(msg)
-	if m.mode == ModeWorkbench {
+	if m.mode == ModeSidepanel {
 		if _, ok := msg.(messages.SwitchViewMsg); ok {
-			m.view = viewWorkbench
-			return m, m.workbenchView.Init()
+			m.view = viewSidepanel
+			return m, m.sidepanelView.Init()
 		}
 	}
 	if m.paletteReturn && !m.worktreeView.IsEditing() {
@@ -635,8 +638,8 @@ func (m Model) View() string {
 		return m.agentABView.View()
 	case viewWorkspaces:
 		return m.workspacesView.View()
-	case viewWorkbench:
-		return m.workbenchView.View()
+	case viewSidepanel:
+		return m.sidepanelView.View()
 	default:
 		return m.sessions.View()
 	}
@@ -768,9 +771,9 @@ func (m Model) execViewCommand(id string) (tea.Model, tea.Cmd, bool) {
 	case "view_agents":
 		m.view = viewAgents
 		return m, nil, true
-	case "view_workbench":
-		m.view = viewWorkbench
-		return m, m.workbenchView.Init(), true
+	case "view_sidepanel", "view_workbench":
+		m.view = viewSidepanel
+		return m, m.sidepanelView.Init(), true
 	}
 	return m, nil, false
 }
@@ -811,7 +814,7 @@ func launchAgentCmd(agentID string) tea.Cmd {
 
 func runPaneCommand(command string) tea.Cmd {
 	return tea.ExecProcess(exec.Command("sh", "-lc", command), func(err error) tea.Msg {
-		return messages.WorkbenchCommandDoneMsg{Err: err}
+		return messages.SidepanelCommandDoneMsg{Err: err}
 	})
 }
 
@@ -886,18 +889,18 @@ func (m Model) launchAgent(msg messages.LaunchAgentMsg) (tea.Model, tea.Cmd) {
 	return m, tea.Quit
 }
 
-func (m Model) launchWorkbenchAgent(msg messages.LaunchWorkbenchAgentMsg) tea.Cmd {
+func (m Model) launchSidepanelAgent(msg messages.LaunchSidepanelAgentMsg) tea.Cmd {
 	return func() tea.Msg {
 		a, ok := agents.Find(msg.AgentID)
 		if !ok {
-			return messages.WorkbenchCommandDoneMsg{}
+			return messages.SidepanelCommandDoneMsg{}
 		}
 		mode, ok := agents.FindMode(a, msg.ModeID)
 		if !ok {
-			return messages.WorkbenchCommandDoneMsg{}
+			return messages.SidepanelCommandDoneMsg{}
 		}
-		err := agentlaunch.LaunchWorkbenchWindow(a, mode, msg.Dir, appAgentLaunchOps())
-		return messages.WorkbenchCommandDoneMsg{Err: err}
+		err := agentlaunch.LaunchSidepanelWindow(a, mode, msg.Dir, appAgentLaunchOps())
+		return messages.SidepanelCommandDoneMsg{Err: err}
 	}
 }
 

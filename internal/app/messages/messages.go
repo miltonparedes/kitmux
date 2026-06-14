@@ -95,10 +95,12 @@ type RunPaneCommandMsg struct {
 	Command string
 }
 
-// WorkbenchCommandDoneMsg signals that a pane command launched by Workbench exited.
-type WorkbenchCommandDoneMsg struct {
+// SidepanelCommandDoneMsg signals that a pane command launched by Sidepanel exited.
+type SidepanelCommandDoneMsg struct {
 	Err error
 }
+
+type WorkbenchCommandDoneMsg = SidepanelCommandDoneMsg
 
 // SendPaneKeysMsg sends keys to a tmux pane without exiting kitmux.
 type SendPaneKeysMsg struct {
@@ -106,12 +108,14 @@ type SendPaneKeysMsg struct {
 	Keys   string
 }
 
-// LaunchWorkbenchAgentMsg launches an agent in a new tmux window from Workbench.
-type LaunchWorkbenchAgentMsg struct {
+// LaunchSidepanelAgentMsg launches an agent in a new tmux window from Sidepanel.
+type LaunchSidepanelAgentMsg struct {
 	AgentID string
 	ModeID  string
 	Dir     string
 }
+
+type LaunchWorkbenchAgentMsg = LaunchSidepanelAgentMsg
 
 // OpenLocalEditorMsg signals the result of the open-in-local-editor action.
 type OpenLocalEditorMsg struct {

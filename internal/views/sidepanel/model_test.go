@@ -1,4 +1,4 @@
-package workbench
+package sidepanel
 
 import (
 	"strings"
@@ -260,9 +260,9 @@ func TestLaunchAgentFlowSelectsAgentAfterDirectory(t *testing.T) {
 		t.Fatal("expected launch message")
 	}
 	msg := cmd()
-	launch, ok := msg.(messages.LaunchWorkbenchAgentMsg)
+	launch, ok := msg.(messages.LaunchSidepanelAgentMsg)
 	if !ok {
-		t.Fatalf("expected LaunchWorkbenchAgentMsg, got %T", msg)
+		t.Fatalf("expected LaunchSidepanelAgentMsg, got %T", msg)
 	}
 	if launch.AgentID != "droid" || launch.ModeID != "default" || launch.Dir != "/tmp/current" {
 		t.Fatalf("unexpected launch: %+v", launch)

@@ -1153,7 +1153,7 @@ func spawnAgentForSession(sessName, worktreePath string, agent agents.Agent, mod
 		Mode:          mode,
 		Target:        agentlaunch.TargetWindow,
 		FreshSession:  freshSession,
-		OpenWorkbench: true,
+		OpenSidepanel: true,
 	}, workspaceAgentLaunchOps)
 }
 
@@ -1234,7 +1234,7 @@ func launchWorkspaceSessionAgent(
 		Mode:          mode,
 		Target:        launchTarget(target),
 		FreshSession:  freshSession,
-		OpenWorkbench: true,
+		OpenSidepanel: true,
 	}, workspaceAgentLaunchOps)
 }
 

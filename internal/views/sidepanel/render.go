@@ -1,4 +1,4 @@
-package workbench
+package sidepanel
 
 import (
 	"fmt"
@@ -17,13 +17,13 @@ func (m Model) View() string {
 	}
 
 	var b strings.Builder
-	b.WriteString(" " + theme.TreeNodeSelected.Render("Activity"))
-	b.WriteString("   " + theme.HelpStyle.Render("agents + changes"))
+	b.WriteString(" " + theme.TreeNodeSelected.Render("Sidepanel"))
+	b.WriteString("   " + theme.HelpStyle.Render("agents · git · actions"))
 	b.WriteString("\n\n")
 
 	b.WriteString(renderChanges(m.project) + "\n")
 	b.WriteString("\n")
-	b.WriteString(section("Activity") + "\n")
+	b.WriteString(section("Agents") + "\n")
 	linesUsed := 5
 	for _, line := range m.visibleActivityLines() {
 		b.WriteString(line + "\n")
@@ -33,7 +33,7 @@ func (m Model) View() string {
 	b.WriteString("\n")
 	linesUsed++
 
-	b.WriteString(section("Tools") + "\n")
+	b.WriteString(section("Actions") + "\n")
 	linesUsed++
 	for i, action := range m.actions {
 		selected := i == m.cursor
@@ -52,7 +52,7 @@ func (m Model) View() string {
 		sepW = 1
 	}
 	b.WriteString(" " + theme.TreeConnector.Render(strings.Repeat("─", sepW)) + "\n")
-	b.WriteString(theme.HelpStyle.Render(" 1-9 tool  ⏎ run  r refresh  esc close"))
+	b.WriteString(theme.HelpStyle.Render(" 1-9 action  ⏎ run  r refresh  esc close"))
 	return b.String()
 }
 

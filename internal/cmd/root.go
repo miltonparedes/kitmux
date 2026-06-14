@@ -43,6 +43,9 @@ func newRootCmd() *cobra.Command {
 	for _, c := range palette.DefaultCommands() {
 		cmd.AddCommand(hiddenRunCmd(c.ID, c.Description))
 	}
+	for _, c := range palette.LegacyCommands() {
+		cmd.AddCommand(hiddenRunCmd(c.ID, c.Description))
+	}
 
 	return cmd
 }

@@ -26,11 +26,11 @@ func TestLaunchAgentAutoWorkbenchWhenWide(t *testing.T) {
 	if calls.sent != "codex" {
 		t.Fatalf("expected codex to be sent, got %q", calls.sent)
 	}
-	if calls.workbenchCommand != "kitmux workbench" {
-		t.Fatalf("expected workbench split, got %q", calls.workbenchCommand)
+	if calls.sidepanelCommand != "kitmux workbench" {
+		t.Fatalf("expected workbench split, got %q", calls.sidepanelCommand)
 	}
-	if calls.workbenchRatio != 30 {
-		t.Fatalf("expected 30%% workbench split, got %d", calls.workbenchRatio)
+	if calls.sidepanelRatio != 30 {
+		t.Fatalf("expected 30%% workbench split, got %d", calls.sidepanelRatio)
 	}
 }
 
@@ -46,8 +46,8 @@ func TestLaunchAgentAutoWorkbenchSkipsWhenNarrow(t *testing.T) {
 	if calls.sent != "codex" {
 		t.Fatalf("expected codex to be sent, got %q", calls.sent)
 	}
-	if calls.workbenchCommand != "" {
-		t.Fatalf("expected no workbench split, got %q", calls.workbenchCommand)
+	if calls.sidepanelCommand != "" {
+		t.Fatalf("expected no workbench split, got %q", calls.sidepanelCommand)
 	}
 }
 
@@ -59,8 +59,8 @@ func TestLaunchAgentAlwaysWorkbenchIgnoresWidthError(t *testing.T) {
 	m := New(ModeAgents)
 	m.launchAgent(messages.LaunchAgentMsg{AgentID: "codex", ModeID: "default", Target: "pane"})
 
-	if calls.workbenchCommand != "kitmux workbench" {
-		t.Fatalf("expected workbench split, got %q", calls.workbenchCommand)
+	if calls.sidepanelCommand != "kitmux workbench" {
+		t.Fatalf("expected workbench split, got %q", calls.sidepanelCommand)
 	}
 }
 
@@ -72,8 +72,8 @@ func TestLaunchAgentOffNeverStartsWorkbench(t *testing.T) {
 	m := New(ModeAgents)
 	m.launchAgent(messages.LaunchAgentMsg{AgentID: "codex", ModeID: "default", Target: "pane"})
 
-	if calls.workbenchCommand != "" {
-		t.Fatalf("expected no workbench split, got %q", calls.workbenchCommand)
+	if calls.sidepanelCommand != "" {
+		t.Fatalf("expected no workbench split, got %q", calls.sidepanelCommand)
 	}
 }
 
@@ -88,13 +88,13 @@ func TestLaunchAgentExplicitSplitDoesNotStartWorkbench(t *testing.T) {
 	if calls.split != "codex" {
 		t.Fatalf("expected explicit split command codex, got %q", calls.split)
 	}
-	if calls.workbenchCommand != "" {
-		t.Fatalf("expected no workbench split, got %q", calls.workbenchCommand)
+	if calls.sidepanelCommand != "" {
+		t.Fatalf("expected no workbench split, got %q", calls.sidepanelCommand)
 	}
 }
 
 func TestWorkbenchEditorResultKeepsPaneAlive(t *testing.T) {
-	m := New(ModeWorkbench)
+	m := New(ModeSidepanel)
 
 	_, cmd, handled := m.handleOpenLocalEditor(messages.OpenLocalEditorMsg{})
 	if !handled {
@@ -106,21 +106,21 @@ func TestWorkbenchEditorResultKeepsPaneAlive(t *testing.T) {
 }
 
 func TestWorkbenchEscReturnsFromAuxView(t *testing.T) {
-	m := New(ModeWorkbench)
+	m := New(ModeSidepanel)
 	m.view = viewAgents
 
 	updated, _, handled := m.handleEscByView()
 	if !handled {
 		t.Fatal("expected esc to be handled")
 	}
-	if updated.view != viewWorkbench {
-		t.Fatalf("expected viewWorkbench, got %v", updated.view)
+	if updated.view != viewSidepanel {
+		t.Fatalf("expected viewSidepanel, got %v", updated.view)
 	}
 }
 
 func TestWorkbenchEscCancelsLaunchPickerWithoutQuitting(t *testing.T) {
-	m := New(ModeWorkbench)
-	m.workbenchView = m.workbenchView.StartAgentLaunchForTest()
+	m := New(ModeSidepanel)
+	m.sidepanelView = m.sidepanelView.StartAgentLaunchForTest()
 
 	updated, cmd, handled := m.handleEscKey(tea.KeyMsg{Type: tea.KeyEsc}, true)
 	if !handled {
@@ -129,11 +129,11 @@ func TestWorkbenchEscCancelsLaunchPickerWithoutQuitting(t *testing.T) {
 	if cmd != nil {
 		t.Fatal("expected no quit command")
 	}
-	if updated.workbenchView.IsEditing() {
+	if updated.sidepanelView.IsEditing() {
 		t.Fatal("expected workbench picker to be cancelled")
 	}
-	if updated.view != viewWorkbench {
-		t.Fatalf("expected viewWorkbench, got %v", updated.view)
+	if updated.view != viewSidepanel {
+		t.Fatalf("expected viewSidepanel, got %v", updated.view)
 	}
 }
 
@@ -142,8 +142,8 @@ type launchCalls struct {
 	split            string
 	windowDir        string
 	windowCommand    string
-	workbenchCommand string
-	workbenchRatio   int
+	sidepanelCommand string
+	sidepanelRatio   int
 }
 
 func stubAgentLaunch(t *testing.T, width int, widthErr error) *launchCalls {
@@ -176,8 +176,8 @@ func stubAgentLaunch(t *testing.T, width int, widthErr error) *launchCalls {
 		return width, widthErr
 	}
 	agentLaunchOps.SplitWindowInDirPercent = func(_, _, command string, percent int) (string, error) {
-		calls.workbenchCommand = command
-		calls.workbenchRatio = percent
+		calls.sidepanelCommand = command
+		calls.sidepanelRatio = percent
 		return "%2", nil
 	}
 	return calls
@@ -188,8 +188,8 @@ func TestWorkbenchLaunchAgentCreatesWindowAndSplitWhenWide(t *testing.T) {
 	t.Setenv("KITMUX_AGENT_WORKBENCH_MIN_WIDTH", "160")
 
 	calls := stubAgentLaunch(t, 220, nil)
-	m := New(ModeWorkbench)
-	cmd := m.launchWorkbenchAgent(messages.LaunchWorkbenchAgentMsg{AgentID: "codex", ModeID: "default", Dir: "/tmp/repo"})
+	m := New(ModeSidepanel)
+	cmd := m.launchSidepanelAgent(messages.LaunchSidepanelAgentMsg{AgentID: "codex", ModeID: "default", Dir: "/tmp/repo"})
 	if cmd == nil {
 		t.Fatal("expected command")
 	}
@@ -200,11 +200,11 @@ func TestWorkbenchLaunchAgentCreatesWindowAndSplitWhenWide(t *testing.T) {
 	if calls.windowCommand != "codex" {
 		t.Fatalf("expected codex command, got %q", calls.windowCommand)
 	}
-	if calls.workbenchCommand != "kitmux workbench" {
-		t.Fatalf("expected workbench split, got %q", calls.workbenchCommand)
+	if calls.sidepanelCommand != "kitmux workbench" {
+		t.Fatalf("expected workbench split, got %q", calls.sidepanelCommand)
 	}
-	if calls.workbenchRatio != 30 {
-		t.Fatalf("expected 30%% workbench split, got %d", calls.workbenchRatio)
+	if calls.sidepanelRatio != 30 {
+		t.Fatalf("expected 30%% workbench split, got %d", calls.sidepanelRatio)
 	}
 }
 
@@ -213,13 +213,13 @@ func TestWorkbenchLaunchAgentSkipsSplitWhenNarrow(t *testing.T) {
 	t.Setenv("KITMUX_AGENT_WORKBENCH_MIN_WIDTH", "160")
 
 	calls := stubAgentLaunch(t, 100, nil)
-	m := New(ModeWorkbench)
-	_ = m.launchWorkbenchAgent(messages.LaunchWorkbenchAgentMsg{AgentID: "aichat", ModeID: "default", Dir: "/tmp/repo"})()
+	m := New(ModeSidepanel)
+	_ = m.launchSidepanelAgent(messages.LaunchSidepanelAgentMsg{AgentID: "aichat", ModeID: "default", Dir: "/tmp/repo"})()
 	if calls.windowCommand != "aichat" {
 		t.Fatalf("expected aichat command, got %q", calls.windowCommand)
 	}
-	if calls.workbenchCommand != "" {
-		t.Fatalf("expected no workbench split, got %q", calls.workbenchCommand)
+	if calls.sidepanelCommand != "" {
+		t.Fatalf("expected no workbench split, got %q", calls.sidepanelCommand)
 	}
 }
 
