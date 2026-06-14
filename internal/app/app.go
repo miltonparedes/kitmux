@@ -215,6 +215,10 @@ func (m Model) dispatchNavigation(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 		if m.paletteReturn {
 			return m, m.returnToPalette(), true
 		}
+		if m.mode == ModeSidepanel {
+			m.view = viewSidepanel
+			return m, m.sidepanelView.Init(), true
+		}
 		m.view = viewSessions
 		return m, nil, true
 	case messages.SessionCursorMsg:
@@ -322,7 +326,7 @@ func (m Model) handleSwitchView(msg messages.SwitchViewMsg) (tea.Model, tea.Cmd,
 		if m.mode == ModeSidepanel {
 			if m.view == viewSidepanel {
 				m.view = viewSessions
-				return m, nil, true
+				return m, m.sessions.Init(), true
 			}
 			m.view = viewSidepanel
 			return m, m.sidepanelView.Init(), true
@@ -579,12 +583,6 @@ func (m Model) routeToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 func (m Model) routeToSessions(msg tea.Msg) (tea.Model, tea.Cmd) {
 	var cmd tea.Cmd
 	m.sessions, cmd = m.sessions.Update(msg)
-	if m.mode == ModeSidepanel {
-		if _, ok := msg.(messages.BackToSessionsMsg); ok {
-			m.view = viewSidepanel
-			return m, m.sidepanelView.Init()
-		}
-	}
 	if m.pendingKey != nil && m.sessions.ConsumeLoaded() {
 		km := *m.pendingKey
 		m.pendingKey = nil

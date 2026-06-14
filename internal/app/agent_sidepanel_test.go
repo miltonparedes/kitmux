@@ -137,6 +137,40 @@ func TestSidepanelEscCancelsLaunchPickerWithoutQuitting(t *testing.T) {
 	}
 }
 
+func TestSidepanelBackToSessionsReturnsToSidepanel(t *testing.T) {
+	m := New(ModeSidepanel)
+	m.view = viewWindows
+
+	model, cmd, handled := m.dispatchNavigation(messages.BackToSessionsMsg{})
+	updated := model.(Model)
+	if !handled {
+		t.Fatal("expected back navigation to be handled")
+	}
+	if updated.view != viewSidepanel {
+		t.Fatalf("expected viewSidepanel, got %v", updated.view)
+	}
+	if cmd == nil {
+		t.Fatal("expected sidepanel init command")
+	}
+}
+
+func TestSidepanelSwitchToSessionsInitializesSessions(t *testing.T) {
+	m := New(ModeSidepanel)
+	m.view = viewSidepanel
+
+	model, cmd, handled := m.handleSwitchView(messages.SwitchViewMsg{View: "sessions"})
+	updated := model.(Model)
+	if !handled {
+		t.Fatal("expected switch view to be handled")
+	}
+	if updated.view != viewSessions {
+		t.Fatalf("expected viewSessions, got %v", updated.view)
+	}
+	if cmd == nil {
+		t.Fatal("expected sessions init command")
+	}
+}
+
 type launchCalls struct {
 	sent             string
 	split            string
