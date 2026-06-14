@@ -87,6 +87,18 @@ func CurrentPanePath() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+func CurrentClientWidth() (int, error) {
+	out, err := exec.Command("tmux", "display-message", "-p", "#{client_width}").Output()
+	if err != nil {
+		return 0, fmt.Errorf("display-message client width: %w", err)
+	}
+	width, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		return 0, fmt.Errorf("parse client width: %w", err)
+	}
+	return width, nil
+}
+
 // HasSession returns true if a session with the given name exists.
 func HasSession(name string) bool {
 	return exec.Command("tmux", "has-session", "-t", name).Run() == nil
@@ -167,9 +179,52 @@ func NewWindowInSession(session, name, dir, command string) error {
 	return exec.Command("tmux", args...).Run()
 }
 
+func NewWindowInSessionPaneID(session, name, dir, command string) (string, error) {
+	args := []string{
+		"new-window", "-d",
+		"-P", "-F", "#{pane_id}",
+		"-t", session + ":",
+	}
+	if name != "" {
+		args = append(args, "-n", name)
+	}
+	if dir != "" {
+		args = append(args, "-c", dir)
+	}
+	if command != "" {
+		args = append(args, command)
+	}
+	out, err := exec.Command("tmux", args...).Output()
+	if err != nil {
+		return "", fmt.Errorf("new-window: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 func SplitWindowInDir(targetPane, dir, command string) (string, error) {
 	args := []string{
 		"split-window", "-h",
+		"-P", "-F", "#{pane_id}",
+	}
+	if targetPane != "" {
+		args = append(args, "-t", targetPane)
+	}
+	if dir != "" {
+		args = append(args, "-c", dir)
+	}
+	args = append(args, command)
+
+	out, err := exec.Command("tmux", args...).Output()
+	if err != nil {
+		return "", fmt.Errorf("split-window: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func SplitWindowInDirPercent(targetPane, dir, command string, percent int) (string, error) {
+	args := []string{
+		"split-window", "-h",
+		"-p", strconv.Itoa(percent),
 		"-P", "-F", "#{pane_id}",
 	}
 	if targetPane != "" {

@@ -61,6 +61,7 @@ kitmux sessions     # session tree
 kitmux workspaces   # project dashboard
 kitmux worktrees    # git worktree manager
 kitmux agents       # coding agent launcher
+kitmux sidepanel    # agent sidecar panel
 kitmux windows      # windows in the current session
 kitmux commands     # list command IDs
 kitmux run <id>     # run a palette command directly
@@ -129,6 +130,28 @@ Optional environment variables:
 | `KITMUX_AB_CLAUDE_TEMPLATE` | `claude {prompt}` | Command template for Claude |
 | `KITMUX_AB_PLAN_PREFIX` | `/plan ` | Prefix when plan mode is enabled |
 | `KITMUX_AB_BASE_BRANCH` | `main` | Base branch for A/B worktrees |
+
+## Agent Sidepanel
+
+`kitmux sidepanel` is a compact sidecar panel for agent-heavy tmux layouts. Its
+summary view shows progress, branch details, changes, artifacts, sources,
+project file/line stats, quick agent launch targets, and actions for existing
+kitmux tools.
+
+When launching an agent into the current pane, kitmux can open the agent on the
+left and Sidepanel on the right. Tool actions such as lazygit and Lumen Diff run
+inside the Sidepanel pane so the agent stays visible. Agent actions send the
+selected agent command to the neighboring agent pane, and opening the local
+editor keeps Sidepanel alive.
+
+Optional environment variables:
+
+| Variable | Default | Description |
+| --- | --- | --- |
+| `KITMUX_AGENT_SIDEPANEL` | `auto` | `auto`, `always`, or `off` |
+| `KITMUX_AGENT_SIDEPANEL_MIN_WIDTH` | `160` | Minimum tmux client width for `auto` |
+| `KITMUX_AGENT_SIDEPANEL_RATIO` | `30` | Width percentage for the Sidepanel pane |
+| `KITMUX_SIDEPANEL_COMMAND` | `kitmux sidepanel` | Command used to start the sidecar pane |
 
 ## Local Editor Bridge
 

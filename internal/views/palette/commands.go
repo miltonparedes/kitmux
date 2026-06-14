@@ -13,12 +13,18 @@ type Command struct {
 
 // IsValidCommand returns true if the given ID matches a registered command.
 func IsValidCommand(id string) bool {
+	_, ok := FindCommand(id)
+	return ok
+}
+
+// FindCommand returns a registered command by ID.
+func FindCommand(id string) (Command, bool) {
 	for _, cmd := range DefaultCommands() {
 		if cmd.ID == id {
-			return true
+			return cmd, true
 		}
 	}
-	return false
+	return Command{}, false
 }
 
 // DefaultCommands returns the built-in command registry.
@@ -102,6 +108,24 @@ func DefaultCommands() []Command {
 
 		// Agent
 		{
+			ID:          "launch_droid",
+			Title:       "Launch Droid",
+			Description: "Start Droid in the current pane",
+			Category:    "Agent",
+		},
+		{
+			ID:          "launch_codex_cloud",
+			Title:       "Launch Codex Cloud",
+			Description: "Browse Codex Cloud tasks in the current pane",
+			Category:    "Agent",
+		},
+		{
+			ID:          "launch_codex",
+			Title:       "Launch Codex CLI",
+			Description: "Start Codex CLI in the current pane",
+			Category:    "Agent",
+		},
+		{
 			ID:          "launch_claude",
 			Title:       "Launch Claude Code",
 			Description: "Start Claude Code in the current pane",
@@ -111,12 +135,6 @@ func DefaultCommands() []Command {
 			ID:          "launch_gemini",
 			Title:       "Launch Gemini CLI",
 			Description: "Start Gemini CLI in the current pane",
-			Category:    "Agent",
-		},
-		{
-			ID:          "launch_codex",
-			Title:       "Launch Codex CLI",
-			Description: "Start Codex CLI in the current pane",
 			Category:    "Agent",
 		},
 		{
@@ -177,6 +195,12 @@ func DefaultCommands() []Command {
 			ID:          "view_agents",
 			Title:       "Agents View",
 			Description: "Switch to agents view",
+			Category:    "View",
+		},
+		{
+			ID:          "view_sidepanel",
+			Title:       "Sidepanel",
+			Description: "Open the agent sidepanel",
 			Category:    "View",
 		},
 	}

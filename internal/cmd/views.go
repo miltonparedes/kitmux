@@ -21,6 +21,7 @@ var views = []viewDef{
 	{"agents", []string{"a"}, "Agent launcher", app.ModeAgents},
 	{"windows", []string{"w"}, "Window list for current session", app.ModeWindows},
 	{"workspaces", []string{"o"}, "Workspace manager", app.ModeWorkspaces},
+	{"sidepanel", nil, "Agent sidepanel", app.ModeSidepanel},
 }
 
 func addViewCommands(parent *cobra.Command) {
