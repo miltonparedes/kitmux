@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
@@ -24,6 +25,9 @@ type Row struct {
 	Kind        RowKind
 	AgentID     string
 	AgentName   string
+	AgentSymbol string
+	AgentState  string
+	Title       string
 	SessionName string
 	WindowIndex int
 	PaneIndex   int
@@ -33,26 +37,31 @@ type Row struct {
 }
 
 type Model struct {
-	rows       []Row
-	agents     []agents.Agent
-	cursor     int
-	scroll     int
-	height     int
-	width      int
-	picking    bool
-	agentIndex int
+	rows         []Row
+	agents       []agents.Agent
+	cursor       int
+	scroll       int
+	height       int
+	width        int
+	picking      bool
+	agentIndex   int
+	spinnerFrame int
 }
 
 type loadedMsg struct {
 	rows []Row
 }
 
+type tickMsg struct{}
+
+const refreshEveryFrames = 6
+
 func New() Model {
 	return Model{agents: agents.DefaultAgents()}
 }
 
 func (m Model) Init() tea.Cmd {
-	return loadCmd()
+	return tea.Batch(loadCmd(), tickCmd())
 }
 
 func (m *Model) SetSize(w, h int) {
@@ -70,6 +79,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		m.rows = msg.rows
 		m.clampCursor()
 		return m, nil
+	case tickMsg:
+		m.spinnerFrame++
+		if m.spinnerFrame%refreshEveryFrames == 0 {
+			return m, tea.Batch(tickCmd(), loadCmd())
+		}
+		return m, tickCmd()
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
 	case tea.KeyMsg:
@@ -161,7 +176,7 @@ func (m Model) handleAction(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	case "r":
 		return m, loadCmd(), true
-	case "esc":
+	case "esc", "q":
 		return m, tea.Quit, true
 	}
 	return m, nil, false
@@ -241,15 +256,25 @@ func loadCmd() tea.Cmd {
 func buildRows(sessions []tmux.Session, panes []tmux.Pane) []Row {
 	threadSessions := tmux.ThreadSessions(sessions)
 	threadSet := make(map[string]struct{}, len(threadSessions))
+	panesBySession := firstPaneBySession(panes)
 	rows := make([]Row, 0, len(threadSessions)+len(panes))
 	for _, session := range threadSessions {
+		agentName, agentSymbol := agentDisplayParts(session.AgentID)
+		pane := panesBySession[session.Name]
+		path := session.Path
+		if path == "" {
+			path = pane.Path
+		}
 		threadSet[session.Name] = struct{}{}
 		rows = append(rows, Row{
 			Kind:        RowHeadless,
 			AgentID:     session.AgentID,
-			AgentName:   agentName(session.AgentID),
+			AgentName:   agentName,
+			AgentSymbol: agentSymbol,
+			AgentState:  rowAgentState(pane.AgentState, session.AgentState),
+			Title:       pane.Title,
 			SessionName: session.Name,
-			Path:        session.Path,
+			Path:        path,
 			Attached:    session.Attached,
 			Activity:    session.Activity,
 		})
@@ -267,7 +292,10 @@ func buildRows(sessions []tmux.Session, panes []tmux.Pane) []Row {
 		rows = append(rows, Row{
 			Kind:        RowEphemeral,
 			AgentID:     agent.ID,
-			AgentName:   agent.DisplayName(),
+			AgentName:   agent.Name,
+			AgentSymbol: agent.Symbol,
+			AgentState:  normalizeAgentState(pane.AgentState),
+			Title:       pane.Title,
 			SessionName: pane.SessionName,
 			WindowIndex: pane.WindowIndex,
 			PaneIndex:   pane.PaneIndex,
@@ -287,14 +315,50 @@ func buildRows(sessions []tmux.Session, panes []tmux.Pane) []Row {
 	return rows
 }
 
-func agentName(agentID string) string {
+func firstPaneBySession(panes []tmux.Pane) map[string]tmux.Pane {
+	bySession := make(map[string]tmux.Pane, len(panes))
+	for _, pane := range panes {
+		if _, ok := bySession[pane.SessionName]; ok {
+			continue
+		}
+		bySession[pane.SessionName] = pane
+	}
+	return bySession
+}
+
+func agentDisplayParts(agentID string) (string, string) {
 	if agent, ok := agents.Find(agentID); ok {
-		return agent.DisplayName()
+		return agent.Name, agent.Symbol
 	}
 	if agentID == "" {
-		return "Agent"
+		return "Agent", ""
 	}
-	return agentID
+	return agentID, ""
+}
+
+func normalizeAgentState(state string) string {
+	switch state {
+	case "working", "input", "idle":
+		return state
+	default:
+		return "idle"
+	}
+}
+
+func rowAgentState(states ...string) string {
+	for _, state := range states {
+		switch state {
+		case "working", "input", "idle":
+			return state
+		}
+	}
+	return "idle"
+}
+
+func tickCmd() tea.Cmd {
+	return tea.Tick(140*time.Millisecond, func(time.Time) tea.Msg {
+		return tickMsg{}
+	})
 }
 
 func openRowCmd(row Row) tea.Cmd {

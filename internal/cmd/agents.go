@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/miltonparedes/kitmux/internal/agenthooks"
 	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/agentthread"
 )
@@ -41,6 +43,9 @@ func agentCmd(agent agents.Agent) *cobra.Command {
 			if !ok {
 				return fmt.Errorf("unknown mode %q for %s", modeID, agent.ID)
 			}
+			if err := installLaunchHooks(agent.ID); err != nil {
+				return err
+			}
 			if headless {
 				return agentthread.EnsureAndAttach(agentthread.Spec{
 					AgentID: agent.ID,
@@ -57,6 +62,13 @@ func agentCmd(agent agents.Agent) *cobra.Command {
 	cmd.Flags().StringVar(&dir, "dir", "", "working directory (defaults to current directory)")
 	cmd.Flags().StringVar(&name, "name", "", "headless session name (defaults to agent-project)")
 	return cmd
+}
+
+func installLaunchHooks(agentID string) error {
+	if _, err := agenthooks.Install(agentID, ""); err != nil && !errors.Is(err, agenthooks.ErrUnsupportedAgent) {
+		return err
+	}
+	return nil
 }
 
 func execShell(command, dir string) error {

@@ -71,6 +71,9 @@ func TestEnsureCreatesMissingThread(t *testing.T) {
 	if !contains(calls, "session:@kitmux_initial_title=⛬ Droid · app") {
 		t.Fatalf("missing initial title option: %#v", calls)
 	}
+	if !contains(calls, "session:@kitmux_agent_state=idle") {
+		t.Fatalf("missing initial agent state option: %#v", calls)
+	}
 	if !contains(calls, `hook:alert-bell=`+bellHookCommand()) {
 		t.Fatalf("missing alert-bell hook: %#v", calls)
 	}

@@ -87,7 +87,7 @@ func (m Model) writeRows(b *strings.Builder, viewHeight int) {
 func (m Model) writeRow(b *strings.Builder, i int) {
 	row := m.rows[i]
 	selected := i == m.cursor
-	label := row.AgentName
+	label := rowLabel(row, m.spinnerFrame)
 	if row.SessionName != "" {
 		label += " " + theme.TreeMeta.Render(row.SessionName)
 	}
@@ -121,6 +121,37 @@ func (m Model) writeRow(b *strings.Builder, i int) {
 	}
 	b.WriteString(" " + badge)
 }
+
+func rowLabel(row Row, spinnerFrame int) string {
+	title := row.Title
+	if title == "" {
+		title = row.AgentName
+	}
+	if title == "" {
+		title = row.AgentID
+	}
+	icon := rowIcon(row, spinnerFrame)
+	if icon == "" {
+		return title
+	}
+	if row.AgentState == "idle" && (title == icon || strings.HasPrefix(title, icon+" ")) {
+		return title
+	}
+	return icon + " " + title
+}
+
+func rowIcon(row Row, spinnerFrame int) string {
+	switch row.AgentState {
+	case "working":
+		return spinnerFrames[spinnerFrame%len(spinnerFrames)]
+	case "input":
+		return "⏎"
+	default:
+		return row.AgentSymbol
+	}
+}
+
+var spinnerFrames = []string{"⠂", "⠆", "⠤", "⠰", "⠠", "⠐"}
 
 func shortPath(path string) string {
 	if path == "" {

@@ -17,6 +17,7 @@ func ListSessions() ([]Session, error) {
 		"#{session_activity}",
 		"#{@kitmux_thread}",
 		"#{@kitmux_agent}",
+		"#{@kitmux_agent_state}",
 	}, "\t")
 	out, err := exec.Command("tmux", "list-sessions", "-F",
 		format).Output()
@@ -28,7 +29,7 @@ func ListSessions() ([]Session, error) {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 7)
+		parts := strings.SplitN(line, "\t", 8)
 		if len(parts) < 3 {
 			continue
 		}
@@ -42,13 +43,14 @@ func ListSessions() ([]Session, error) {
 			activity, _ = strconv.ParseInt(parts[4], 10, 64)
 		}
 		sessions = append(sessions, Session{
-			Name:     parts[0],
-			Windows:  wins,
-			Attached: parts[2] == "1",
-			Path:     path,
-			Activity: activity,
-			Thread:   len(parts) >= 6 && parts[5] == "1",
-			AgentID:  sessionAgentID(parts),
+			Name:       parts[0],
+			Windows:    wins,
+			Attached:   parts[2] == "1",
+			Path:       path,
+			Activity:   activity,
+			Thread:     len(parts) >= 6 && parts[5] == "1",
+			AgentID:    sessionAgentID(parts),
+			AgentState: sessionAgentState(parts),
 		})
 	}
 	return sessions, nil
@@ -59,6 +61,13 @@ func sessionAgentID(parts []string) string {
 		return ""
 	}
 	return parts[6]
+}
+
+func sessionAgentState(parts []string) string {
+	if len(parts) < 8 {
+		return ""
+	}
+	return parts[7]
 }
 
 func NormalSessions(sessions []Session) []Session {
@@ -131,6 +140,30 @@ func CurrentSession() (string, error) {
 	return strings.TrimSpace(string(out)), nil
 }
 
+func CurrentThreadContext() (ThreadContext, error) {
+	format := strings.Join([]string{
+		"#{session_name}",
+		"#{@kitmux_thread}",
+		"#{@kitmux_agent}",
+	}, "\t")
+	out, err := exec.Command("tmux", "display-message", "-p", format).Output()
+	if err != nil {
+		return ThreadContext{}, fmt.Errorf("display-message thread context: %w", err)
+	}
+	parts := strings.SplitN(strings.TrimSpace(string(out)), "\t", 3)
+	if len(parts) < 1 || parts[0] == "" {
+		return ThreadContext{}, fmt.Errorf("display-message thread context: empty session")
+	}
+	ctx := ThreadContext{SessionName: parts[0]}
+	if len(parts) >= 2 {
+		ctx.Thread = parts[1] == "1"
+	}
+	if len(parts) >= 3 {
+		ctx.AgentID = parts[2]
+	}
+	return ctx, nil
+}
+
 func CurrentPanePath() (string, error) {
 	out, err := exec.Command("tmux", "display-message", "-p", "#{pane_current_path}").Output()
 	if err != nil {
@@ -159,6 +192,14 @@ func HasSession(name string) bool {
 // SwitchClient switches the current tmux client to the given target.
 func SwitchClient(target string) error {
 	return exec.Command("tmux", "switch-client", "-t", target).Run()
+}
+
+func SelectWindow(target string) error {
+	return exec.Command("tmux", "select-window", "-t", target).Run()
+}
+
+func SelectPane(target string) error {
+	return exec.Command("tmux", "select-pane", "-t", target).Run()
 }
 
 // KillSession kills the named session.
@@ -209,12 +250,20 @@ func SetSessionOption(target, option, value string) error {
 	return exec.Command("tmux", "set-option", "-t", target, option, value).Run()
 }
 
+func SetCurrentSessionOption(option, value string) error {
+	return exec.Command("tmux", "set-option", "-q", option, value).Run()
+}
+
 func SetWindowOption(target, option, value string) error {
 	return exec.Command("tmux", "set-window-option", "-t", target, option, value).Run()
 }
 
 func SetPaneOption(target, option, value string) error {
 	return exec.Command("tmux", "set-option", "-p", "-t", target, option, value).Run()
+}
+
+func SetCurrentPaneOption(option, value string) error {
+	return exec.Command("tmux", "set-option", "-p", "-q", option, value).Run()
 }
 
 func SetPaneTitle(target, title string) error {
@@ -339,8 +388,17 @@ func SelectLayout(target, layout string) error {
 
 // ListPanes returns all panes across all sessions with their running commands.
 func ListPanes() ([]Pane, error) {
-	out, err := exec.Command("tmux", "list-panes", "-a", "-F",
-		"#{session_name}\t#{window_index}\t#{pane_index}\t#{pane_current_command}\t#{pane_pid}\t#{pane_current_path}").Output()
+	format := strings.Join([]string{
+		"#{session_name}",
+		"#{window_index}",
+		"#{pane_index}",
+		"#{pane_current_command}",
+		"#{pane_pid}",
+		"#{pane_current_path}",
+		"#{pane_title}",
+		"#{@kitmux_agent_state}",
+	}, "\t")
+	out, err := exec.Command("tmux", "list-panes", "-a", "-F", format).Output()
 	if err != nil {
 		return nil, fmt.Errorf("list-panes: %w", err)
 	}
@@ -349,7 +407,7 @@ func ListPanes() ([]Pane, error) {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 6)
+		parts := strings.SplitN(line, "\t", 8)
 		if len(parts) < 4 {
 			continue
 		}
@@ -363,6 +421,14 @@ func ListPanes() ([]Pane, error) {
 		if len(parts) >= 6 {
 			path = parts[5]
 		}
+		var title string
+		if len(parts) >= 7 {
+			title = parts[6]
+		}
+		var agentState string
+		if len(parts) >= 8 {
+			agentState = parts[7]
+		}
 		panes = append(panes, Pane{
 			SessionName: parts[0],
 			WindowIndex: winIdx,
@@ -370,6 +436,8 @@ func ListPanes() ([]Pane, error) {
 			Command:     parts[3],
 			PID:         pid,
 			Path:        path,
+			Title:       title,
+			AgentState:  agentState,
 		})
 	}
 	return panes, nil

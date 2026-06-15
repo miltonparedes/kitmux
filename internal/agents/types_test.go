@@ -47,4 +47,12 @@ func TestAgentDisplayNameUsesSymbol(t *testing.T) {
 	if a.DisplayName() != "⛬ Droid" {
 		t.Fatalf("DisplayName() = %q", a.DisplayName())
 	}
+
+	claude, ok := Find("claude")
+	if !ok {
+		t.Fatal("expected claude agent")
+	}
+	if claude.DisplayName() != "✳ Claude Code" {
+		t.Fatalf("Claude DisplayName() = %q", claude.DisplayName())
+	}
 }

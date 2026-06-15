@@ -202,6 +202,11 @@ func ApplySupport(spec SupportSpec, ops Ops) error {
 			return fmt.Errorf("set session option %s: %w", opt.name, err)
 		}
 	}
+	if spec.Created {
+		if err := ops.SetSessionOption(spec.SessionName, "@kitmux_agent_state", "idle"); err != nil {
+			return fmt.Errorf("set session option @kitmux_agent_state: %w", err)
+		}
+	}
 	if err := ops.SetWindowOption(spec.TargetPane, "allow-passthrough", "on"); err != nil {
 		return fmt.Errorf("set allow-passthrough: %w", err)
 	}
@@ -239,8 +244,7 @@ func agentName(agentID string) string {
 }
 
 func threadTitleFormat() string {
-	title := "#{?#{==:#{pane_title},#{host_short}},#{pane_current_command},#{pane_title}}"
-	return title + " - #{session_name}"
+	return "#{pane_title}"
 }
 
 const supportVersion = "1"

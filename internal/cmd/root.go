@@ -37,6 +37,7 @@ func newRootCmd() *cobra.Command {
 	addRunCommand(cmd)
 	addCommandsCommand(cmd)
 	addBridgeCommand(cmd)
+	addHookCommand(cmd)
 	addAgentCommands(cmd)
 
 	// Register each palette command ID as a hidden subcommand so that

@@ -48,6 +48,7 @@ var defaultAgents = []Agent{
 	{
 		ID:      "claude",
 		Name:    "Claude Code",
+		Symbol:  "✳",
 		Command: "claude",
 		Modes: []AgentMode{
 			{ID: "default", Name: "Default", Flags: ""},

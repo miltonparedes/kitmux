@@ -212,11 +212,9 @@ func (m Model) dispatchInput(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 func (m Model) dispatchNavigation(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case messages.SwitchSessionMsg:
-		_ = tmux.SwitchClient(msg.Name)
-		return m, tea.Quit, true
+		return m, openTmuxSessionCmd(msg.Name), true
 	case messages.SwitchWindowMsg:
-		_ = tmux.SwitchClient(msg.Target)
-		return m, tea.Quit, true
+		return m, openTmuxPaneCmd(msg.Target), true
 	case messages.DrillWindowsMsg:
 		m.view = viewWindows
 		return m, m.windows.LoadSession(msg.SessionName), true
