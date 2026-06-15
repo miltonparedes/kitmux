@@ -4,6 +4,7 @@ package agents
 type Agent struct {
 	ID      string
 	Name    string
+	Symbol  string
 	Command string
 	Modes   []AgentMode
 }
@@ -19,6 +20,7 @@ var defaultAgents = []Agent{
 	{
 		ID:      "droid",
 		Name:    "Droid",
+		Symbol:  "⛬",
 		Command: "droid",
 		Modes: []AgentMode{
 			{ID: "default", Name: "Default", Flags: ""},
@@ -123,4 +125,11 @@ func (a Agent) FullCommand(mode AgentMode) string {
 		return a.Command
 	}
 	return a.Command + " " + mode.Flags
+}
+
+func (a Agent) DisplayName() string {
+	if a.Symbol == "" {
+		return a.Name
+	}
+	return a.Symbol + " " + a.Name
 }

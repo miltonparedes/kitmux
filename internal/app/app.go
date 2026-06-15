@@ -19,6 +19,7 @@ import (
 	"github.com/miltonparedes/kitmux/internal/views/palette"
 	"github.com/miltonparedes/kitmux/internal/views/sessions"
 	sidepanelview "github.com/miltonparedes/kitmux/internal/views/sidepanel"
+	threadsview "github.com/miltonparedes/kitmux/internal/views/threads"
 	"github.com/miltonparedes/kitmux/internal/views/windows"
 	workspacesview "github.com/miltonparedes/kitmux/internal/views/workspaces"
 	"github.com/miltonparedes/kitmux/internal/views/worktrees"
@@ -37,6 +38,7 @@ const (
 	ModeRun                    // Execute a palette command directly
 	ModeWorkspaces             // Workspaces dashboard
 	ModeSidepanel              // Agent sidepanel
+	ModeThreads                // Agent threads
 )
 
 type activeView int
@@ -49,6 +51,7 @@ const (
 	viewAgentAB               // A/B launcher form
 	viewWorkspaces            // Workspaces dashboard
 	viewSidepanel             // Agent sidepanel
+	viewThreads               // Agent threads
 )
 
 type Model struct {
@@ -61,6 +64,7 @@ type Model struct {
 	agentABView    agentabview.Model
 	workspacesView workspacesview.Model
 	sidepanelView  sidepanelview.Model
+	threadsView    threadsview.Model
 	palette        palette.Model
 	paletteActive  bool
 	paletteReturn  bool        // return to palette after sub-action completes
@@ -84,6 +88,7 @@ func New(mode Mode, opts ...Option) Model {
 		agentABView:    agentabview.New(),
 		workspacesView: workspacesview.New(),
 		sidepanelView:  sidepanelview.New(),
+		threadsView:    threadsview.New(),
 		palette:        palette.New(),
 	}
 	for _, opt := range opts {
@@ -103,6 +108,8 @@ func New(mode Mode, opts ...Option) Model {
 		m.view = viewWorkspaces
 	case ModeSidepanel:
 		m.view = viewSidepanel
+	case ModeThreads:
+		m.view = viewThreads
 	}
 	return m
 }
@@ -138,6 +145,8 @@ func (m Model) Init() tea.Cmd {
 			return m.workspacesView.Init()
 		case viewSidepanel:
 			return m.sidepanelView.Init()
+		case viewThreads:
+			return m.threadsView.Init()
 		default:
 			return m.sessions.Init()
 		}
@@ -305,6 +314,7 @@ func (m Model) applyWindowSize(msg tea.WindowSizeMsg) Model {
 	m.agentABView.SetSize(m.width, m.height-1)
 	m.workspacesView.SetSize(m.width, m.height-1)
 	m.sidepanelView.SetSize(m.width, m.height-1)
+	m.threadsView.SetSize(m.width, m.height-1)
 	m.palette.SetSize(m.width, m.height)
 	return m
 }
@@ -345,6 +355,9 @@ func (m Model) handleSwitchView(msg messages.SwitchViewMsg) (tea.Model, tea.Cmd,
 	case "sidepanel":
 		m.view = viewSidepanel
 		return m, m.sidepanelView.Init(), true
+	case "threads":
+		m.view = viewThreads
+		return m, m.threadsView.Init(), true
 	}
 	return m, nil, true
 }
@@ -450,6 +463,9 @@ func (m Model) isEditing() bool {
 	if m.view == viewSidepanel && m.sidepanelView.IsEditing() {
 		return true
 	}
+	if m.view == viewThreads && m.threadsView.IsEditing() {
+		return true
+	}
 	return false
 }
 
@@ -499,6 +515,11 @@ func (m Model) handleEscKey(msg tea.KeyMsg, isEditing bool) (Model, tea.Cmd, boo
 		m.sidepanelView, cmd = m.sidepanelView.Update(msg)
 		return m, cmd, true
 	}
+	if m.view == viewThreads && m.threadsView.IsEditing() {
+		var cmd tea.Cmd
+		m.threadsView, cmd = m.threadsView.Update(msg)
+		return m, cmd, true
+	}
 	if m.paletteReturn && !isEditing {
 		return m, m.returnToPalette(), true
 	}
@@ -540,6 +561,8 @@ func (m Model) handleEscByView() (Model, tea.Cmd, bool) {
 		return m, nil, false
 	case viewSidepanel:
 		return m.escWithMode(ModeSidepanel)
+	case viewThreads:
+		return m.escWithMode(ModeThreads)
 	default:
 		if m.sessions.IsEditing() {
 			return m, nil, false
@@ -576,6 +599,8 @@ func (m Model) routeToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.workspacesView = model.(workspacesview.Model)
 	case viewSidepanel:
 		m.sidepanelView, cmd = m.sidepanelView.Update(msg)
+	case viewThreads:
+		m.threadsView, cmd = m.threadsView.Update(msg)
 	}
 	return m, cmd
 }
@@ -635,6 +660,8 @@ func (m Model) View() string {
 		return m.workspacesView.View()
 	case viewSidepanel:
 		return m.sidepanelView.View()
+	case viewThreads:
+		return m.threadsView.View()
 	default:
 		return m.sessions.View()
 	}
@@ -769,6 +796,9 @@ func (m Model) execViewCommand(id string) (tea.Model, tea.Cmd, bool) {
 	case "view_sidepanel":
 		m.view = viewSidepanel
 		return m, m.sidepanelView.Init(), true
+	case "view_threads":
+		m.view = viewThreads
+		return m, m.threadsView.Init(), true
 	}
 	return m, nil, false
 }

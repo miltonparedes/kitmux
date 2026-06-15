@@ -71,9 +71,9 @@ type LaunchAgentABMsg struct {
 
 type BackFromAgentABMsg struct{}
 
-// SwitchViewMsg switches between sessions/worktrees/agents views.
+// SwitchViewMsg switches between app views.
 type SwitchViewMsg struct {
-	View string // "sessions", "worktrees", "agents"
+	View string // "sessions", "worktrees", "agents", "threads"
 }
 
 // CreateSessionInDirMsg creates a new session in the given directory and switches to it.

@@ -9,8 +9,17 @@ import (
 
 // ListSessions returns all tmux sessions.
 func ListSessions() ([]Session, error) {
+	format := strings.Join([]string{
+		"#{session_name}",
+		"#{session_windows}",
+		"#{?session_attached,1,0}",
+		"#{session_path}",
+		"#{session_activity}",
+		"#{@kitmux_thread}",
+		"#{@kitmux_agent}",
+	}, "\t")
 	out, err := exec.Command("tmux", "list-sessions", "-F",
-		"#{session_name}\t#{session_windows}\t#{?session_attached,1,0}\t#{session_path}\t#{session_activity}").Output()
+		format).Output()
 	if err != nil {
 		return nil, fmt.Errorf("list-sessions: %w", err)
 	}
@@ -19,7 +28,7 @@ func ListSessions() ([]Session, error) {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 5)
+		parts := strings.SplitN(line, "\t", 7)
 		if len(parts) < 3 {
 			continue
 		}
@@ -38,9 +47,52 @@ func ListSessions() ([]Session, error) {
 			Attached: parts[2] == "1",
 			Path:     path,
 			Activity: activity,
+			Thread:   len(parts) >= 6 && parts[5] == "1",
+			AgentID:  sessionAgentID(parts),
 		})
 	}
 	return sessions, nil
+}
+
+func sessionAgentID(parts []string) string {
+	if len(parts) < 7 {
+		return ""
+	}
+	return parts[6]
+}
+
+func NormalSessions(sessions []Session) []Session {
+	if len(sessions) == 0 {
+		return sessions
+	}
+	out := make([]Session, 0, len(sessions))
+	for _, session := range sessions {
+		if !session.Thread {
+			out = append(out, session)
+		}
+	}
+	return out
+}
+
+func ThreadSessions(sessions []Session) []Session {
+	if len(sessions) == 0 {
+		return sessions
+	}
+	out := make([]Session, 0, len(sessions))
+	for _, session := range sessions {
+		if session.Thread {
+			out = append(out, session)
+		}
+	}
+	return out
+}
+
+func ListThreads() ([]Session, error) {
+	sessions, err := ListSessions()
+	if err != nil {
+		return nil, err
+	}
+	return ThreadSessions(sessions), nil
 }
 
 // ListWindows returns windows for a given session.
@@ -132,6 +184,45 @@ func NewSessionInDir(name, dir string) error {
 // NewSessionDetached creates a detached session with the given name.
 func NewSessionDetached(name string) error {
 	return exec.Command("tmux", "new-session", "-d", "-s", name).Run()
+}
+
+func NewSessionWithCommand(name, dir, command string) (string, error) {
+	args := []string{
+		"new-session", "-d",
+		"-P", "-F", "#{pane_id}",
+		"-s", name,
+	}
+	if dir != "" {
+		args = append(args, "-c", dir)
+	}
+	if command != "" {
+		args = append(args, command)
+	}
+	out, err := exec.Command("tmux", args...).Output()
+	if err != nil {
+		return "", fmt.Errorf("new-session: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func SetSessionOption(target, option, value string) error {
+	return exec.Command("tmux", "set-option", "-t", target, option, value).Run()
+}
+
+func SetWindowOption(target, option, value string) error {
+	return exec.Command("tmux", "set-window-option", "-t", target, option, value).Run()
+}
+
+func SetPaneOption(target, option, value string) error {
+	return exec.Command("tmux", "set-option", "-p", "-t", target, option, value).Run()
+}
+
+func SetPaneTitle(target, title string) error {
+	return exec.Command("tmux", "select-pane", "-t", target, "-T", title).Run()
+}
+
+func SetHook(target, hook, command string) error {
+	return exec.Command("tmux", "set-hook", "-t", target, hook, command).Run()
 }
 
 // SendKeys sends keystrokes to a tmux target pane.

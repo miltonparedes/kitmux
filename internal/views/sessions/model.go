@@ -99,6 +99,7 @@ func (m Model) loadSessions() tea.Msg {
 	if err != nil {
 		return sessionsLoadedMsg{}
 	}
+	sessions = tmux.NormalSessions(sessions)
 	snap := cache.Load()
 	repoRoots, repoRootsRefreshedAt := resolveRepoRootsIncremental(sessions, snap, time.Now())
 
@@ -124,7 +125,8 @@ func (m Model) loadSessionsCached() tea.Cmd {
 	// background refresh below, and survives restart. Fall back to the
 	// session-name-keyed legacy snapshot only when the shared cache is
 	// empty (first run after upgrade).
-	cachedStats := sharedStatsForSessions(snap.Sessions)
+	sessions := tmux.NormalSessions(snap.Sessions)
+	cachedStats := sharedStatsForSessions(sessions)
 	if len(cachedStats) == 0 && snap.StatsValid() {
 		cachedStats = make(map[string]sessionStats, len(snap.Stats))
 		for k, v := range snap.Stats {
@@ -134,7 +136,7 @@ func (m Model) loadSessionsCached() tea.Cmd {
 
 	return func() tea.Msg {
 		return cachedSnapshotMsg{
-			sessions:  snap.Sessions,
+			sessions:  sessions,
 			repoRoots: snap.RepoRoots,
 			stats:     cachedStats,
 		}
@@ -575,6 +577,7 @@ func (m Model) handleConfirm(msg tea.KeyMsg) (Model, tea.Cmd) {
 				_ = tmux.KillSession(name)
 				// Reload sessions from tmux after kill
 				sessions, _ := tmux.ListSessions()
+				sessions = tmux.NormalSessions(sessions)
 				repoRoots := resolveRepoRoots(sessions)
 				return sessionsLoadedMsg{sessions: sessions, repoRoots: repoRoots}
 			}

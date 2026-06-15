@@ -7,6 +7,8 @@ type Session struct {
 	Attached bool
 	Path     string // session working directory
 	Activity int64  // unix timestamp of last activity
+	Thread   bool   // true when managed by kitmux as an agent thread
+	AgentID  string // registered agent ID for kitmux-managed threads
 }
 
 // Window represents a tmux window within a session.

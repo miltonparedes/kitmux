@@ -38,3 +38,13 @@ func TestCommandMapKeepsFirstAgentForDuplicateCommands(t *testing.T) {
 		t.Fatal("expected droid to be detected as an agent command")
 	}
 }
+
+func TestAgentDisplayNameUsesSymbol(t *testing.T) {
+	a, ok := Find("droid")
+	if !ok {
+		t.Fatal("expected droid agent")
+	}
+	if a.DisplayName() != "⛬ Droid" {
+		t.Fatalf("DisplayName() = %q", a.DisplayName())
+	}
+}

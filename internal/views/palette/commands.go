@@ -203,5 +203,11 @@ func DefaultCommands() []Command {
 			Description: "Open the agent sidepanel",
 			Category:    "View",
 		},
+		{
+			ID:          "view_threads",
+			Title:       "Agent Threads",
+			Description: "Open the running agent thread list",
+			Category:    "View",
+		},
 	}
 }

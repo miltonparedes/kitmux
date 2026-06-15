@@ -27,6 +27,7 @@ func loadDataCmd(svc *wsdata.StatsService) tea.Cmd {
 // via refreshAllStatsCmd, which dispatches one goroutine per workspace.
 func loadInitialSnapshot(svc *wsdata.StatsService) tea.Msg {
 	sess, _ := tmux.ListSessions()
+	sess = tmux.NormalSessions(sess)
 	panes, _ := tmux.ListPanes()
 	projs := wsreg.LoadRegistry()
 
