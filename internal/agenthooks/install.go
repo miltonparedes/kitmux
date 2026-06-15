@@ -104,8 +104,27 @@ func installerForAgent(agentID string) (func(string) (Result, error), bool) {
 }
 
 func installDroid(home string) (Result, error) {
-	path := filepath.Join(home, ".factory", "hooks.json")
-	changed, err := installJSONHooks(path, []hookSpec{
+	hooks := droidHookSpecs()
+
+	// Standalone hooks.json (documented primary location for newer droid builds).
+	hooksPath := filepath.Join(home, ".factory", "hooks.json")
+	changedHooks, err := installJSONHooks(hooksPath, hooks)
+	if err != nil {
+		return Result{AgentID: "droid", Path: hooksPath, Changed: changedHooks}, err
+	}
+
+	// settings.json "hooks" key + enableHooks. Current droid builds load hooks from
+	// here and ignore the standalone hooks.json, so this is the operative location.
+	settingsPath := filepath.Join(home, ".factory", "settings.json")
+	changedSettings, err := installDroidSettingsHooks(settingsPath, hooks)
+	if err != nil {
+		return Result{AgentID: "droid", Path: settingsPath, Changed: changedHooks || changedSettings}, err
+	}
+	return Result{AgentID: "droid", Path: settingsPath, Changed: changedHooks || changedSettings}, nil
+}
+
+func droidHookSpecs() []hookSpec {
+	return []hookSpec{
 		eventHook("droid", "SessionStart", "", "session-start", "idle", false),
 		eventHook("droid", "UserPromptSubmit", "", "user-prompt-submit", "working", false),
 		eventHook("droid", "PreToolUse", "*", "pre-tool-use", "working", false),
@@ -113,8 +132,24 @@ func installDroid(home string) (Result, error) {
 		eventHook("droid", "Notification", "", "notification", "input", true),
 		eventHook("droid", "Stop", "", "stop", "idle", true),
 		eventHook("droid", "SessionEnd", "", "session-end", "idle", false),
-	})
-	return Result{AgentID: "droid", Path: path, Changed: changed}, err
+	}
+}
+
+func installDroidSettingsHooks(path string, hooks []hookSpec) (bool, error) {
+	doc, err := readJSON(path)
+	if err != nil {
+		return false, err
+	}
+	changed := setBool(doc, "enableHooks", true)
+	if addCommandHooks(doc, hooks) {
+		changed = true
+	}
+	if changed {
+		if err := writeJSON(path, doc); err != nil {
+			return false, err
+		}
+	}
+	return changed, nil
 }
 
 func installClaude(home string) (Result, error) {
@@ -233,6 +268,14 @@ func writeJSON(path string, doc map[string]any) error {
 
 func setString(doc map[string]any, key, value string) bool {
 	if got, ok := doc[key].(string); ok && got == value {
+		return false
+	}
+	doc[key] = value
+	return true
+}
+
+func setBool(doc map[string]any, key string, value bool) bool {
+	if got, ok := doc[key].(bool); ok && got == value {
 		return false
 	}
 	doc[key] = value

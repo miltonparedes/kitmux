@@ -60,14 +60,15 @@ type SpinnerTarget struct {
 }
 
 type hookInput struct {
-	HookEventName string         `json:"hook_event_name"`
-	ToolName      string         `json:"tool_name"`
-	Message       string         `json:"message"`
-	Reason        string         `json:"reason"`
-	Trigger       string         `json:"trigger"`
-	Source        string         `json:"source"`
-	EventType     string         `json:"type"`
-	ToolInput     map[string]any `json:"tool_input"`
+	HookEventName    string         `json:"hook_event_name"`
+	ToolName         string         `json:"tool_name"`
+	Message          string         `json:"message"`
+	Reason           string         `json:"reason"`
+	Trigger          string         `json:"trigger"`
+	Source           string         `json:"source"`
+	EventType        string         `json:"type"`
+	NotificationType string         `json:"notification_type"`
+	ToolInput        map[string]any `json:"tool_input"`
 }
 
 func DefaultStateOps() StateOps {
@@ -97,8 +98,9 @@ func RunAgentEvent(event AgentEvent, in io.Reader, out io.Writer, ops StateOps) 
 	ops = ops.withDefaults()
 
 	var input hookInput
+	var rawInput []byte
 	if event.StdinJSON && in != nil {
-		input = readHookInput(in)
+		input, rawInput = readHookInputRaw(in)
 	}
 	ctx := targetContext()
 	agentID := firstNonEmpty(event.Agent, ctx.AgentID)
@@ -107,6 +109,8 @@ func RunAgentEvent(event AgentEvent, in io.Reader, out io.Writer, ops StateOps) 
 	if err != nil {
 		return err
 	}
+
+	logHookEvent(event, eventName, state, ctx, rawInput)
 
 	detail := sanitizeDetail(firstNonEmpty(event.Detail, deriveDetail(input)))
 	updated := fmt.Sprintf("%d", ops.Now().UnixMilli())
@@ -192,18 +196,49 @@ func setSessionOptions(ops StateOps, sessionName, state, eventName, detail, upda
 	_ = set(agentTitleDisplayOption, displayTitle)
 }
 
-func readHookInput(in io.Reader) hookInput {
-	var input hookInput
-	if err := json.NewDecoder(in).Decode(&input); err != nil {
-		return hookInput{}
+func readHookInputRaw(in io.Reader) (hookInput, []byte) {
+	data, err := io.ReadAll(in)
+	if err != nil {
+		return hookInput{}, nil
 	}
-	return input
+	var input hookInput
+	if err := json.Unmarshal(data, &input); err != nil {
+		return hookInput{}, data
+	}
+	return input, data
+}
+
+func logHookEvent(event AgentEvent, eventName, state string, ctx tmux.ThreadContext, raw []byte) {
+	path := os.Getenv("KITMUX_HOOK_LOG")
+	if path == "" {
+		return
+	}
+	// #nosec G304 G703 -- path comes from the user-controlled KITMUX_HOOK_LOG debug env var.
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o600)
+	if err != nil {
+		return
+	}
+	defer func() { _ = f.Close() }()
+	rawLine := strings.NewReplacer("\n", " ", "\r", " ", "\t", " ").Replace(string(raw))
+	if len(rawLine) > 600 {
+		rawLine = rawLine[:600]
+	}
+	_, _ = fmt.Fprintf(f,
+		"%s agent=%s flagEvent=%q flagState=%q -> event=%q state=%q pane=%q session=%q thread=%t raw=%s\n",
+		time.Now().Format("15:04:05.000"), event.Agent, event.Event, event.State,
+		eventName, state, ctx.PaneID, ctx.SessionName, ctx.Thread, rawLine,
+	)
 }
 
 func deriveState(explicit, eventName string, input hookInput) string {
 	key := eventKey(eventName)
 	toolKey := eventKey(input.ToolName)
-	if toolKey == "askuserquestion" || key == "elicitation" {
+	if key == "elicitation" {
+		return "input"
+	}
+	// AskUser (droid) / AskUserQuestion (claude) blocks waiting for the user, so the
+	// PreToolUse phase is an attention state. PostToolUse means the user answered.
+	if strings.HasPrefix(toolKey, "askuser") && !strings.HasPrefix(key, "posttool") {
 		return "input"
 	}
 	if key == "elicitationresult" {
@@ -216,10 +251,7 @@ func deriveState(explicit, eventName string, input hookInput) string {
 		return "error"
 	}
 	if key == "notification" {
-		if strings.Contains(strings.ToLower(input.Message), "permission") {
-			return "permission"
-		}
-		return "input"
+		return notificationState(input)
 	}
 	if explicit != "" {
 		return explicit
@@ -232,6 +264,15 @@ func deriveState(explicit, eventName string, input hookInput) string {
 	default:
 		return "idle"
 	}
+}
+
+func notificationState(input hookInput) string {
+	notifType := eventKey(input.NotificationType)
+	if notifType == "permissionprompt" || notifType == "permissionrequest" ||
+		strings.Contains(strings.ToLower(input.Message), "permission") {
+		return "permission"
+	}
+	return "input"
 }
 
 func deriveDetail(input hookInput) string {
@@ -451,16 +492,36 @@ func RunSpinner(target SpinnerTarget) error {
 	for {
 		select {
 		case <-deadline:
+			restoreStaticPrefix(target)
 			return nil
 		case <-ticker.C:
 			state, token, err := readSpinnerState(target.PaneID)
-			if err != nil || state != "working" || token != target.Token {
+			if err != nil {
+				return nil
+			}
+			if state != "working" {
+				restoreStaticPrefix(target)
+				return nil
+			}
+			if token != target.Token {
 				return nil
 			}
 			frame++
 			setSpinnerPrefix(target.PaneID, target.SessionName, SpinnerFrames[frame%len(SpinnerFrames)])
 		}
 	}
+}
+
+func restoreStaticPrefix(target SpinnerTarget) {
+	state, _, err := readSpinnerState(target.PaneID)
+	if err != nil || state == "working" {
+		return
+	}
+	paneTitle := ""
+	if out, err := exec.Command("tmux", "display-message", "-p", "-t", target.PaneID, "#{pane_title}").Output(); err == nil {
+		paneTitle = strings.TrimSpace(string(out))
+	}
+	setSpinnerPrefix(target.PaneID, target.SessionName, titlePrefix(state, target.AgentID, paneTitle))
 }
 
 func readSpinnerState(paneID string) (string, string, error) {

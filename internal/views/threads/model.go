@@ -427,7 +427,7 @@ func newHeadlessCmd(agent agents.Agent) tea.Cmd {
 				dir = cwd
 			}
 		}
-		resolved, err := agentthread.Ensure(agentthread.Spec{AgentID: agent.ID, Dir: dir}, agentthread.DefaultOps())
+		resolved, err := agentthread.Create(agentthread.Spec{AgentID: agent.ID, Dir: dir}, agentthread.DefaultOps())
 		if err != nil {
 			return loadedMsg{}
 		}

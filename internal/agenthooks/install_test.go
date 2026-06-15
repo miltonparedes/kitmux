@@ -170,6 +170,37 @@ func TestInstallAllUpgradesUnwrappedAgentEventHooks(t *testing.T) {
 	}
 }
 
+func TestInstallDroidEnablesAndWritesSettingsHooks(t *testing.T) {
+	home := t.TempDir()
+	if _, err := Install("droid", home); err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	settingsPath := filepath.Join(home, ".factory", "settings.json")
+	settings := readJSONFile(t, settingsPath)
+	if settings["enableHooks"] != true {
+		t.Fatalf("enableHooks = %#v", settings["enableHooks"])
+	}
+	assertJSONHook(t, settingsPath, "UserPromptSubmit", agentEventCommand("droid", "user-prompt-submit", "working", false, true))
+	assertJSONHook(t, settingsPath, "Stop", agentEventCommand("droid", "stop", "idle", true, true))
+	assertJSONHook(t, settingsPath, "Notification", agentEventCommand("droid", "notification", "input", true, true))
+
+	// Idempotent: existing settings keys are preserved and no spurious change.
+	settings["customKey"] = "keep-me"
+	if err := writeJSON(settingsPath, settings); err != nil {
+		t.Fatalf("rewrite settings: %v", err)
+	}
+	result, err := Install("droid", home)
+	if err != nil {
+		t.Fatalf("second Install() error = %v", err)
+	}
+	if result.Changed {
+		t.Fatalf("droid install changed on second run")
+	}
+	if readJSONFile(t, settingsPath)["customKey"] != "keep-me" {
+		t.Fatalf("existing settings key was dropped")
+	}
+}
+
 func TestInstallWritesOnlyRequestedAgentHooks(t *testing.T) {
 	home := t.TempDir()
 

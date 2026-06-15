@@ -139,6 +139,48 @@ func Ensure(spec Spec, ops Ops) (Resolved, error) {
 	return resolved, nil
 }
 
+// Create always starts a new thread, picking a unique session name so multiple
+// agents of the same kind can run in the same project.
+func Create(spec Spec, ops Ops) (Resolved, error) {
+	resolved, err := Resolve(spec)
+	if err != nil {
+		return Resolved{}, err
+	}
+
+	ops = ops.withDefaults()
+	resolved.SessionName = uniqueSessionName(resolved.SessionName, ops.HasSession)
+	paneID, err := ops.NewSessionWithCommand(
+		resolved.SessionName,
+		resolved.Dir,
+		agentenv.WrapTmuxCommand(resolved.Agent.ID, resolved.SessionName, resolved.Agent.FullCommand(resolved.Mode), true),
+	)
+	if err != nil {
+		return Resolved{}, err
+	}
+	if err := ApplySupport(SupportSpec{
+		SessionName:  resolved.SessionName,
+		TargetPane:   paneID,
+		AgentID:      resolved.Agent.ID,
+		InitialTitle: resolved.Title,
+		Created:      true,
+	}, ops); err != nil {
+		return Resolved{}, err
+	}
+	return resolved, nil
+}
+
+func uniqueSessionName(base string, has func(string) bool) string {
+	if has == nil || !has(base) {
+		return base
+	}
+	for i := 2; ; i++ {
+		candidate := fmt.Sprintf("%s-%d", base, i)
+		if !has(candidate) {
+			return candidate
+		}
+	}
+}
+
 type SupportSpec struct {
 	SessionName  string
 	TargetPane   string

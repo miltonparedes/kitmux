@@ -109,6 +109,30 @@ func TestEnsureSkipsExistingThreadCreate(t *testing.T) {
 	}
 }
 
+func TestCreateGeneratesUniqueName(t *testing.T) {
+	existing := map[string]bool{"droid-app": true}
+	var created string
+	ops := Ops{
+		HasSession:            func(name string) bool { return existing[name] },
+		NewSessionWithCommand: func(name, _, _ string) (string, error) { created = name; return "%2", nil },
+		SetSessionOption:      func(_, _, _ string) error { return nil },
+		SetWindowOption:       func(_, _, _ string) error { return nil },
+		SetPaneTitle:          func(_, _ string) error { return nil },
+		SetHook:               func(_, _, _ string) error { return nil },
+	}
+
+	resolved, err := Create(Spec{AgentID: "droid", Dir: "/tmp/app"}, ops)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if resolved.SessionName != "droid-app-2" {
+		t.Fatalf("SessionName = %q", resolved.SessionName)
+	}
+	if created != "droid-app-2" {
+		t.Fatalf("created session = %q", created)
+	}
+}
+
 func TestInstallAllSupportUpdatesExistingThreads(t *testing.T) {
 	var sessions []string
 	var hooks []string

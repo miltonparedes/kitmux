@@ -166,6 +166,44 @@ func TestRunAgentEventDerivesPermissionAndDetailFromHookJSON(t *testing.T) {
 	}
 }
 
+func TestRunAgentEventPreToolAskUserIsInputNoSpinner(t *testing.T) {
+	t.Setenv("KITMUX_TMUX_PANE", "%1")
+	paneOptions := make(map[string]string)
+	spinnerStarted := false
+	input := `{"hook_event_name":"PreToolUse","tool_name":"AskUser"}`
+	err := RunAgentEvent(AgentEvent{Agent: "droid", Event: "pre-tool-use", State: "working", StdinJSON: true}, strings.NewReader(input), nil, StateOps{
+		CurrentThreadContext: func() (tmux.ThreadContext, error) {
+			return tmux.ThreadContext{SessionName: "work", PaneID: "%1"}, nil
+		},
+		CurrentPaneTitle: func() (string, error) { return "branch-title", nil },
+		SetPaneOption: func(_, option, value string) error {
+			paneOptions[option] = value
+			return nil
+		},
+		SetCurrentPaneOption:    func(_, _ string) error { return nil },
+		SetCurrentSessionOption: func(_, _ string) error { return nil },
+		EmitBell:                func(_ io.Writer) error { return nil },
+		StartSpinner:            func(SpinnerTarget) error { spinnerStarted = true; return nil },
+		Now:                     func() time.Time { return time.UnixMilli(7) },
+	})
+	if err != nil {
+		t.Fatalf("RunAgentEvent() error = %v", err)
+	}
+	if paneOptions[agentStateOption] != "input" || paneOptions[agentTitlePrefixOption] != "?" {
+		t.Fatalf("paneOptions = %#v", paneOptions)
+	}
+	if spinnerStarted {
+		t.Fatalf("spinner must not start for an attention state")
+	}
+}
+
+func TestDeriveStatePostToolAskUserIsWorking(t *testing.T) {
+	state := deriveState("working", "post-tool-use", hookInput{ToolName: "AskUser"})
+	if state != "working" {
+		t.Fatalf("post-tool AskUser state = %q, want working", state)
+	}
+}
+
 func TestRunAgentEventAddsConsistentSpinnerAndTrimsNativeLoaderForCodex(t *testing.T) {
 	t.Setenv("KITMUX_AGENT_ID", "codex")
 	t.Setenv("KITMUX_TMUX_PANE", "%1")
@@ -272,6 +310,27 @@ func TestRunAgentEventTargetsSessionFromEnvWithoutTmuxPane(t *testing.T) {
 	}
 	if spinner.SessionName != "droid-kitmux" || spinner.Token != "2026" {
 		t.Fatalf("spinner = %#v", spinner)
+	}
+}
+
+func TestTitlePrefixRevertsToAgentSymbolWhenIdle(t *testing.T) {
+	cases := []struct {
+		state string
+		title string
+		want  string
+	}{
+		{"working", "Android app", SpinnerFrames[0]},
+		{"input", "Android app", "?"},
+		{"permission", "Android app", "!"},
+		{"error", "Android app", "×"},
+		{"idle", "⛬ Android app", "⛬"},
+		{"idle", "⠹ Android app", "⛬"},
+		{"idle", "⛬", ""},
+	}
+	for _, tc := range cases {
+		if got := titlePrefix(tc.state, "droid", tc.title); got != tc.want {
+			t.Fatalf("titlePrefix(%q, droid, %q) = %q, want %q", tc.state, tc.title, got, tc.want)
+		}
 	}
 }
 
