@@ -4,6 +4,7 @@ import (
 	"reflect"
 	"testing"
 
+	"github.com/miltonparedes/kitmux/internal/agentenv"
 	"github.com/miltonparedes/kitmux/internal/tmux"
 )
 
@@ -57,7 +58,7 @@ func TestEnsureCreatesMissingThread(t *testing.T) {
 		t.Fatalf("SessionName = %q", resolved.SessionName)
 	}
 	wantPrefix := []string{
-		"new:droid-app:/tmp/app:droid",
+		"new:droid-app:/tmp/app:" + agentenv.WrapTmuxCommand("droid", "droid-app", "droid", true),
 		"session:status=off",
 		"session:set-titles=on",
 		"session:set-titles-string=" + threadTitleFormat(),

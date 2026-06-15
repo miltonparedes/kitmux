@@ -3,6 +3,7 @@ package agentlaunch
 import (
 	"fmt"
 
+	"github.com/miltonparedes/kitmux/internal/agentenv"
 	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/config"
 	"github.com/miltonparedes/kitmux/internal/tmux"
@@ -56,7 +57,7 @@ func DefaultOps() Ops {
 
 func LaunchCurrent(agent agents.Agent, mode agents.AgentMode, target Target, ops Ops) error {
 	ops = ops.withDefaults()
-	command := agent.FullCommand(mode)
+	command := agentenv.WrapTmuxCommand(agent.ID, "", agent.FullCommand(mode), false)
 	switch target {
 	case TargetSplit:
 		return ops.SplitWindow(command)
@@ -72,7 +73,7 @@ func LaunchCurrent(agent agents.Agent, mode agents.AgentMode, target Target, ops
 
 func LaunchSidepanelWindow(agent agents.Agent, mode agents.AgentMode, dir string, ops Ops) error {
 	ops = ops.withDefaults()
-	paneID, err := ops.NewWindowInDir(agent.ID, dir, agent.FullCommand(mode))
+	paneID, err := ops.NewWindowInDir(agent.ID, dir, agentenv.WrapTmuxCommand(agent.ID, "", agent.FullCommand(mode), false))
 	if err != nil {
 		return err
 	}
@@ -81,7 +82,7 @@ func LaunchSidepanelWindow(agent agents.Agent, mode agents.AgentMode, dir string
 
 func LaunchInSession(req SessionRequest, ops Ops) error {
 	ops = ops.withDefaults()
-	command := req.Agent.FullCommand(req.Mode)
+	command := agentenv.WrapTmuxCommand(req.Agent.ID, req.SessionName, req.Agent.FullCommand(req.Mode), false)
 
 	if req.FreshSession {
 		target := req.SessionName + ":0"

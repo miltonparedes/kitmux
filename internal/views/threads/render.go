@@ -137,6 +137,9 @@ func rowLabel(row Row, spinnerFrame int) string {
 	if row.AgentState == "idle" && (title == icon || strings.HasPrefix(title, icon+" ")) {
 		return title
 	}
+	if row.AgentState != "idle" {
+		title = stripLeadingStatusGlyph(title)
+	}
 	return icon + " " + title
 }
 
@@ -145,13 +148,56 @@ func rowIcon(row Row, spinnerFrame int) string {
 	case "working":
 		return spinnerFrames[spinnerFrame%len(spinnerFrames)]
 	case "input":
-		return "⏎"
+		return "?"
+	case "permission":
+		return "!"
+	case "error":
+		return "×"
 	default:
-		return row.AgentSymbol
+		return rowSymbol(row)
 	}
 }
 
-var spinnerFrames = []string{"⠂", "⠆", "⠤", "⠰", "⠠", "⠐"}
+var spinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+func stripLeadingStatusGlyph(title string) string {
+	title = strings.TrimLeft(title, " \t")
+	for title != "" {
+		stripped := false
+		for index, r := range title {
+			if index != 0 {
+				break
+			}
+			if strings.ContainsRune(statusGlyphs, r) {
+				title = strings.TrimLeft(title[len(string(r)):], " \t")
+				stripped = true
+			}
+			break
+		}
+		if !stripped {
+			return title
+		}
+	}
+	return title
+}
+
+const statusGlyphs = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⠂⠆⠤⠰⠠⠐⛬✳✻✶✢✤✱›"
+
+func rowSymbol(row Row) string {
+	if row.AgentSymbol != "" {
+		return row.AgentSymbol
+	}
+	value := row.AgentName
+	if value == "" {
+		value = row.AgentID
+	}
+	for _, r := range value {
+		if r >= 'A' && r <= 'Z' || r >= 'a' && r <= 'z' || r >= '0' && r <= '9' {
+			return strings.ToUpper(string(r))
+		}
+	}
+	return ""
+}
 
 func shortPath(path string) string {
 	if path == "" {

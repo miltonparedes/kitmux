@@ -9,6 +9,7 @@ import (
 	"strings"
 	"syscall"
 
+	"github.com/miltonparedes/kitmux/internal/agentenv"
 	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/tmux"
 )
@@ -118,7 +119,7 @@ func Ensure(spec Spec, ops Ops) (Resolved, error) {
 		paneID, err := ops.NewSessionWithCommand(
 			resolved.SessionName,
 			resolved.Dir,
-			resolved.Agent.FullCommand(resolved.Mode),
+			agentenv.WrapTmuxCommand(resolved.Agent.ID, resolved.SessionName, resolved.Agent.FullCommand(resolved.Mode), true),
 		)
 		if err != nil {
 			return Resolved{}, err
@@ -206,6 +207,18 @@ func ApplySupport(spec SupportSpec, ops Ops) error {
 		if err := ops.SetSessionOption(spec.SessionName, "@kitmux_agent_state", "idle"); err != nil {
 			return fmt.Errorf("set session option @kitmux_agent_state: %w", err)
 		}
+		if err := ops.SetSessionOption(spec.SessionName, "@kitmux_agent_event", "thread-created"); err != nil {
+			return fmt.Errorf("set session option @kitmux_agent_event: %w", err)
+		}
+		if err := ops.SetSessionOption(spec.SessionName, "@kitmux_agent_detail", ""); err != nil {
+			return fmt.Errorf("set session option @kitmux_agent_detail: %w", err)
+		}
+		if err := ops.SetSessionOption(spec.SessionName, "@kitmux_agent_title_prefix", ""); err != nil {
+			return fmt.Errorf("set session option @kitmux_agent_title_prefix: %w", err)
+		}
+		if err := ops.SetSessionOption(spec.SessionName, "@kitmux_agent_title_display", ""); err != nil {
+			return fmt.Errorf("set session option @kitmux_agent_title_display: %w", err)
+		}
 	}
 	if err := ops.SetWindowOption(spec.TargetPane, "allow-passthrough", "on"); err != nil {
 		return fmt.Errorf("set allow-passthrough: %w", err)
@@ -244,10 +257,10 @@ func agentName(agentID string) string {
 }
 
 func threadTitleFormat() string {
-	return "#{pane_title}"
+	return "#{?#{@kitmux_agent_title_prefix},#{@kitmux_agent_title_prefix}#{?#{@kitmux_agent_title_display}, #{@kitmux_agent_title_display},},#{pane_title}}"
 }
 
-const supportVersion = "1"
+const supportVersion = "4"
 
 type threadHook struct {
 	name    string

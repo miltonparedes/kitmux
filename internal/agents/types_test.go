@@ -55,4 +55,12 @@ func TestAgentDisplayNameUsesSymbol(t *testing.T) {
 	if claude.DisplayName() != "✳ Claude Code" {
 		t.Fatalf("Claude DisplayName() = %q", claude.DisplayName())
 	}
+
+	codex, ok := Find("codex")
+	if !ok {
+		t.Fatal("expected codex agent")
+	}
+	if codex.DisplayName() != "› Codex CLI" {
+		t.Fatalf("Codex DisplayName() = %q", codex.DisplayName())
+	}
 }

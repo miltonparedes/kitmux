@@ -7,6 +7,9 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
+
+	"github.com/miltonparedes/kitmux/internal/agentenv"
 )
 
 const legacyBellCommand = `sh -c 'printf "\007" > /dev/tty 2>/dev/null || printf "\007"'`
@@ -103,10 +106,13 @@ func installerForAgent(agentID string) (func(string) (Result, error), bool) {
 func installDroid(home string) (Result, error) {
 	path := filepath.Join(home, ".factory", "hooks.json")
 	changed, err := installJSONHooks(path, []hookSpec{
-		{Event: "UserPromptSubmit", Command: stateCommand("working"), ReplaceCommands: workingReplacements()},
-		{Event: "PreToolUse", Matcher: "*", Command: stateCommand("working"), ReplaceCommands: workingReplacements()},
-		{Event: "Notification", Command: bellCommand("input"), ReplaceCommands: bellReplacements("input")},
-		{Event: "Stop", Command: bellCommand("idle"), ReplaceCommands: bellReplacements("idle")},
+		eventHook("droid", "SessionStart", "", "session-start", "idle", false),
+		eventHook("droid", "UserPromptSubmit", "", "user-prompt-submit", "working", false),
+		eventHook("droid", "PreToolUse", "*", "pre-tool-use", "working", false),
+		eventHook("droid", "PostToolUse", "*", "post-tool-use", "working", false),
+		eventHook("droid", "Notification", "", "notification", "input", true),
+		eventHook("droid", "Stop", "", "stop", "idle", true),
+		eventHook("droid", "SessionEnd", "", "session-end", "idle", false),
 	})
 	return Result{AgentID: "droid", Path: path, Changed: changed}, err
 }
@@ -119,12 +125,20 @@ func installClaude(home string) (Result, error) {
 	}
 	changed := setString(doc, "preferredNotifChannel", "terminal_bell")
 	if addCommandHooks(doc, []hookSpec{
-		{Event: "UserPromptSubmit", Command: stateCommand("working"), ReplaceCommands: workingReplacements()},
-		{Event: "PreToolUse", Matcher: "*", Command: stateCommand("working"), ReplaceCommands: workingReplacements()},
-		{Event: "PermissionRequest", Command: bellCommand("input"), ReplaceCommands: bellReplacements("input")},
-		{Event: "Notification", Command: bellCommand("input"), ReplaceCommands: bellReplacements("input")},
-		{Event: "Stop", Command: bellCommand("idle"), ReplaceCommands: bellReplacements("idle")},
-		{Event: "StopFailure", Command: bellCommand("idle"), ReplaceCommands: bellReplacements("idle")},
+		eventHook("claude", "SessionStart", "", "session-start", "idle", false),
+		eventHook("claude", "UserPromptSubmit", "", "user-prompt-submit", "working", false),
+		eventHook("claude", "PreToolUse", "*", "pre-tool-use", "working", false),
+		eventHook("claude", "PostToolUse", "*", "post-tool-use", "working", false),
+		eventHook("claude", "PostToolUseFailure", "*", "post-tool-use-failure", "working", false),
+		eventHook("claude", "PostToolBatch", "", "post-tool-batch", "working", false),
+		eventHook("claude", "PermissionRequest", "", "permission-request", "permission", true),
+		eventHook("claude", "PermissionDenied", "", "permission-denied", "error", true),
+		eventHook("claude", "Elicitation", "", "elicitation", "input", true),
+		eventHook("claude", "ElicitationResult", "", "elicitation-result", "working", false),
+		eventHook("claude", "Notification", "", "notification", "input", true),
+		eventHook("claude", "Stop", "", "stop", "idle", true),
+		eventHook("claude", "StopFailure", "", "stop-failure", "idle", true),
+		eventHook("claude", "SessionEnd", "", "session-end", "idle", false),
 	}) {
 		changed = true
 	}
@@ -139,10 +153,12 @@ func installClaude(home string) (Result, error) {
 func installCodex(home string) (Result, error) {
 	path := filepath.Join(home, ".codex", "hooks.json")
 	changed, err := installJSONHooks(path, []hookSpec{
-		{Event: "UserPromptSubmit", Command: stateCommand("working"), ReplaceCommands: workingReplacements()},
-		{Event: "PreToolUse", Command: stateCommand("working"), ReplaceCommands: workingReplacements()},
-		{Event: "PermissionRequest", Command: bellCommand("input"), ReplaceCommands: bellReplacements("input")},
-		{Event: "Stop", Command: bellCommand("idle"), ReplaceCommands: bellReplacements("idle")},
+		eventHook("codex", "SessionStart", "", "session-start", "idle", false),
+		eventHook("codex", "UserPromptSubmit", "", "user-prompt-submit", "working", false),
+		eventHook("codex", "PreToolUse", "", "pre-tool-use", "working", false),
+		eventHook("codex", "PermissionRequest", "", "permission-request", "permission", true),
+		eventHook("codex", "PostToolUse", "", "post-tool-use", "working", false),
+		eventHook("codex", "Stop", "", "stop", "idle", true),
 	})
 	return Result{AgentID: "codex", Path: path, Changed: changed}, err
 }
@@ -242,6 +258,11 @@ func addCommandHooks(doc map[string]any, hooks []hookSpec) bool {
 func addCommandHook(rawHooks map[string]any, spec hookSpec) bool {
 	groups, _ := rawHooks[spec.Event].([]any)
 	changed := replaceCommands(groups, spec.ReplaceCommands, spec.Command)
+	if dedupedGroups, deduped := dedupeCommandHooks(groups, spec.Command); deduped {
+		groups = dedupedGroups
+		rawHooks[spec.Event] = groups
+		changed = true
+	}
 	if hasCommand(groups, spec.Command) {
 		return changed
 	}
@@ -260,6 +281,49 @@ func addCommandHook(rawHooks map[string]any, spec hookSpec) bool {
 	}
 	rawHooks[spec.Event] = append(groups, group)
 	return true
+}
+
+func dedupeCommandHooks(groups []any, command string) ([]any, bool) {
+	seen := false
+	changed := false
+	out := make([]any, 0, len(groups))
+	for _, group := range groups {
+		groupMap, ok := group.(map[string]any)
+		if !ok {
+			out = append(out, group)
+			continue
+		}
+		hooks, ok := groupMap["hooks"].([]any)
+		if !ok {
+			out = append(out, group)
+			continue
+		}
+		nextHooks := make([]any, 0, len(hooks))
+		for _, hook := range hooks {
+			hookMap, ok := hook.(map[string]any)
+			if ok && hookMap["type"] == "command" && hookMap["command"] == command {
+				if seen {
+					changed = true
+					continue
+				}
+				seen = true
+			}
+			nextHooks = append(nextHooks, hook)
+		}
+		if len(nextHooks) == 0 {
+			changed = true
+			continue
+		}
+		if len(nextHooks) != len(hooks) {
+			groupMap["hooks"] = nextHooks
+			changed = true
+		}
+		out = append(out, group)
+	}
+	if len(out) != len(groups) {
+		changed = true
+	}
+	return out, changed
 }
 
 func replaceCommands(groups []any, oldCommands []string, newCommand string) bool {
@@ -313,6 +377,41 @@ func hasCommand(groups []any, command string) bool {
 	return false
 }
 
+func eventHook(agent, hookEvent, matcher, event, state string, bell bool) hookSpec {
+	return hookSpec{
+		Event:           hookEvent,
+		Matcher:         matcher,
+		Command:         agentEventCommand(agent, event, state, bell, true),
+		ReplaceCommands: commandReplacements(agent, event, state, bell, true),
+	}
+}
+
+func agentEventCommand(agent, event, state string, bell, stdinJSON bool) string {
+	return agentenv.WrapHookCommand(agent, rawAgentEventCommand(agent, event, state, bell, stdinJSON))
+}
+
+func rawAgentEventCommand(agent, event, state string, bell, stdinJSON bool) string {
+	parts := []string{kitmuxCommand(), "hook", "agent-event", "--agent", agent, "--event", event}
+	if state != "" {
+		parts = append(parts, "--state", state)
+	}
+	if bell {
+		parts = append(parts, "--bell")
+	}
+	if stdinJSON {
+		parts = append(parts, "--stdin-json")
+	}
+	return strings.Join(parts, " ")
+}
+
+func kitmuxCommand() string {
+	exe, err := os.Executable()
+	if err == nil && filepath.Base(exe) == "kitmux" {
+		return exe
+	}
+	return "kitmux"
+}
+
 func stateCommand(state string) string {
 	return fmt.Sprintf("kitmux hook agent-state --state %s", state)
 }
@@ -321,12 +420,42 @@ func bellCommand(state string) string {
 	return stateCommand(state) + " --bell"
 }
 
-func workingReplacements() []string {
-	return []string{legacyStateCommand("working")}
+func commandReplacements(agent, event, state string, bell, stdinJSON bool) []string {
+	states := []string{state}
+	if state == "permission" {
+		states = append(states, "input")
+	}
+	var commands []string
+	seen := make(map[string]struct{})
+	add := func(values []string) {
+		for _, value := range values {
+			if _, ok := seen[value]; ok {
+				continue
+			}
+			seen[value] = struct{}{}
+			commands = append(commands, value)
+		}
+	}
+	if bell {
+		for _, state := range states {
+			add(bellReplacements(state))
+		}
+		add([]string{rawAgentEventCommand(agent, event, state, bell, stdinJSON)})
+		return commands
+	}
+	for _, state := range states {
+		add(stateReplacements(state))
+	}
+	add([]string{rawAgentEventCommand(agent, event, state, bell, stdinJSON)})
+	return commands
+}
+
+func stateReplacements(state string) []string {
+	return []string{legacyStateCommand(state), stateCommand(state)}
 }
 
 func bellReplacements(state string) []string {
-	return []string{legacyBellCommand, legacyStateBellCommand(state)}
+	return []string{legacyBellCommand, legacyStateBellCommand(state), bellCommand(state)}
 }
 
 func legacyStateCommand(state string) string {
@@ -343,8 +472,8 @@ func legacyStateBellCommand(state string) string {
 
 func openCodePlugin() string {
 	return `export const KitmuxZedBell = async () => {
-  const setState = async (state, bell = false) => {
-    const args = ["kitmux", "hook", "agent-state", "--state", state]
+  const setEvent = async (event, state, bell = false) => {
+    const args = ["kitmux", "hook", "agent-event", "--agent", "opencode", "--event", event, "--state", state]
     if (bell) {
       args.push("--bell")
     }
@@ -367,15 +496,20 @@ func openCodePlugin() string {
   return {
     event: async ({ event }) => {
       if (event.type === "permission.asked") {
-        await setState("input", true)
+        await setEvent("permission.asked", "permission", true)
       } else if (event.type === "session.idle") {
-        await setState("idle", true)
+        await setEvent("session.idle", "idle", true)
+      } else if (event.type === "session.error") {
+        await setEvent("session.error", "error", true)
       } else if (event.type === "permission.replied") {
-        await setState("working")
+        await setEvent("permission.replied", "working")
       }
     },
     "tool.execute.before": async () => {
-      await setState("working")
+      await setEvent("tool.execute.before", "working")
+    },
+    "tool.execute.after": async () => {
+      await setEvent("tool.execute.after", "working")
     },
   }
 }

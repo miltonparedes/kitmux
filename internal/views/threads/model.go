@@ -22,18 +22,21 @@ const (
 )
 
 type Row struct {
-	Kind        RowKind
-	AgentID     string
-	AgentName   string
-	AgentSymbol string
-	AgentState  string
-	Title       string
-	SessionName string
-	WindowIndex int
-	PaneIndex   int
-	Path        string
-	Attached    bool
-	Activity    int64
+	Kind         RowKind
+	AgentID      string
+	AgentName    string
+	AgentSymbol  string
+	AgentState   string
+	AgentEvent   string
+	AgentDetail  string
+	AgentUpdated int64
+	Title        string
+	SessionName  string
+	WindowIndex  int
+	PaneIndex    int
+	Path         string
+	Attached     bool
+	Activity     int64
 }
 
 type Model struct {
@@ -61,7 +64,7 @@ func New() Model {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(loadCmd(), tickCmd())
+	return tea.Batch(syncSupportAndLoadCmd(), tickCmd())
 }
 
 func (m *Model) SetSize(w, h int) {
@@ -247,10 +250,21 @@ func (m *Model) ensureVisible() {
 
 func loadCmd() tea.Cmd {
 	return func() tea.Msg {
-		sessions, _ := tmux.ListSessions()
-		panes, _ := tmux.ListPanes()
-		return loadedMsg{rows: buildRows(sessions, panes)}
+		return loadRows()
 	}
+}
+
+func syncSupportAndLoadCmd() tea.Cmd {
+	return func() tea.Msg {
+		_, _ = agentthread.InstallAllSupport(agentthread.DefaultOps())
+		return loadRows()
+	}
+}
+
+func loadRows() loadedMsg {
+	sessions, _ := tmux.ListSessions()
+	panes, _ := tmux.ListPanes()
+	return loadedMsg{rows: buildRows(sessions, panes)}
 }
 
 func buildRows(sessions []tmux.Session, panes []tmux.Pane) []Row {
@@ -261,22 +275,29 @@ func buildRows(sessions []tmux.Session, panes []tmux.Pane) []Row {
 	for _, session := range threadSessions {
 		agentName, agentSymbol := agentDisplayParts(session.AgentID)
 		pane := panesBySession[session.Name]
+		agentState, agentEvent, agentDetail, agentUpdated := rowAgentMetadata(
+			agentMetadata{State: pane.AgentState, Event: pane.AgentEvent, Detail: pane.AgentDetail, Updated: pane.AgentUpdated},
+			agentMetadata{State: session.AgentState, Event: session.AgentEvent, Detail: session.AgentDetail, Updated: session.AgentUpdated},
+		)
 		path := session.Path
 		if path == "" {
 			path = pane.Path
 		}
 		threadSet[session.Name] = struct{}{}
 		rows = append(rows, Row{
-			Kind:        RowHeadless,
-			AgentID:     session.AgentID,
-			AgentName:   agentName,
-			AgentSymbol: agentSymbol,
-			AgentState:  rowAgentState(pane.AgentState, session.AgentState),
-			Title:       pane.Title,
-			SessionName: session.Name,
-			Path:        path,
-			Attached:    session.Attached,
-			Activity:    session.Activity,
+			Kind:         RowHeadless,
+			AgentID:      session.AgentID,
+			AgentName:    agentName,
+			AgentSymbol:  agentSymbol,
+			AgentState:   agentState,
+			AgentEvent:   agentEvent,
+			AgentDetail:  agentDetail,
+			AgentUpdated: agentUpdated,
+			Title:        pane.Title,
+			SessionName:  session.Name,
+			Path:         path,
+			Attached:     session.Attached,
+			Activity:     session.Activity,
 		})
 	}
 
@@ -290,16 +311,19 @@ func buildRows(sessions []tmux.Session, panes []tmux.Pane) []Row {
 			continue
 		}
 		rows = append(rows, Row{
-			Kind:        RowEphemeral,
-			AgentID:     agent.ID,
-			AgentName:   agent.Name,
-			AgentSymbol: agent.Symbol,
-			AgentState:  normalizeAgentState(pane.AgentState),
-			Title:       pane.Title,
-			SessionName: pane.SessionName,
-			WindowIndex: pane.WindowIndex,
-			PaneIndex:   pane.PaneIndex,
-			Path:        pane.Path,
+			Kind:         RowEphemeral,
+			AgentID:      agent.ID,
+			AgentName:    agent.Name,
+			AgentSymbol:  agent.Symbol,
+			AgentState:   normalizeAgentState(pane.AgentState, pane.AgentUpdated),
+			AgentEvent:   pane.AgentEvent,
+			AgentDetail:  pane.AgentDetail,
+			AgentUpdated: pane.AgentUpdated,
+			Title:        pane.Title,
+			SessionName:  pane.SessionName,
+			WindowIndex:  pane.WindowIndex,
+			PaneIndex:    pane.PaneIndex,
+			Path:         pane.Path,
 		})
 	}
 
@@ -336,23 +360,38 @@ func agentDisplayParts(agentID string) (string, string) {
 	return agentID, ""
 }
 
-func normalizeAgentState(state string) string {
+type agentMetadata struct {
+	State   string
+	Event   string
+	Detail  string
+	Updated int64
+}
+
+func normalizeAgentState(state string, updated int64) string {
 	switch state {
-	case "working", "input", "idle":
+	case "working":
+		if updated == 0 {
+			return "idle"
+		}
+		if time.Since(time.UnixMilli(updated)) > 2*time.Hour {
+			return "idle"
+		}
+		return state
+	case "input", "permission", "error", "idle":
 		return state
 	default:
 		return "idle"
 	}
 }
 
-func rowAgentState(states ...string) string {
-	for _, state := range states {
-		switch state {
-		case "working", "input", "idle":
-			return state
+func rowAgentMetadata(records ...agentMetadata) (string, string, string, int64) {
+	for _, record := range records {
+		state := normalizeAgentState(record.State, record.Updated)
+		if state != "idle" || record.State == "idle" {
+			return state, record.Event, record.Detail, record.Updated
 		}
 	}
-	return "idle"
+	return "idle", "", "", 0
 }
 
 func tickCmd() tea.Cmd {

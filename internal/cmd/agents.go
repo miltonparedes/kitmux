@@ -9,9 +9,11 @@ import (
 
 	"github.com/spf13/cobra"
 
+	"github.com/miltonparedes/kitmux/internal/agentenv"
 	"github.com/miltonparedes/kitmux/internal/agenthooks"
 	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/agentthread"
+	"github.com/miltonparedes/kitmux/internal/tmux"
 )
 
 func addAgentCommands(parent *cobra.Command) {
@@ -54,7 +56,7 @@ func agentCmd(agent agents.Agent) *cobra.Command {
 					Name:    name,
 				}, agentthread.DefaultOps())
 			}
-			return execShell(agent.FullCommand(mode), dir)
+			return execShell(agent.ID, agent.FullCommand(mode), dir)
 		},
 	}
 	cmd.Flags().BoolVar(&headless, "headless", false, "run or attach this agent as a persistent tmux thread")
@@ -71,12 +73,17 @@ func installLaunchHooks(agentID string) error {
 	return nil
 }
 
-func execShell(command, dir string) error {
+func execShell(agentID, command, dir string) error {
 	sh, err := exec.LookPath("sh")
 	if err != nil {
 		return err
 	}
 	env := os.Environ()
+	if ctx, err := tmux.CurrentThreadContext(); err == nil {
+		env = agentenv.WithTrackingEnv(env, agentID, ctx.SessionName, ctx.PaneID, ctx.Thread)
+	} else {
+		env = agentenv.WithTrackingEnv(env, agentID, "", "", false)
+	}
 	if dir != "" {
 		if err := os.Chdir(dir); err != nil {
 			return fmt.Errorf("chdir: %w", err)

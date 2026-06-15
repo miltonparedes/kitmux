@@ -18,6 +18,9 @@ func ListSessions() ([]Session, error) {
 		"#{@kitmux_thread}",
 		"#{@kitmux_agent}",
 		"#{@kitmux_agent_state}",
+		"#{@kitmux_agent_event}",
+		"#{@kitmux_agent_detail}",
+		"#{@kitmux_agent_updated}",
 	}, "\t")
 	out, err := exec.Command("tmux", "list-sessions", "-F",
 		format).Output()
@@ -29,7 +32,7 @@ func ListSessions() ([]Session, error) {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 8)
+		parts := strings.SplitN(line, "\t", 11)
 		if len(parts) < 3 {
 			continue
 		}
@@ -43,14 +46,17 @@ func ListSessions() ([]Session, error) {
 			activity, _ = strconv.ParseInt(parts[4], 10, 64)
 		}
 		sessions = append(sessions, Session{
-			Name:       parts[0],
-			Windows:    wins,
-			Attached:   parts[2] == "1",
-			Path:       path,
-			Activity:   activity,
-			Thread:     len(parts) >= 6 && parts[5] == "1",
-			AgentID:    sessionAgentID(parts),
-			AgentState: sessionAgentState(parts),
+			Name:         parts[0],
+			Windows:      wins,
+			Attached:     parts[2] == "1",
+			Path:         path,
+			Activity:     activity,
+			Thread:       len(parts) >= 6 && parts[5] == "1",
+			AgentID:      sessionAgentID(parts),
+			AgentState:   sessionAgentState(parts),
+			AgentEvent:   sessionAgentEvent(parts),
+			AgentDetail:  sessionAgentDetail(parts),
+			AgentUpdated: sessionAgentUpdated(parts),
 		})
 	}
 	return sessions, nil
@@ -68,6 +74,28 @@ func sessionAgentState(parts []string) string {
 		return ""
 	}
 	return parts[7]
+}
+
+func sessionAgentEvent(parts []string) string {
+	if len(parts) < 9 {
+		return ""
+	}
+	return parts[8]
+}
+
+func sessionAgentDetail(parts []string) string {
+	if len(parts) < 10 {
+		return ""
+	}
+	return parts[9]
+}
+
+func sessionAgentUpdated(parts []string) int64 {
+	if len(parts) < 11 {
+		return 0
+	}
+	updated, _ := strconv.ParseInt(parts[10], 10, 64)
+	return updated
 }
 
 func NormalSessions(sessions []Session) []Session {
@@ -143,6 +171,7 @@ func CurrentSession() (string, error) {
 func CurrentThreadContext() (ThreadContext, error) {
 	format := strings.Join([]string{
 		"#{session_name}",
+		"#{pane_id}",
 		"#{@kitmux_thread}",
 		"#{@kitmux_agent}",
 	}, "\t")
@@ -150,18 +179,29 @@ func CurrentThreadContext() (ThreadContext, error) {
 	if err != nil {
 		return ThreadContext{}, fmt.Errorf("display-message thread context: %w", err)
 	}
-	parts := strings.SplitN(strings.TrimSpace(string(out)), "\t", 3)
+	parts := strings.SplitN(strings.TrimSpace(string(out)), "\t", 4)
 	if len(parts) < 1 || parts[0] == "" {
 		return ThreadContext{}, fmt.Errorf("display-message thread context: empty session")
 	}
 	ctx := ThreadContext{SessionName: parts[0]}
 	if len(parts) >= 2 {
-		ctx.Thread = parts[1] == "1"
+		ctx.PaneID = parts[1]
 	}
 	if len(parts) >= 3 {
-		ctx.AgentID = parts[2]
+		ctx.Thread = parts[2] == "1"
+	}
+	if len(parts) >= 4 {
+		ctx.AgentID = parts[3]
 	}
 	return ctx, nil
+}
+
+func CurrentPaneTitle() (string, error) {
+	out, err := exec.Command("tmux", "display-message", "-p", "#{pane_title}").Output()
+	if err != nil {
+		return "", fmt.Errorf("display-message pane title: %w", err)
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 func CurrentPanePath() (string, error) {
@@ -397,6 +437,9 @@ func ListPanes() ([]Pane, error) {
 		"#{pane_current_path}",
 		"#{pane_title}",
 		"#{@kitmux_agent_state}",
+		"#{@kitmux_agent_event}",
+		"#{@kitmux_agent_detail}",
+		"#{@kitmux_agent_updated}",
 	}, "\t")
 	out, err := exec.Command("tmux", "list-panes", "-a", "-F", format).Output()
 	if err != nil {
@@ -407,7 +450,7 @@ func ListPanes() ([]Pane, error) {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 8)
+		parts := strings.SplitN(line, "\t", 11)
 		if len(parts) < 4 {
 			continue
 		}
@@ -429,15 +472,30 @@ func ListPanes() ([]Pane, error) {
 		if len(parts) >= 8 {
 			agentState = parts[7]
 		}
+		var agentEvent string
+		if len(parts) >= 9 {
+			agentEvent = parts[8]
+		}
+		var agentDetail string
+		if len(parts) >= 10 {
+			agentDetail = parts[9]
+		}
+		var agentUpdated int64
+		if len(parts) >= 11 {
+			agentUpdated, _ = strconv.ParseInt(parts[10], 10, 64)
+		}
 		panes = append(panes, Pane{
-			SessionName: parts[0],
-			WindowIndex: winIdx,
-			PaneIndex:   paneIdx,
-			Command:     parts[3],
-			PID:         pid,
-			Path:        path,
-			Title:       title,
-			AgentState:  agentState,
+			SessionName:  parts[0],
+			WindowIndex:  winIdx,
+			PaneIndex:    paneIdx,
+			Command:      parts[3],
+			PID:          pid,
+			Path:         path,
+			Title:        title,
+			AgentState:   agentState,
+			AgentEvent:   agentEvent,
+			AgentDetail:  agentDetail,
+			AgentUpdated: agentUpdated,
 		})
 	}
 	return panes, nil

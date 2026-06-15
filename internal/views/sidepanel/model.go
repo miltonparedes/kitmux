@@ -62,6 +62,7 @@ const (
 	activityStatusActive  activityStatus = "active"
 	activityStatusIdle    activityStatus = "idle"
 	activityStatusWorking activityStatus = "working"
+	activityStatusError   activityStatus = "error"
 )
 
 type agentActivity struct {
@@ -558,8 +559,10 @@ func buildAgentActivities(panes []tmux.Pane) []agentActivity {
 			status = activityStatusIdle
 		case "working":
 			status = activityStatusWorking
-		case "input":
+		case "input", "permission":
 			needsInput = true
+		case "error":
+			status = activityStatusError
 		}
 		activities = append(activities, agentActivity{
 			Pane:       pane,

@@ -97,6 +97,9 @@ func installAgentHookSupport(cmd *cobra.Command, _ []string) error {
 		}
 		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "%s: %s (%s)\n", result.AgentID, status, result.Path)
 	}
+	if count, err := agentthread.InstallAllSupport(agentthread.DefaultOps()); err == nil {
+		_, _ = fmt.Fprintf(cmd.OutOrStdout(), "threads: synced support for %d thread(s)\n", count)
+	}
 	return nil
 }
 

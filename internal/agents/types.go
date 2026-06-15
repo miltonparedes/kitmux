@@ -29,6 +29,7 @@ var defaultAgents = []Agent{
 	{
 		ID:      "codex-cloud",
 		Name:    "Codex Cloud",
+		Symbol:  "›",
 		Command: "codex",
 		Modes: []AgentMode{
 			{ID: "default", Name: "Cloud", Flags: "cloud"},
@@ -37,6 +38,7 @@ var defaultAgents = []Agent{
 	{
 		ID:      "codex",
 		Name:    "Codex CLI",
+		Symbol:  "›",
 		Command: "codex",
 		Modes: []AgentMode{
 			{ID: "default", Name: "Default", Flags: ""},
