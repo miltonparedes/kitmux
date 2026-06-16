@@ -51,7 +51,6 @@ type AgentEvent struct {
 }
 
 type StateOps struct {
-	CurrentThreadContext    func() (tmux.ThreadContext, error)
 	CurrentPaneTitle        func() (string, error)
 	SetCurrentPaneOption    func(string, string) error
 	SetCurrentSessionOption func(string, string) error
@@ -84,7 +83,6 @@ type hookInput struct {
 
 func DefaultStateOps() StateOps {
 	return StateOps{
-		CurrentThreadContext:    tmux.CurrentThreadContext,
 		CurrentPaneTitle:        tmux.CurrentPaneTitle,
 		SetCurrentPaneOption:    tmux.SetCurrentPaneOption,
 		SetCurrentSessionOption: tmux.SetCurrentSessionOption,
@@ -453,9 +451,6 @@ func firstNonEmpty(values ...string) string {
 
 func (ops StateOps) withDefaults() StateOps {
 	defaults := DefaultStateOps()
-	if ops.CurrentThreadContext == nil {
-		ops.CurrentThreadContext = defaults.CurrentThreadContext
-	}
 	if ops.CurrentPaneTitle == nil {
 		ops.CurrentPaneTitle = defaults.CurrentPaneTitle
 	}

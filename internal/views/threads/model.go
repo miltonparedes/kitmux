@@ -81,6 +81,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case loadedMsg:
 		m.rows = msg.rows
 		m.clampCursor()
+		m.ensureVisible()
 		return m, nil
 	case tickMsg:
 		m.spinnerFrame++
@@ -236,6 +237,10 @@ func (m *Model) clampAgentIndex() {
 }
 
 func (m *Model) ensureVisible() {
+	m.clampCursor()
+	if m.scroll < 0 {
+		m.scroll = 0
+	}
 	viewHeight := m.height - 2
 	if viewHeight < 1 {
 		viewHeight = 1

@@ -4,6 +4,8 @@ import (
 	"testing"
 	"time"
 
+	tea "github.com/charmbracelet/bubbletea"
+
 	"github.com/miltonparedes/kitmux/internal/tmux"
 )
 
@@ -64,5 +66,20 @@ func TestRowLabelUsesStateIconAndAvoidsIdleSymbolDuplication(t *testing.T) {
 	idle := Row{AgentSymbol: "⛬", AgentState: "idle", Title: "⛬ Droid · app"}
 	if got := rowLabel(idle, 0); got != "⛬ Droid · app" {
 		t.Fatalf("idle rowLabel = %q", got)
+	}
+}
+
+func TestModelClampsScrollAfterEmptyEndKeyThenLoad(t *testing.T) {
+	m := New()
+	m.SetSize(80, 5)
+
+	m, _ = m.Update(tea.KeyMsg{Type: tea.KeyEnd})
+	m, _ = m.Update(loadedMsg{rows: []Row{{Kind: RowHeadless, SessionName: "droid-app", AgentName: "Droid"}}})
+
+	if m.scroll != 0 || m.cursor != 0 {
+		t.Fatalf("cursor=%d scroll=%d, want both 0", m.cursor, m.scroll)
+	}
+	if got := m.View(); got == "" {
+		t.Fatal("expected non-empty view")
 	}
 }

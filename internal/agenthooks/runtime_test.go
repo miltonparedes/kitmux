@@ -9,7 +9,6 @@ import (
 	"time"
 
 	"github.com/miltonparedes/kitmux/internal/agenttrack"
-	"github.com/miltonparedes/kitmux/internal/tmux"
 )
 
 func TestRunStateEventUpdatesPaneForAnyTmuxPane(t *testing.T) {
@@ -17,9 +16,6 @@ func TestRunStateEventUpdatesPaneForAnyTmuxPane(t *testing.T) {
 	paneOptions := make(map[string]string)
 	sessionOptions := make(map[string]string)
 	err := RunStateEvent(StateEvent{State: stateWorking}, nil, StateOps{
-		CurrentThreadContext: func() (tmux.ThreadContext, error) {
-			return tmux.ThreadContext{SessionName: "work", PaneID: "%1"}, nil
-		},
 		CurrentPaneTitle: func() (string, error) {
 			return "feat/threads", nil
 		},
@@ -59,9 +55,6 @@ func TestRunStateEventSyncsSessionForThread(t *testing.T) {
 	sessionOptions := make(map[string]string)
 	var spinner SpinnerTarget
 	err := RunAgentEvent(AgentEvent{Agent: "droid", Event: "pre-tool-use", State: stateWorking}, nil, nil, StateOps{
-		CurrentThreadContext: func() (tmux.ThreadContext, error) {
-			return tmux.ThreadContext{SessionName: "droid-app", PaneID: "%2", Thread: true, AgentID: "droid"}, nil
-		},
 		CurrentPaneTitle: func() (string, error) {
 			return "feat/threads", nil
 		},
@@ -109,10 +102,6 @@ func TestRunAgentEventKeepsTrackedThreadsIsolated(t *testing.T) {
 	var refreshed []string
 	var spinners []SpinnerTarget
 	ops := StateOps{
-		CurrentThreadContext: func() (tmux.ThreadContext, error) {
-			t.Fatal("expected hook context to come only from explicit tracking env")
-			return tmux.ThreadContext{}, nil
-		},
 		CurrentPaneTitle: func() (string, error) { return "feat/thread", nil },
 		SetPaneOption: func(target, option, value string) error {
 			if paneOptions[target] == nil {
@@ -173,9 +162,6 @@ func TestRunAgentEventKeepsTrackedThreadsIsolated(t *testing.T) {
 func TestRunStateEventEmitsBellAndIgnoresTmuxErrors(t *testing.T) {
 	var out bytes.Buffer
 	err := RunStateEvent(StateEvent{State: stateIdle, Bell: true}, &out, StateOps{
-		CurrentThreadContext: func() (tmux.ThreadContext, error) {
-			return tmux.ThreadContext{}, fmt.Errorf("not in tmux")
-		},
 		CurrentPaneTitle: func() (string, error) {
 			return "", fmt.Errorf("not in tmux")
 		},
@@ -210,9 +196,6 @@ func TestRunAgentEventDerivesPermissionAndDetailFromHookJSON(t *testing.T) {
 	var bells int
 	input := `{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"description":"Run tests"}}`
 	err := RunAgentEvent(AgentEvent{Agent: "codex", Event: "permission-request", StdinJSON: true}, strings.NewReader(input), nil, StateOps{
-		CurrentThreadContext: func() (tmux.ThreadContext, error) {
-			return tmux.ThreadContext{SessionName: "work", PaneID: "%1"}, nil
-		},
 		CurrentPaneTitle: func() (string, error) { return "branch-title", nil },
 		SetCurrentPaneOption: func(option, value string) error {
 			paneOptions[option] = value
@@ -244,9 +227,6 @@ func TestRunAgentEventPreToolAskUserIsInputNoSpinner(t *testing.T) {
 	spinnerStarted := false
 	input := `{"hook_event_name":"PreToolUse","tool_name":"AskUser"}`
 	err := RunAgentEvent(AgentEvent{Agent: "droid", Event: "pre-tool-use", StdinJSON: true}, strings.NewReader(input), nil, StateOps{
-		CurrentThreadContext: func() (tmux.ThreadContext, error) {
-			return tmux.ThreadContext{SessionName: "work", PaneID: "%1"}, nil
-		},
 		CurrentPaneTitle: func() (string, error) { return "branch-title", nil },
 		SetPaneOption: func(_, option, value string) error {
 			paneOptions[option] = value
@@ -309,9 +289,6 @@ func TestRunAgentEventAddsConsistentSpinnerAndTrimsNativeLoaderForCodex(t *testi
 	paneOptions := make(map[string]string)
 	var spinner SpinnerTarget
 	err := RunAgentEvent(AgentEvent{Event: "pre-tool-use", State: stateWorking}, nil, nil, StateOps{
-		CurrentThreadContext: func() (tmux.ThreadContext, error) {
-			return tmux.ThreadContext{}, fmt.Errorf("not in tmux")
-		},
 		CurrentPaneTitle: func() (string, error) { return "⠹ › kitmux", nil },
 		SetPaneOption: func(_, option, value string) error {
 			paneOptions[option] = value
@@ -345,9 +322,6 @@ func TestRunAgentEventReplacesDroidSymbolWithSpinnerInTitleDisplay(t *testing.T)
 	t.Setenv("KITMUX_TMUX_PANE", "%1")
 	paneOptions := make(map[string]string)
 	err := RunAgentEvent(AgentEvent{Event: "pre-tool-use", State: stateWorking}, nil, nil, StateOps{
-		CurrentThreadContext: func() (tmux.ThreadContext, error) {
-			return tmux.ThreadContext{}, fmt.Errorf("not in tmux")
-		},
 		CurrentPaneTitle: func() (string, error) { return "⠂ ⛬ Android app", nil },
 		SetPaneOption: func(_, option, value string) error {
 			paneOptions[option] = value
@@ -374,9 +348,6 @@ func TestRunAgentEventTargetsSessionFromEnvWithoutTmuxPane(t *testing.T) {
 	sessionOptions := make(map[string]string)
 	var spinner SpinnerTarget
 	err := RunAgentEvent(AgentEvent{Event: "pre-tool-use", State: stateWorking}, nil, nil, StateOps{
-		CurrentThreadContext: func() (tmux.ThreadContext, error) {
-			return tmux.ThreadContext{}, fmt.Errorf("not in tmux")
-		},
 		CurrentPaneTitle: func() (string, error) { return "", fmt.Errorf("not in tmux") },
 		SetCurrentPaneOption: func(_, _ string) error {
 			t.Fatal("expected no implicit pane writes without KITMUX_TMUX_PANE")
@@ -440,9 +411,6 @@ func TestRunAgentEventTargetsPaneFromEnvWithoutSessionSync(t *testing.T) {
 	paneOptions := make(map[string]string)
 	sessionOptions := make(map[string]string)
 	err := RunAgentEvent(AgentEvent{Event: "permission-request", State: statePermission}, nil, nil, StateOps{
-		CurrentThreadContext: func() (tmux.ThreadContext, error) {
-			return tmux.ThreadContext{}, fmt.Errorf("not in tmux")
-		},
 		CurrentPaneTitle: func() (string, error) { return "branch", nil },
 		SetCurrentPaneOption: func(_, _ string) error {
 			t.Fatal("expected targeted pane writes")
@@ -488,9 +456,6 @@ func TestRunAgentEventWithoutTrackingEnvDoesNotTouchTmuxTargets(t *testing.T) {
 	var sessionWrites int
 	spinnerStarted := false
 	err := RunAgentEvent(AgentEvent{Agent: "droid", Event: "pre-tool-use", State: stateWorking}, nil, nil, StateOps{
-		CurrentThreadContext: func() (tmux.ThreadContext, error) {
-			return tmux.ThreadContext{SessionName: "unrelated", PaneID: "%9", Thread: true}, nil
-		},
 		CurrentPaneTitle: func() (string, error) {
 			t.Fatal("expected no pane title lookup without explicit tracking env")
 			return "", nil
@@ -542,10 +507,6 @@ func TestRunAgentEventResolvesTargetFromRegisteredAncestor(t *testing.T) {
 	sessionOptions := make(map[string]string)
 	var spinner SpinnerTarget
 	err := RunAgentEvent(AgentEvent{Agent: "droid", Event: "pre-tool-use", State: stateWorking}, nil, nil, StateOps{
-		CurrentThreadContext: func() (tmux.ThreadContext, error) {
-			t.Fatal("expected registered process context, not ambient tmux lookup")
-			return tmux.ThreadContext{}, nil
-		},
 		CurrentPaneTitle: func() (string, error) { return "registered thread", nil },
 		SetPaneOption: func(target, option, value string) error {
 			if target != "%7" {
