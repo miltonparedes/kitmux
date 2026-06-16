@@ -120,6 +120,7 @@ func RunAgentEvent(event AgentEvent, in io.Reader, out io.Writer, ops StateOps) 
 	if err != nil {
 		return err
 	}
+	bell := deriveBell(event.Bell, eventName)
 
 	logHookEvent(event, eventName, state, ctx, rawInput)
 
@@ -154,7 +155,7 @@ func RunAgentEvent(event AgentEvent, in io.Reader, out io.Writer, ops StateOps) 
 			Token:   updated,
 		})
 	}
-	if event.Bell {
+	if bell {
 		_ = ops.EmitBell(out)
 	}
 	return nil
@@ -291,6 +292,19 @@ func deriveState(explicit, eventName string, input hookInput) string {
 		return stateWorking
 	default:
 		return stateIdle
+	}
+}
+
+func deriveBell(explicit bool, eventName string) bool {
+	if explicit {
+		return true
+	}
+	switch eventKey(eventName) {
+	case "notification", "permissionrequest", "permissionasked", "permissiondenied",
+		"elicitation", "stop", "stopfailure", "sessionidle", "sessionerror":
+		return true
+	default:
+		return false
 	}
 }
 

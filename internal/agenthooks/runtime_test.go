@@ -207,8 +207,9 @@ func TestRunStateEventRejectsUnknownState(t *testing.T) {
 func TestRunAgentEventDerivesPermissionAndDetailFromHookJSON(t *testing.T) {
 	t.Setenv("KITMUX_TMUX_PANE", "%1")
 	paneOptions := make(map[string]string)
+	var bells int
 	input := `{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"description":"Run tests"}}`
-	err := RunAgentEvent(AgentEvent{Agent: "codex", Event: "permission-request", State: stateWorking, StdinJSON: true}, strings.NewReader(input), nil, StateOps{
+	err := RunAgentEvent(AgentEvent{Agent: "codex", Event: "permission-request", StdinJSON: true}, strings.NewReader(input), nil, StateOps{
 		CurrentThreadContext: func() (tmux.ThreadContext, error) {
 			return tmux.ThreadContext{SessionName: "work", PaneID: "%1"}, nil
 		},
@@ -222,7 +223,7 @@ func TestRunAgentEventDerivesPermissionAndDetailFromHookJSON(t *testing.T) {
 			return nil
 		},
 		SetCurrentSessionOption: func(_, _ string) error { return nil },
-		EmitBell:                func(_ io.Writer) error { return nil },
+		EmitBell:                func(_ io.Writer) error { bells++; return nil },
 		StartSpinner:            func(SpinnerTarget) error { return nil },
 		Now:                     func() time.Time { return time.UnixMilli(99) },
 	})
@@ -232,6 +233,9 @@ func TestRunAgentEventDerivesPermissionAndDetailFromHookJSON(t *testing.T) {
 	if paneOptions[agentStateOption] != statePermission || paneOptions[agentDetailOption] != "Bash" || paneOptions[agentTitlePrefixOption] != "!" {
 		t.Fatalf("paneOptions = %#v", paneOptions)
 	}
+	if bells != 1 {
+		t.Fatalf("bells = %d, want 1", bells)
+	}
 }
 
 func TestRunAgentEventPreToolAskUserIsInputNoSpinner(t *testing.T) {
@@ -239,7 +243,7 @@ func TestRunAgentEventPreToolAskUserIsInputNoSpinner(t *testing.T) {
 	paneOptions := make(map[string]string)
 	spinnerStarted := false
 	input := `{"hook_event_name":"PreToolUse","tool_name":"AskUser"}`
-	err := RunAgentEvent(AgentEvent{Agent: "droid", Event: "pre-tool-use", State: stateWorking, StdinJSON: true}, strings.NewReader(input), nil, StateOps{
+	err := RunAgentEvent(AgentEvent{Agent: "droid", Event: "pre-tool-use", StdinJSON: true}, strings.NewReader(input), nil, StateOps{
 		CurrentThreadContext: func() (tmux.ThreadContext, error) {
 			return tmux.ThreadContext{SessionName: "work", PaneID: "%1"}, nil
 		},
@@ -269,6 +273,33 @@ func TestDeriveStatePostToolAskUserIsWorking(t *testing.T) {
 	state := deriveState(stateWorking, "post-tool-use", hookInput{ToolName: "AskUser"})
 	if state != stateWorking {
 		t.Fatalf("post-tool AskUser state = %q, want working", state)
+	}
+}
+
+func TestDeriveBellForAttentionEvents(t *testing.T) {
+	bellEvents := []string{
+		"notification",
+		"permission-request",
+		"permission.asked",
+		"permission-denied",
+		"elicitation",
+		"stop",
+		"stop-failure",
+		"session.idle",
+		"session.error",
+	}
+	for _, event := range bellEvents {
+		if !deriveBell(false, event) {
+			t.Fatalf("deriveBell(%q) = false, want true", event)
+		}
+	}
+	for _, event := range []string{"session-start", "user-prompt-submit", "pre-tool-use", "post-tool-use"} {
+		if deriveBell(false, event) {
+			t.Fatalf("deriveBell(%q) = true, want false", event)
+		}
+	}
+	if !deriveBell(true, "pre-tool-use") {
+		t.Fatal("explicit bell should be preserved")
 	}
 }
 
@@ -444,6 +475,15 @@ func TestRunAgentEventTargetsPaneFromEnvWithoutSessionSync(t *testing.T) {
 }
 
 func TestRunAgentEventWithoutTrackingEnvDoesNotTouchTmuxTargets(t *testing.T) {
+	clearTrackingEnv(t)
+	original := resolveAncestorContext
+	t.Cleanup(func() {
+		resolveAncestorContext = original
+	})
+	resolveAncestorContext = func(int) (agenttrack.Context, bool) {
+		return agenttrack.Context{}, false
+	}
+
 	var paneWrites int
 	var sessionWrites int
 	spinnerStarted := false
@@ -484,6 +524,7 @@ func TestRunAgentEventWithoutTrackingEnvDoesNotTouchTmuxTargets(t *testing.T) {
 }
 
 func TestRunAgentEventResolvesTargetFromRegisteredAncestor(t *testing.T) {
+	clearTrackingEnv(t)
 	original := resolveAncestorContext
 	t.Cleanup(func() {
 		resolveAncestorContext = original
@@ -537,4 +578,12 @@ func TestRunAgentEventResolvesTargetFromRegisteredAncestor(t *testing.T) {
 	if spinner.PaneID != "%7" || spinner.SessionName != "droid-thread" {
 		t.Fatalf("spinner = %#v", spinner)
 	}
+}
+
+func clearTrackingEnv(t *testing.T) {
+	t.Helper()
+	t.Setenv("KITMUX_AGENT_ID", "")
+	t.Setenv("KITMUX_TMUX_SESSION", "")
+	t.Setenv("KITMUX_TMUX_PANE", "")
+	t.Setenv("KITMUX_TMUX_THREAD", "")
 }

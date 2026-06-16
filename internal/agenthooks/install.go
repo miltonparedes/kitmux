@@ -8,11 +8,17 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"syscall"
 
 	"github.com/miltonparedes/kitmux/internal/agentenv"
 )
 
-const legacyBellCommand = `sh -c 'printf "\007" > /dev/tty 2>/dev/null || printf "\007"'`
+const (
+	legacyBellCommand = `sh -c 'printf "\007" > /dev/tty 2>/dev/null || printf "\007"'`
+	hookCommandKey    = "command"
+	hookTypeKey       = "type"
+	hookTypeCommand   = "command"
+)
 
 var ErrUnsupportedAgent = errors.New("unsupported agent hooks")
 
@@ -106,98 +112,95 @@ func installerForAgent(agentID string) (func(string) (Result, error), bool) {
 }
 
 func installDroid(home string) (Result, error) {
-	hooks := droidHookSpecs()
+	shimPath, changedShim, err := installAgentEventShim(home)
+	if err != nil {
+		return Result{AgentID: "droid", Path: shimPath, Changed: changedShim}, err
+	}
+	hooks := droidHookSpecs(shimPath)
 
-	// Standalone hooks.json (documented primary location for newer droid builds).
 	hooksPath := filepath.Join(home, ".factory", "hooks.json")
 	changedHooks, err := installJSONHooks(hooksPath, hooks)
 	if err != nil {
-		return Result{AgentID: "droid", Path: hooksPath, Changed: changedHooks}, err
+		return Result{AgentID: "droid", Path: hooksPath, Changed: changedShim || changedHooks}, err
 	}
 
-	// settings.json "hooks" key + enableHooks. Current droid builds load hooks from
-	// here and ignore the standalone hooks.json, so this is the operative location.
 	settingsPath := filepath.Join(home, ".factory", "settings.json")
-	changedSettings, err := installDroidSettingsHooks(settingsPath, hooks)
+	changedSettings, err := cleanupDroidSettingsHooks(settingsPath, hooks)
 	if err != nil {
-		return Result{AgentID: "droid", Path: settingsPath, Changed: changedHooks || changedSettings}, err
+		return Result{AgentID: "droid", Path: hooksPath, Changed: changedShim || changedHooks || changedSettings}, err
 	}
-	return Result{AgentID: "droid", Path: settingsPath, Changed: changedHooks || changedSettings}, nil
+	return Result{AgentID: "droid", Path: hooksPath, Changed: changedShim || changedHooks || changedSettings}, nil
 }
 
-func droidHookSpecs() []hookSpec {
+func droidHookSpecs(shimPath string) []hookSpec {
 	return []hookSpec{
-		eventHook("droid", "SessionStart", "", "session-start", stateIdle, false),
-		eventHook("droid", "UserPromptSubmit", "", "user-prompt-submit", stateWorking, false),
-		eventHook("droid", "PreToolUse", "*", "pre-tool-use", stateWorking, false),
-		eventHook("droid", "PostToolUse", "*", "post-tool-use", stateWorking, false),
-		eventHook("droid", "Notification", "", "notification", stateInput, true),
-		eventHook("droid", "Stop", "", "stop", stateIdle, true),
-		eventHook("droid", "SessionEnd", "", "session-end", stateIdle, false),
+		eventHook(shimPath, "droid", "SessionStart", "", "session-start", stateIdle, false),
+		eventHook(shimPath, "droid", "UserPromptSubmit", "", "user-prompt-submit", stateWorking, false),
+		eventHook(shimPath, "droid", "PreToolUse", "*", "pre-tool-use", stateWorking, false),
+		eventHook(shimPath, "droid", "PostToolUse", "*", "post-tool-use", stateWorking, false),
+		eventHook(shimPath, "droid", "Notification", "", "notification", stateInput, true),
+		eventHook(shimPath, "droid", "Stop", "", "stop", stateIdle, true),
+		eventHook(shimPath, "droid", "SessionEnd", "", "session-end", stateIdle, false),
 	}
 }
 
-func installDroidSettingsHooks(path string, hooks []hookSpec) (bool, error) {
-	doc, err := readJSON(path)
-	if err != nil {
+func cleanupDroidSettingsHooks(path string, hooks []hookSpec) (bool, error) {
+	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
+		return false, nil
+	} else if err != nil {
 		return false, err
 	}
-	changed := setBool(doc, "enableHooks", true)
-	if addCommandHooks(doc, hooks) {
-		changed = true
-	}
-	if changed {
-		if err := writeJSON(path, doc); err != nil {
-			return false, err
-		}
-	}
-	return changed, nil
+	return updateJSON(path, func(doc map[string]any) bool {
+		return removeCommandHooks(doc, hooks)
+	})
 }
 
 func installClaude(home string) (Result, error) {
-	path := filepath.Join(home, ".claude", "settings.json")
-	doc, err := readJSON(path)
+	shimPath, changedShim, err := installAgentEventShim(home)
 	if err != nil {
-		return Result{AgentID: "claude", Path: path}, err
+		return Result{AgentID: "claude", Path: shimPath, Changed: changedShim}, err
 	}
-	changed := setString(doc, "preferredNotifChannel", "terminal_bell")
-	if addCommandHooks(doc, []hookSpec{
-		eventHook("claude", "SessionStart", "", "session-start", stateIdle, false),
-		eventHook("claude", "UserPromptSubmit", "", "user-prompt-submit", stateWorking, false),
-		eventHook("claude", "PreToolUse", "*", "pre-tool-use", stateWorking, false),
-		eventHook("claude", "PostToolUse", "*", "post-tool-use", stateWorking, false),
-		eventHook("claude", "PostToolUseFailure", "*", "post-tool-use-failure", stateWorking, false),
-		eventHook("claude", "PostToolBatch", "", "post-tool-batch", stateWorking, false),
-		eventHook("claude", "PermissionRequest", "", "permission-request", statePermission, true),
-		eventHook("claude", "PermissionDenied", "", "permission-denied", stateError, true),
-		eventHook("claude", "Elicitation", "", "elicitation", stateInput, true),
-		eventHook("claude", "ElicitationResult", "", "elicitation-result", stateWorking, false),
-		eventHook("claude", "Notification", "", "notification", stateInput, true),
-		eventHook("claude", "Stop", "", "stop", stateIdle, true),
-		eventHook("claude", "StopFailure", "", "stop-failure", stateIdle, true),
-		eventHook("claude", "SessionEnd", "", "session-end", stateIdle, false),
-	}) {
-		changed = true
-	}
-	if changed {
-		if err := writeJSON(path, doc); err != nil {
-			return Result{AgentID: "claude", Path: path}, err
+	path := filepath.Join(home, ".claude", "settings.json")
+	changed, err := updateJSON(path, func(doc map[string]any) bool {
+		changed := setString(doc, "preferredNotifChannel", "terminal_bell")
+		if addCommandHooks(doc, []hookSpec{
+			eventHook(shimPath, "claude", "SessionStart", "", "session-start", stateIdle, false),
+			eventHook(shimPath, "claude", "UserPromptSubmit", "", "user-prompt-submit", stateWorking, false),
+			eventHook(shimPath, "claude", "PreToolUse", "*", "pre-tool-use", stateWorking, false),
+			eventHook(shimPath, "claude", "PostToolUse", "*", "post-tool-use", stateWorking, false),
+			eventHook(shimPath, "claude", "PostToolUseFailure", "*", "post-tool-use-failure", stateWorking, false),
+			eventHook(shimPath, "claude", "PostToolBatch", "", "post-tool-batch", stateWorking, false),
+			eventHook(shimPath, "claude", "PermissionRequest", "", "permission-request", statePermission, true),
+			eventHook(shimPath, "claude", "PermissionDenied", "", "permission-denied", stateError, true),
+			eventHook(shimPath, "claude", "Elicitation", "", "elicitation", stateInput, true),
+			eventHook(shimPath, "claude", "ElicitationResult", "", "elicitation-result", stateWorking, false),
+			eventHook(shimPath, "claude", "Notification", "", "notification", stateInput, true),
+			eventHook(shimPath, "claude", "Stop", "", "stop", stateIdle, true),
+			eventHook(shimPath, "claude", "StopFailure", "", "stop-failure", stateIdle, true),
+			eventHook(shimPath, "claude", "SessionEnd", "", "session-end", stateIdle, false),
+		}) {
+			changed = true
 		}
-	}
-	return Result{AgentID: "claude", Path: path, Changed: changed}, nil
+		return changed
+	})
+	return Result{AgentID: "claude", Path: path, Changed: changedShim || changed}, err
 }
 
 func installCodex(home string) (Result, error) {
+	shimPath, changedShim, err := installAgentEventShim(home)
+	if err != nil {
+		return Result{AgentID: "codex", Path: shimPath, Changed: changedShim}, err
+	}
 	path := filepath.Join(home, ".codex", "hooks.json")
 	changed, err := installJSONHooks(path, []hookSpec{
-		eventHook("codex", "SessionStart", "", "session-start", stateIdle, false),
-		eventHook("codex", "UserPromptSubmit", "", "user-prompt-submit", stateWorking, false),
-		eventHook("codex", "PreToolUse", "", "pre-tool-use", stateWorking, false),
-		eventHook("codex", "PermissionRequest", "", "permission-request", statePermission, true),
-		eventHook("codex", "PostToolUse", "", "post-tool-use", stateWorking, false),
-		eventHook("codex", "Stop", "", "stop", stateIdle, true),
+		eventHook(shimPath, "codex", "SessionStart", "", "session-start", stateIdle, false),
+		eventHook(shimPath, "codex", "UserPromptSubmit", "", "user-prompt-submit", stateWorking, false),
+		eventHook(shimPath, "codex", "PreToolUse", "", "pre-tool-use", stateWorking, false),
+		eventHook(shimPath, "codex", "PermissionRequest", "", "permission-request", statePermission, true),
+		eventHook(shimPath, "codex", "PostToolUse", "", "post-tool-use", stateWorking, false),
+		eventHook(shimPath, "codex", "Stop", "", "stop", stateIdle, true),
 	})
-	return Result{AgentID: "codex", Path: path, Changed: changed}, err
+	return Result{AgentID: "codex", Path: path, Changed: changedShim || changed}, err
 }
 
 func installOpenCode(home string) (Result, error) {
@@ -221,17 +224,9 @@ func installOpenCode(home string) (Result, error) {
 }
 
 func installJSONHooks(path string, hooks []hookSpec) (bool, error) {
-	doc, err := readJSON(path)
-	if err != nil {
-		return false, err
-	}
-	changed := addCommandHooks(doc, hooks)
-	if changed {
-		if err := writeJSON(path, doc); err != nil {
-			return false, err
-		}
-	}
-	return changed, nil
+	return updateJSON(path, func(doc map[string]any) bool {
+		return addCommandHooks(doc, hooks)
+	})
 }
 
 func readJSON(path string) (map[string]any, error) {
@@ -265,19 +260,96 @@ func writeJSON(path string, doc map[string]any) error {
 		return err
 	}
 	data = append(data, '\n')
-	return os.WriteFile(path, data, 0o600)
+	return writeFileAtomic(path, data, 0o600)
+}
+
+func updateJSON(path string, update func(map[string]any) bool) (bool, error) {
+	return withFileLock(path, func() (bool, error) {
+		doc, err := readJSON(path)
+		if err != nil {
+			return false, err
+		}
+		changed := update(doc)
+		if !changed {
+			return false, nil
+		}
+		if err := writeJSON(path, doc); err != nil {
+			return false, err
+		}
+		return true, nil
+	})
+}
+
+func withFileLock(path string, fn func() (bool, error)) (bool, error) {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return false, err
+	}
+	// #nosec G304 -- lock path is derived from fixed agent config paths under the user's home directory.
+	lockFile, err := os.OpenFile(path+".lock", os.O_CREATE|os.O_RDWR, 0o600)
+	if err != nil {
+		return false, err
+	}
+	defer func() { _ = lockFile.Close() }()
+	if err := lockExclusive(lockFile); err != nil {
+		return false, err
+	}
+	defer func() { _ = unlockFile(lockFile) }()
+	return fn()
+}
+
+func lockExclusive(file *os.File) error {
+	return syscall.FcntlFlock(file.Fd(), syscall.F_SETLKW, &syscall.Flock_t{Type: syscall.F_WRLCK})
+}
+
+func unlockFile(file *os.File) error {
+	return syscall.FcntlFlock(file.Fd(), syscall.F_SETLK, &syscall.Flock_t{Type: syscall.F_UNLCK})
+}
+
+func writeFileAtomic(path string, data []byte, perm os.FileMode) error {
+	if err := os.MkdirAll(filepath.Dir(path), 0o700); err != nil {
+		return err
+	}
+	tmp, err := os.CreateTemp(filepath.Dir(path), "."+filepath.Base(path)+".tmp-*")
+	if err != nil {
+		return err
+	}
+	tmpName := tmp.Name()
+	defer func() { _ = os.Remove(tmpName) }()
+	if err := tmp.Chmod(perm); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if _, err := tmp.Write(data); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Sync(); err != nil {
+		_ = tmp.Close()
+		return err
+	}
+	if err := tmp.Close(); err != nil {
+		return err
+	}
+	// #nosec G703 -- source and destination are derived from fixed agent config paths under the user's home directory.
+	if err := os.Rename(tmpName, path); err != nil {
+		return err
+	}
+	syncDir(filepath.Dir(path))
+	return nil
+}
+
+func syncDir(path string) {
+	// #nosec G304 -- path is a fixed agent config directory under the user's home directory.
+	dir, err := os.Open(path)
+	if err != nil {
+		return
+	}
+	defer func() { _ = dir.Close() }()
+	_ = dir.Sync()
 }
 
 func setString(doc map[string]any, key, value string) bool {
 	if got, ok := doc[key].(string); ok && got == value {
-		return false
-	}
-	doc[key] = value
-	return true
-}
-
-func setBool(doc map[string]any, key string, value bool) bool {
-	if got, ok := doc[key].(bool); ok && got == value {
 		return false
 	}
 	doc[key] = value
@@ -296,6 +368,35 @@ func addCommandHooks(doc map[string]any, hooks []hookSpec) bool {
 		if addCommandHook(rawHooks, spec) {
 			changed = true
 		}
+	}
+	return changed
+}
+
+func removeCommandHooks(doc map[string]any, hooks []hookSpec) bool {
+	rawHooks, _ := doc["hooks"].(map[string]any)
+	if rawHooks == nil {
+		return false
+	}
+
+	changed := false
+	for _, spec := range hooks {
+		groups, _ := rawHooks[spec.Event].([]any)
+		if len(groups) == 0 {
+			continue
+		}
+		nextGroups, removed := removeAgentEventHooks(groups, spec)
+		if !removed {
+			continue
+		}
+		changed = true
+		if len(nextGroups) == 0 {
+			delete(rawHooks, spec.Event)
+		} else {
+			rawHooks[spec.Event] = nextGroups
+		}
+	}
+	if changed && len(rawHooks) == 0 {
+		delete(doc, "hooks")
 	}
 	return changed
 }
@@ -320,9 +421,9 @@ func addCommandHook(rawHooks map[string]any, spec hookSpec) bool {
 	group := map[string]any{
 		"hooks": []any{
 			map[string]any{
-				"type":    "command",
-				"command": spec.Command,
-				"timeout": float64(5),
+				hookTypeKey:    hookTypeCommand,
+				hookCommandKey: spec.Command,
+				"timeout":      float64(5),
 			},
 		},
 	}
@@ -331,6 +432,59 @@ func addCommandHook(rawHooks map[string]any, spec hookSpec) bool {
 	}
 	rawHooks[spec.Event] = append(groups, group)
 	return true
+}
+
+func removeAgentEventHooks(groups []any, spec hookSpec) ([]any, bool) {
+	changed := false
+	out := make([]any, 0, len(groups))
+	for _, group := range groups {
+		groupMap, ok := group.(map[string]any)
+		if !ok {
+			out = append(out, group)
+			continue
+		}
+		hooks, ok := groupMap["hooks"].([]any)
+		if !ok {
+			out = append(out, group)
+			continue
+		}
+		nextHooks, groupChanged := removeAgentEventGroup(hooks, spec)
+		if len(nextHooks) == 0 {
+			changed = true
+			continue
+		}
+		if groupChanged {
+			groupMap["hooks"] = nextHooks
+			changed = true
+		}
+		out = append(out, group)
+	}
+	if len(out) != len(groups) {
+		changed = true
+	}
+	return out, changed
+}
+
+func removeAgentEventGroup(hooks []any, spec hookSpec) ([]any, bool) {
+	changed := false
+	nextHooks := make([]any, 0, len(hooks))
+	for _, hook := range hooks {
+		if isOwnedCommandHook(hook, spec) {
+			changed = true
+			continue
+		}
+		nextHooks = append(nextHooks, hook)
+	}
+	return nextHooks, changed
+}
+
+func isOwnedCommandHook(hook any, spec hookSpec) bool {
+	hookMap, ok := hook.(map[string]any)
+	command, _ := hookMap[hookCommandKey].(string)
+	if !ok || hookMap[hookTypeKey] != hookTypeCommand {
+		return false
+	}
+	return isAgentEventCommand(command, spec) || hasExactCommand(command, spec.ReplaceCommands)
 }
 
 func normalizeAgentEventHooks(groups []any, spec hookSpec) ([]any, bool) {
@@ -383,8 +537,8 @@ func normalizeAgentEventGroup(hooks []any, spec hookSpec, seenCurrent *bool) ([]
 
 func shouldDropAgentEventHook(hook any, spec hookSpec, seenCurrent *bool) bool {
 	hookMap, ok := hook.(map[string]any)
-	command, _ := hookMap["command"].(string)
-	if !ok || hookMap["type"] != "command" || !isAgentEventCommand(command, spec) {
+	command, _ := hookMap[hookCommandKey].(string)
+	if !ok || hookMap[hookTypeKey] != hookTypeCommand || !isAgentEventCommand(command, spec) {
 		return false
 	}
 	if command == spec.Command && !*seenCurrent {
@@ -395,9 +549,28 @@ func shouldDropAgentEventHook(hook any, spec hookSpec, seenCurrent *bool) bool {
 }
 
 func isAgentEventCommand(command string, spec hookSpec) bool {
-	return strings.Contains(command, "hook agent-event") &&
-		strings.Contains(command, "--agent "+spec.AgentID) &&
-		strings.Contains(command, "--event "+spec.AgentEvent)
+	if !hasFlagValue(command, "--agent", spec.AgentID) || !hasFlagValue(command, "--event", spec.AgentEvent) {
+		return false
+	}
+	return command == spec.Command ||
+		strings.Contains(command, "hook agent-event") ||
+		strings.Contains(command, ".config/kitmux/hooks/agent-event")
+}
+
+func hasFlagValue(command, flag, value string) bool {
+	return strings.Contains(command, flag+" "+value) ||
+		strings.Contains(command, flag+"="+value) ||
+		strings.Contains(command, flag+" "+hookShellQuote(value)) ||
+		strings.Contains(command, flag+"="+hookShellQuote(value))
+}
+
+func hasExactCommand(command string, values []string) bool {
+	for _, value := range values {
+		if command == value {
+			return true
+		}
+	}
+	return false
 }
 
 func dedupeCommandHooks(groups []any, command string) ([]any, bool) {
@@ -418,7 +591,7 @@ func dedupeCommandHooks(groups []any, command string) ([]any, bool) {
 		nextHooks := make([]any, 0, len(hooks))
 		for _, hook := range hooks {
 			hookMap, ok := hook.(map[string]any)
-			if ok && hookMap["type"] == "command" && hookMap["command"] == command {
+			if ok && hookMap[hookTypeKey] == hookTypeCommand && hookMap[hookCommandKey] == command {
 				if seen {
 					changed = true
 					continue
@@ -464,9 +637,9 @@ func replaceCommands(groups []any, oldCommands []string, newCommand string) bool
 			if !ok {
 				continue
 			}
-			command, _ := hookMap["command"].(string)
+			command, _ := hookMap[hookCommandKey].(string)
 			if _, ok := replace[command]; ok {
-				hookMap["command"] = newCommand
+				hookMap[hookCommandKey] = newCommand
 				changed = true
 			}
 		}
@@ -486,7 +659,7 @@ func hasCommand(groups []any, command string) bool {
 			if !ok {
 				continue
 			}
-			if hookMap["type"] == "command" && hookMap["command"] == command {
+			if hookMap[hookTypeKey] == hookTypeCommand && hookMap[hookCommandKey] == command {
 				return true
 			}
 		}
@@ -494,19 +667,19 @@ func hasCommand(groups []any, command string) bool {
 	return false
 }
 
-func eventHook(agent, hookEvent, matcher, event, state string, bell bool) hookSpec {
+func eventHook(shimPath, agent, hookEvent, matcher, event, state string, bell bool) hookSpec {
 	return hookSpec{
 		Event:           hookEvent,
 		Matcher:         matcher,
-		Command:         agentEventCommand(agent, event, state, bell),
+		Command:         agentEventCommand(shimPath, agent, event),
 		ReplaceCommands: commandReplacements(agent, event, state, bell, true),
 		AgentID:         agent,
 		AgentEvent:      event,
 	}
 }
 
-func agentEventCommand(agent, event, state string, bell bool) string {
-	return agentenv.WrapHookCommand(agent, rawAgentEventCommand(agent, event, state, bell, true))
+func agentEventCommand(shimPath, agent, event string) string {
+	return strings.Join([]string{hookShellQuote(shimPath), "--agent", agent, "--event", event, "--stdin-json"}, " ")
 }
 
 func rawAgentEventCommand(agent, event, state string, bell, stdinJSON bool) string {
