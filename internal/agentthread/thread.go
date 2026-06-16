@@ -14,6 +14,8 @@ import (
 	"github.com/miltonparedes/kitmux/internal/tmux"
 )
 
+var switchClient = tmux.SwitchClient
+
 type Spec struct {
 	AgentID string
 	ModeID  string
@@ -106,6 +108,14 @@ func EnsureAndAttach(spec Spec, ops Ops) error {
 	return ops.withDefaults().Attach(resolved.SessionName)
 }
 
+func CreateAndAttach(spec Spec, ops Ops) error {
+	resolved, err := Create(spec, ops)
+	if err != nil {
+		return err
+	}
+	return ops.withDefaults().Attach(resolved.SessionName)
+}
+
 func Ensure(spec Spec, ops Ops) (Resolved, error) {
 	resolved, err := Resolve(spec)
 	if err != nil {
@@ -119,7 +129,7 @@ func Ensure(spec Spec, ops Ops) (Resolved, error) {
 		paneID, err := ops.NewSessionWithCommand(
 			resolved.SessionName,
 			resolved.Dir,
-			agentenv.WrapTmuxCommand(resolved.Agent.ID, resolved.SessionName, resolved.Agent.FullCommand(resolved.Mode), true),
+			threadCommand(resolved.Agent.ID, resolved.SessionName, resolved.Agent.FullCommand(resolved.Mode)),
 		)
 		if err != nil {
 			return Resolved{}, err
@@ -152,7 +162,7 @@ func Create(spec Spec, ops Ops) (Resolved, error) {
 	paneID, err := ops.NewSessionWithCommand(
 		resolved.SessionName,
 		resolved.Dir,
-		agentenv.WrapTmuxCommand(resolved.Agent.ID, resolved.SessionName, resolved.Agent.FullCommand(resolved.Mode), true),
+		threadCommand(resolved.Agent.ID, resolved.SessionName, resolved.Agent.FullCommand(resolved.Mode)),
 	)
 	if err != nil {
 		return Resolved{}, err
@@ -167,6 +177,14 @@ func Create(spec Spec, ops Ops) (Resolved, error) {
 		return Resolved{}, err
 	}
 	return resolved, nil
+}
+
+func threadCommand(agentID, sessionName, command string) string {
+	exe, err := os.Executable()
+	if err != nil || exe == "" {
+		return agentenv.WrapTmuxCommand(agentID, sessionName, command, true)
+	}
+	return agentenv.WrapRegisteredTmuxCommand(agentID, sessionName, command, true, exe)
 }
 
 func uniqueSessionName(base string, has func(string) bool) string {
@@ -215,6 +233,31 @@ func InstallSupportForSession(session tmux.Session, ops Ops) error {
 
 func ApplySupport(spec SupportSpec, ops Ops) error {
 	ops = ops.withDefaults()
+	spec = normalizeSupportSpec(spec)
+	if err := setSessionOptions(spec.SessionName, supportSessionOptions(spec), ops); err != nil {
+		return err
+	}
+	if spec.Created {
+		if err := setSessionOptions(spec.SessionName, createdSessionOptions(), ops); err != nil {
+			return err
+		}
+	}
+	if err := ops.SetWindowOption(spec.TargetPane, "allow-passthrough", "on"); err != nil {
+		return fmt.Errorf("set allow-passthrough: %w", err)
+	}
+	if err := setThreadHooks(spec.SessionName, ops); err != nil {
+		return err
+	}
+	if !spec.Created {
+		return nil
+	}
+	if err := ops.SetPaneTitle(spec.TargetPane, spec.InitialTitle); err != nil {
+		return fmt.Errorf("set pane title: %w", err)
+	}
+	return nil
+}
+
+func normalizeSupportSpec(spec SupportSpec) SupportSpec {
 	if spec.TargetPane == "" {
 		spec.TargetPane = spec.SessionName
 	}
@@ -225,10 +268,16 @@ func ApplySupport(spec SupportSpec, ops Ops) error {
 			AgentID: spec.AgentID,
 		})
 	}
-	for _, opt := range []struct {
-		name  string
-		value string
-	}{
+	return spec
+}
+
+type sessionOption struct {
+	name  string
+	value string
+}
+
+func supportSessionOptions(spec SupportSpec) []sessionOption {
+	return []sessionOption{
 		{"status", "off"},
 		{"set-titles", "on"},
 		{"set-titles-string", threadTitleFormat()},
@@ -240,41 +289,33 @@ func ApplySupport(spec SupportSpec, ops Ops) error {
 		{"@kitmux_agent", spec.AgentID},
 		{"@kitmux_agent_support", supportVersion},
 		{"@kitmux_initial_title", spec.InitialTitle},
-	} {
-		if err := ops.SetSessionOption(spec.SessionName, opt.name, opt.value); err != nil {
+	}
+}
+
+func createdSessionOptions() []sessionOption {
+	return []sessionOption{
+		{"@kitmux_agent_state", "idle"},
+		{"@kitmux_agent_event", "thread-created"},
+		{"@kitmux_agent_detail", ""},
+		{"@kitmux_agent_title_prefix", ""},
+		{"@kitmux_agent_title_display", ""},
+	}
+}
+
+func setSessionOptions(sessionName string, options []sessionOption, ops Ops) error {
+	for _, opt := range options {
+		if err := ops.SetSessionOption(sessionName, opt.name, opt.value); err != nil {
 			return fmt.Errorf("set session option %s: %w", opt.name, err)
 		}
 	}
-	if spec.Created {
-		if err := ops.SetSessionOption(spec.SessionName, "@kitmux_agent_state", "idle"); err != nil {
-			return fmt.Errorf("set session option @kitmux_agent_state: %w", err)
-		}
-		if err := ops.SetSessionOption(spec.SessionName, "@kitmux_agent_event", "thread-created"); err != nil {
-			return fmt.Errorf("set session option @kitmux_agent_event: %w", err)
-		}
-		if err := ops.SetSessionOption(spec.SessionName, "@kitmux_agent_detail", ""); err != nil {
-			return fmt.Errorf("set session option @kitmux_agent_detail: %w", err)
-		}
-		if err := ops.SetSessionOption(spec.SessionName, "@kitmux_agent_title_prefix", ""); err != nil {
-			return fmt.Errorf("set session option @kitmux_agent_title_prefix: %w", err)
-		}
-		if err := ops.SetSessionOption(spec.SessionName, "@kitmux_agent_title_display", ""); err != nil {
-			return fmt.Errorf("set session option @kitmux_agent_title_display: %w", err)
-		}
-	}
-	if err := ops.SetWindowOption(spec.TargetPane, "allow-passthrough", "on"); err != nil {
-		return fmt.Errorf("set allow-passthrough: %w", err)
-	}
+	return nil
+}
+
+func setThreadHooks(sessionName string, ops Ops) error {
 	for _, hook := range threadHooks() {
-		if err := ops.SetHook(spec.SessionName, hook.name, hook.command); err != nil {
+		if err := ops.SetHook(sessionName, hook.name, hook.command); err != nil {
 			return fmt.Errorf("set hook %s: %w", hook.name, err)
 		}
-	}
-	if !spec.Created {
-		return nil
-	}
-	if err := ops.SetPaneTitle(spec.TargetPane, spec.InitialTitle); err != nil {
-		return fmt.Errorf("set pane title: %w", err)
 	}
 	return nil
 }
@@ -299,7 +340,8 @@ func agentName(agentID string) string {
 }
 
 func threadTitleFormat() string {
-	return "#{?#{@kitmux_agent_title_prefix},#{@kitmux_agent_title_prefix}#{?#{@kitmux_agent_title_display}, #{@kitmux_agent_title_display},},#{pane_title}}"
+	return "#{?#{@kitmux_agent_title_prefix},#{@kitmux_agent_title_prefix}" +
+		"#{?#{@kitmux_agent_title_display}, #{@kitmux_agent_title_display},},#{pane_title}}"
 }
 
 const supportVersion = "4"
@@ -313,11 +355,11 @@ func threadHooks() []threadHook {
 	return []threadHook{
 		{
 			name:    "client-attached",
-			command: `refresh-client -t "#{hook_client}"`,
+			command: "refresh-client",
 		},
 		{
 			name:    "client-session-changed",
-			command: `refresh-client -t "#{hook_client}"`,
+			command: "refresh-client",
 		},
 		{
 			name:    "alert-bell",
@@ -333,6 +375,9 @@ func alertBellHookCommand() string {
 }
 
 func Attach(sessionName string) error {
+	if os.Getenv("TMUX") != "" {
+		return switchClient(sessionName)
+	}
 	tmuxPath, err := exec.LookPath("tmux")
 	if err != nil {
 		return err

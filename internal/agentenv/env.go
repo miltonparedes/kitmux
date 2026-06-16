@@ -10,24 +10,38 @@ const (
 )
 
 func WrapTmuxCommand(agentID, sessionName, command string, thread bool) string {
+	parts := append(trackingAssignments(agentID, sessionName, thread), "exec", command)
+	return strings.Join(parts, " ")
+}
+
+func WrapRegisteredTmuxCommand(agentID, sessionName, command string, thread bool, kitmuxPath string) string {
+	assignments := trackingAssignments(agentID, sessionName, thread)
+	exports := "export " + AgentIDKey + " " + TmuxSessionKey + " " + TmuxPaneKey + " " + TmuxThreadKey
+	register := shellQuote(kitmuxPath) + ` hook agent-register --pid "$$" --agent "$` + AgentIDKey +
+		`" --session "$` + TmuxSessionKey + `" --pane "$` + TmuxPaneKey + `" --thread "$` + TmuxThreadKey + `"`
+	assignments = append(assignments, ";", exports, ";", register, ">/dev/null", "2>&1", "||", "true", ";", "exec", command)
+	return strings.Join(assignments, " ")
+}
+
+func trackingAssignments(agentID, sessionName string, thread bool) []string {
 	parts := []string{
 		AgentIDKey + "=" + shellQuote(agentID),
 		TmuxSessionKey + "=" + shellValueOrTmuxFormat(sessionName, "session_name"),
 		TmuxPaneKey + "=" + tmuxPaneValue(),
+		TmuxThreadKey + "=" + shellQuote(""),
 	}
 	if thread {
-		parts = append(parts, TmuxThreadKey+"=1")
+		parts[len(parts)-1] = TmuxThreadKey + "=1"
 	}
-	parts = append(parts, "exec", command)
-	return strings.Join(parts, " ")
+	return parts
 }
 
 func WrapHookCommand(agentID, command string) string {
 	parts := []string{
 		AgentIDKey + "=" + shellQuote(agentID),
-		TmuxSessionKey + `="${` + TmuxSessionKey + `:-$(tmux display-message -p '#{session_name}' 2>/dev/null)}"`,
-		TmuxPaneKey + `="${` + TmuxPaneKey + `:-${TMUX_PANE:-$(tmux display-message -p '#{pane_id}' 2>/dev/null)}}"`,
-		TmuxThreadKey + `="${` + TmuxThreadKey + `:-$(tmux display-message -p '#{@kitmux_thread}' 2>/dev/null)}"`,
+		TmuxSessionKey + `="${` + TmuxSessionKey + `:-}"`,
+		TmuxPaneKey + `="${` + TmuxPaneKey + `:-}"`,
+		TmuxThreadKey + `="${` + TmuxThreadKey + `:-}"`,
 		command,
 	}
 	return strings.Join(parts, " ")

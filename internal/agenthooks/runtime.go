@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/miltonparedes/kitmux/internal/agents"
+	"github.com/miltonparedes/kitmux/internal/agenttrack"
 	"github.com/miltonparedes/kitmux/internal/tmux"
 )
 
@@ -23,7 +24,17 @@ const (
 	agentTitleDisplayOption = "@kitmux_agent_title_display"
 )
 
+const (
+	stateIdle       = "idle"
+	stateWorking    = "working"
+	stateInput      = "input"
+	statePermission = "permission"
+	stateError      = "error"
+)
+
 var SpinnerFrames = []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+
+var resolveAncestorContext = agenttrack.ResolveAncestor
 
 type StateEvent struct {
 	State string
@@ -114,18 +125,21 @@ func RunAgentEvent(event AgentEvent, in io.Reader, out io.Writer, ops StateOps) 
 
 	detail := sanitizeDetail(firstNonEmpty(event.Detail, deriveDetail(input)))
 	updated := fmt.Sprintf("%d", ops.Now().UnixMilli())
-	paneTitle := currentPaneTitle(ops)
-	prefix := titlePrefix(state, agentID, paneTitle)
+	prefix := ""
 	displayTitle := ""
-	if prefix != "" {
-		displayTitle = stripLeadingStateGlyph(paneTitle)
+	if hasTmuxTarget(ctx) {
+		paneTitle := currentPaneTitle(ops)
+		prefix = titlePrefix(state, agentID, paneTitle)
+		if prefix != "" {
+			displayTitle = stripLeadingStateGlyph(paneTitle)
+		}
 	}
 
 	setPaneOptions(ops, ctx.PaneID, state, eventName, detail, updated, prefix, displayTitle)
 	if shouldSyncSession(ctx) {
 		setSessionOptions(ops, ctx.SessionName, state, eventName, detail, updated, prefix, displayTitle)
 		ops.RefreshSessionClients(ctx.SessionName)
-		if state == "working" && prefix != "" {
+		if state == stateWorking && prefix != "" {
 			_ = ops.StartSpinner(SpinnerTarget{
 				PaneID:      ctx.PaneID,
 				SessionName: ctx.SessionName,
@@ -133,7 +147,7 @@ func RunAgentEvent(event AgentEvent, in io.Reader, out io.Writer, ops StateOps) 
 				Token:       updated,
 			})
 		}
-	} else if state == "working" && prefix != "" {
+	} else if ctx.PaneID != "" && state == stateWorking && prefix != "" {
 		_ = ops.StartSpinner(SpinnerTarget{
 			PaneID:  ctx.PaneID,
 			AgentID: agentID,
@@ -156,14 +170,24 @@ func targetContext() tmux.ThreadContext {
 		ctx.Thread = true
 	}
 	ctx.AgentID = os.Getenv("KITMUX_AGENT_ID")
+	if hasTmuxTarget(ctx) {
+		return ctx
+	}
+	if tracked, ok := resolveAncestorContext(os.Getppid()); ok {
+		ctx.AgentID = firstNonEmpty(ctx.AgentID, tracked.AgentID)
+		ctx.SessionName = tracked.SessionName
+		ctx.PaneID = tracked.PaneID
+		ctx.Thread = tracked.Thread
+	}
 	return ctx
 }
 
 func shouldSyncSession(ctx tmux.ThreadContext) bool {
-	if ctx.Thread {
-		return true
-	}
-	return ctx.SessionName != "" && ctx.PaneID == ""
+	return ctx.SessionName != "" && (ctx.Thread || ctx.PaneID == "")
+}
+
+func hasTmuxTarget(ctx tmux.ThreadContext) bool {
+	return ctx.PaneID != "" || shouldSyncSession(ctx)
 }
 
 func setPaneOptions(ops StateOps, paneID, state, eventName, detail, updated, prefix, displayTitle string) {
@@ -182,6 +206,9 @@ func setPaneOptions(ops StateOps, paneID, state, eventName, detail, updated, pre
 }
 
 func setSessionOptions(ops StateOps, sessionName, state, eventName, detail, updated, prefix, displayTitle string) {
+	if sessionName == "" {
+		return
+	}
 	set := ops.SetCurrentSessionOption
 	if sessionName != "" && ops.SetSessionOption != nil {
 		set = func(option, value string) error {
@@ -234,21 +261,21 @@ func deriveState(explicit, eventName string, input hookInput) string {
 	key := eventKey(eventName)
 	toolKey := eventKey(input.ToolName)
 	if key == "elicitation" {
-		return "input"
+		return stateInput
 	}
 	// AskUser (droid) / AskUserQuestion (claude) blocks waiting for the user, so the
 	// PreToolUse phase is an attention state. PostToolUse means the user answered.
 	if strings.HasPrefix(toolKey, "askuser") && !strings.HasPrefix(key, "posttool") {
-		return "input"
+		return stateInput
 	}
 	if key == "elicitationresult" {
-		return "working"
+		return stateWorking
 	}
 	if key == "permissionrequest" || key == "permissionasked" {
-		return "permission"
+		return statePermission
 	}
 	if key == "permissiondenied" || key == "sessionerror" {
-		return "error"
+		return stateError
 	}
 	if key == "notification" {
 		return notificationState(input)
@@ -258,21 +285,22 @@ func deriveState(explicit, eventName string, input hookInput) string {
 	}
 	switch key {
 	case "sessionstart", "stop", "stopfailure", "sessionend", "sessionidle":
-		return "idle"
-	case "userpromptsubmit", "pretooluse", "posttooluse", "posttoolusefailure", "posttoolbatch", "toolexecutebefore", "toolexecuteafter", "permissionreplied":
-		return "working"
+		return stateIdle
+	case "userpromptsubmit", "pretooluse", "posttooluse", "posttoolusefailure", "posttoolbatch",
+		"toolexecutebefore", "toolexecuteafter", "permissionreplied":
+		return stateWorking
 	default:
-		return "idle"
+		return stateIdle
 	}
 }
 
 func notificationState(input hookInput) string {
 	notifType := eventKey(input.NotificationType)
 	if notifType == "permissionprompt" || notifType == "permissionrequest" ||
-		strings.Contains(strings.ToLower(input.Message), "permission") {
-		return "permission"
+		strings.Contains(strings.ToLower(input.Message), statePermission) {
+		return statePermission
 	}
-	return "input"
+	return stateInput
 }
 
 func deriveDetail(input hookInput) string {
@@ -299,7 +327,7 @@ func deriveDetail(input hookInput) string {
 
 func normalizeState(state string) (string, error) {
 	switch state {
-	case "idle", "working", "input", "permission", "error":
+	case stateIdle, stateWorking, stateInput, statePermission, stateError:
 		return state, nil
 	default:
 		return "", fmt.Errorf("invalid agent state %q", state)
@@ -338,13 +366,13 @@ func currentPaneTitle(ops StateOps) string {
 
 func titlePrefix(state, agentID, paneTitle string) string {
 	switch state {
-	case "working":
+	case stateWorking:
 		return SpinnerFrames[0]
-	case "input":
+	case stateInput:
 		return "?"
-	case "permission":
+	case statePermission:
 		return "!"
-	case "error":
+	case stateError:
 		return "×"
 	case "idle":
 		symbol := agentSymbol(agentID)
@@ -499,7 +527,7 @@ func RunSpinner(target SpinnerTarget) error {
 			if err != nil {
 				return nil
 			}
-			if state != "working" {
+			if state != stateWorking {
 				restoreStaticPrefix(target)
 				return nil
 			}
@@ -514,7 +542,7 @@ func RunSpinner(target SpinnerTarget) error {
 
 func restoreStaticPrefix(target SpinnerTarget) {
 	state, _, err := readSpinnerState(target.PaneID)
-	if err != nil || state == "working" {
+	if err != nil || state == stateWorking {
 		return
 	}
 	paneTitle := ""

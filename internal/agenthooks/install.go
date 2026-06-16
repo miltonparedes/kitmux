@@ -21,6 +21,8 @@ type hookSpec struct {
 	Matcher         string
 	Command         string
 	ReplaceCommands []string
+	AgentID         string
+	AgentEvent      string
 }
 
 type Result struct {
@@ -125,13 +127,13 @@ func installDroid(home string) (Result, error) {
 
 func droidHookSpecs() []hookSpec {
 	return []hookSpec{
-		eventHook("droid", "SessionStart", "", "session-start", "idle", false),
-		eventHook("droid", "UserPromptSubmit", "", "user-prompt-submit", "working", false),
-		eventHook("droid", "PreToolUse", "*", "pre-tool-use", "working", false),
-		eventHook("droid", "PostToolUse", "*", "post-tool-use", "working", false),
-		eventHook("droid", "Notification", "", "notification", "input", true),
-		eventHook("droid", "Stop", "", "stop", "idle", true),
-		eventHook("droid", "SessionEnd", "", "session-end", "idle", false),
+		eventHook("droid", "SessionStart", "", "session-start", stateIdle, false),
+		eventHook("droid", "UserPromptSubmit", "", "user-prompt-submit", stateWorking, false),
+		eventHook("droid", "PreToolUse", "*", "pre-tool-use", stateWorking, false),
+		eventHook("droid", "PostToolUse", "*", "post-tool-use", stateWorking, false),
+		eventHook("droid", "Notification", "", "notification", stateInput, true),
+		eventHook("droid", "Stop", "", "stop", stateIdle, true),
+		eventHook("droid", "SessionEnd", "", "session-end", stateIdle, false),
 	}
 }
 
@@ -160,20 +162,20 @@ func installClaude(home string) (Result, error) {
 	}
 	changed := setString(doc, "preferredNotifChannel", "terminal_bell")
 	if addCommandHooks(doc, []hookSpec{
-		eventHook("claude", "SessionStart", "", "session-start", "idle", false),
-		eventHook("claude", "UserPromptSubmit", "", "user-prompt-submit", "working", false),
-		eventHook("claude", "PreToolUse", "*", "pre-tool-use", "working", false),
-		eventHook("claude", "PostToolUse", "*", "post-tool-use", "working", false),
-		eventHook("claude", "PostToolUseFailure", "*", "post-tool-use-failure", "working", false),
-		eventHook("claude", "PostToolBatch", "", "post-tool-batch", "working", false),
-		eventHook("claude", "PermissionRequest", "", "permission-request", "permission", true),
-		eventHook("claude", "PermissionDenied", "", "permission-denied", "error", true),
-		eventHook("claude", "Elicitation", "", "elicitation", "input", true),
-		eventHook("claude", "ElicitationResult", "", "elicitation-result", "working", false),
-		eventHook("claude", "Notification", "", "notification", "input", true),
-		eventHook("claude", "Stop", "", "stop", "idle", true),
-		eventHook("claude", "StopFailure", "", "stop-failure", "idle", true),
-		eventHook("claude", "SessionEnd", "", "session-end", "idle", false),
+		eventHook("claude", "SessionStart", "", "session-start", stateIdle, false),
+		eventHook("claude", "UserPromptSubmit", "", "user-prompt-submit", stateWorking, false),
+		eventHook("claude", "PreToolUse", "*", "pre-tool-use", stateWorking, false),
+		eventHook("claude", "PostToolUse", "*", "post-tool-use", stateWorking, false),
+		eventHook("claude", "PostToolUseFailure", "*", "post-tool-use-failure", stateWorking, false),
+		eventHook("claude", "PostToolBatch", "", "post-tool-batch", stateWorking, false),
+		eventHook("claude", "PermissionRequest", "", "permission-request", statePermission, true),
+		eventHook("claude", "PermissionDenied", "", "permission-denied", stateError, true),
+		eventHook("claude", "Elicitation", "", "elicitation", stateInput, true),
+		eventHook("claude", "ElicitationResult", "", "elicitation-result", stateWorking, false),
+		eventHook("claude", "Notification", "", "notification", stateInput, true),
+		eventHook("claude", "Stop", "", "stop", stateIdle, true),
+		eventHook("claude", "StopFailure", "", "stop-failure", stateIdle, true),
+		eventHook("claude", "SessionEnd", "", "session-end", stateIdle, false),
 	}) {
 		changed = true
 	}
@@ -188,19 +190,19 @@ func installClaude(home string) (Result, error) {
 func installCodex(home string) (Result, error) {
 	path := filepath.Join(home, ".codex", "hooks.json")
 	changed, err := installJSONHooks(path, []hookSpec{
-		eventHook("codex", "SessionStart", "", "session-start", "idle", false),
-		eventHook("codex", "UserPromptSubmit", "", "user-prompt-submit", "working", false),
-		eventHook("codex", "PreToolUse", "", "pre-tool-use", "working", false),
-		eventHook("codex", "PermissionRequest", "", "permission-request", "permission", true),
-		eventHook("codex", "PostToolUse", "", "post-tool-use", "working", false),
-		eventHook("codex", "Stop", "", "stop", "idle", true),
+		eventHook("codex", "SessionStart", "", "session-start", stateIdle, false),
+		eventHook("codex", "UserPromptSubmit", "", "user-prompt-submit", stateWorking, false),
+		eventHook("codex", "PreToolUse", "", "pre-tool-use", stateWorking, false),
+		eventHook("codex", "PermissionRequest", "", "permission-request", statePermission, true),
+		eventHook("codex", "PostToolUse", "", "post-tool-use", stateWorking, false),
+		eventHook("codex", "Stop", "", "stop", stateIdle, true),
 	})
 	return Result{AgentID: "codex", Path: path, Changed: changed}, err
 }
 
 func installOpenCode(home string) (Result, error) {
 	path := filepath.Join(home, ".config", "opencode", "plugins", "kitmux-zed-bell.js")
-	content := []byte(openCodePlugin())
+	content := []byte(openCodePlugin(kitmuxCommand()))
 	// #nosec G304 -- path is derived from the user's home directory and a fixed agent config path.
 	existing, err := os.ReadFile(path)
 	if err == nil && bytes.Equal(existing, content) {
@@ -301,6 +303,11 @@ func addCommandHooks(doc map[string]any, hooks []hookSpec) bool {
 func addCommandHook(rawHooks map[string]any, spec hookSpec) bool {
 	groups, _ := rawHooks[spec.Event].([]any)
 	changed := replaceCommands(groups, spec.ReplaceCommands, spec.Command)
+	if normalizedGroups, normalized := normalizeAgentEventHooks(groups, spec); normalized {
+		groups = normalizedGroups
+		rawHooks[spec.Event] = groups
+		changed = true
+	}
 	if dedupedGroups, deduped := dedupeCommandHooks(groups, spec.Command); deduped {
 		groups = dedupedGroups
 		rawHooks[spec.Event] = groups
@@ -324,6 +331,73 @@ func addCommandHook(rawHooks map[string]any, spec hookSpec) bool {
 	}
 	rawHooks[spec.Event] = append(groups, group)
 	return true
+}
+
+func normalizeAgentEventHooks(groups []any, spec hookSpec) ([]any, bool) {
+	if spec.AgentID == "" || spec.AgentEvent == "" {
+		return groups, false
+	}
+	seenCurrent := false
+	changed := false
+	out := make([]any, 0, len(groups))
+	for _, group := range groups {
+		groupMap, ok := group.(map[string]any)
+		if !ok {
+			out = append(out, group)
+			continue
+		}
+		hooks, ok := groupMap["hooks"].([]any)
+		if !ok {
+			out = append(out, group)
+			continue
+		}
+		nextHooks, groupChanged := normalizeAgentEventGroup(hooks, spec, &seenCurrent)
+		if len(nextHooks) == 0 {
+			changed = true
+			continue
+		}
+		if groupChanged {
+			groupMap["hooks"] = nextHooks
+			changed = true
+		}
+		out = append(out, group)
+	}
+	if len(out) != len(groups) {
+		changed = true
+	}
+	return out, changed
+}
+
+func normalizeAgentEventGroup(hooks []any, spec hookSpec, seenCurrent *bool) ([]any, bool) {
+	changed := false
+	nextHooks := make([]any, 0, len(hooks))
+	for _, hook := range hooks {
+		if shouldDropAgentEventHook(hook, spec, seenCurrent) {
+			changed = true
+			continue
+		}
+		nextHooks = append(nextHooks, hook)
+	}
+	return nextHooks, changed
+}
+
+func shouldDropAgentEventHook(hook any, spec hookSpec, seenCurrent *bool) bool {
+	hookMap, ok := hook.(map[string]any)
+	command, _ := hookMap["command"].(string)
+	if !ok || hookMap["type"] != "command" || !isAgentEventCommand(command, spec) {
+		return false
+	}
+	if command == spec.Command && !*seenCurrent {
+		*seenCurrent = true
+		return false
+	}
+	return true
+}
+
+func isAgentEventCommand(command string, spec hookSpec) bool {
+	return strings.Contains(command, "hook agent-event") &&
+		strings.Contains(command, "--agent "+spec.AgentID) &&
+		strings.Contains(command, "--event "+spec.AgentEvent)
 }
 
 func dedupeCommandHooks(groups []any, command string) ([]any, bool) {
@@ -424,13 +498,15 @@ func eventHook(agent, hookEvent, matcher, event, state string, bell bool) hookSp
 	return hookSpec{
 		Event:           hookEvent,
 		Matcher:         matcher,
-		Command:         agentEventCommand(agent, event, state, bell, true),
+		Command:         agentEventCommand(agent, event, state, bell),
 		ReplaceCommands: commandReplacements(agent, event, state, bell, true),
+		AgentID:         agent,
+		AgentEvent:      event,
 	}
 }
 
-func agentEventCommand(agent, event, state string, bell, stdinJSON bool) string {
-	return agentenv.WrapHookCommand(agent, rawAgentEventCommand(agent, event, state, bell, stdinJSON))
+func agentEventCommand(agent, event, state string, bell bool) string {
+	return agentenv.WrapHookCommand(agent, rawAgentEventCommand(agent, event, state, bell, true))
 }
 
 func rawAgentEventCommand(agent, event, state string, bell, stdinJSON bool) string {
@@ -465,8 +541,8 @@ func bellCommand(state string) string {
 
 func commandReplacements(agent, event, state string, bell, stdinJSON bool) []string {
 	states := []string{state}
-	if state == "permission" {
-		states = append(states, "input")
+	if state == statePermission {
+		states = append(states, stateInput)
 	}
 	var commands []string
 	seen := make(map[string]struct{})
@@ -483,14 +559,42 @@ func commandReplacements(agent, event, state string, bell, stdinJSON bool) []str
 		for _, state := range states {
 			add(bellReplacements(state))
 		}
-		add([]string{rawAgentEventCommand(agent, event, state, bell, stdinJSON)})
+		add(agentEventReplacements(agent, event, state, bell, stdinJSON))
 		return commands
 	}
 	for _, state := range states {
 		add(stateReplacements(state))
 	}
-	add([]string{rawAgentEventCommand(agent, event, state, bell, stdinJSON)})
+	add(agentEventReplacements(agent, event, state, bell, stdinJSON))
 	return commands
+}
+
+func agentEventReplacements(agent, event, state string, bell, stdinJSON bool) []string {
+	return []string{
+		rawAgentEventCommand(agent, event, state, bell, stdinJSON),
+		legacyAmbientAgentEventCommand(agent, event, state, bell, stdinJSON),
+	}
+}
+
+func legacyAmbientAgentEventCommand(agent, event, state string, bell, stdinJSON bool) string {
+	parts := []string{
+		agentenv.AgentIDKey + "=" + hookShellQuote(agent),
+		agentenv.TmuxSessionKey + `="${` + agentenv.TmuxSessionKey +
+			`:-$(tmux display-message -p '#{session_name}' 2>/dev/null)}"`,
+		agentenv.TmuxPaneKey + `="${` + agentenv.TmuxPaneKey +
+			`:-${TMUX_PANE:-$(tmux display-message -p '#{pane_id}' 2>/dev/null)}}"`,
+		agentenv.TmuxThreadKey + `="${` + agentenv.TmuxThreadKey +
+			`:-$(tmux display-message -p '#{@kitmux_thread}' 2>/dev/null)}"`,
+		rawAgentEventCommand(agent, event, state, bell, stdinJSON),
+	}
+	return strings.Join(parts, " ")
+}
+
+func hookShellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
 }
 
 func stateReplacements(state string) []string {
@@ -513,10 +617,13 @@ func legacyStateBellCommand(state string) string {
 	)
 }
 
-func openCodePlugin() string {
+func openCodePlugin(kitmux string) string {
+	kitmuxJSON, _ := json.Marshal(kitmux)
 	return `export const KitmuxZedBell = async () => {
+  const kitmux = ` + string(kitmuxJSON) + `
+
   const setEvent = async (event, state, bell = false) => {
-    const args = ["kitmux", "hook", "agent-event", "--agent", "opencode", "--event", event, "--state", state]
+    const args = [kitmux, "hook", "agent-event", "--agent", "opencode", "--event", event, "--state", state]
     if (bell) {
       args.push("--bell")
     }

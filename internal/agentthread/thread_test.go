@@ -4,7 +4,6 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/miltonparedes/kitmux/internal/agentenv"
 	"github.com/miltonparedes/kitmux/internal/tmux"
 )
 
@@ -58,7 +57,7 @@ func TestEnsureCreatesMissingThread(t *testing.T) {
 		t.Fatalf("SessionName = %q", resolved.SessionName)
 	}
 	wantPrefix := []string{
-		"new:droid-app:/tmp/app:" + agentenv.WrapTmuxCommand("droid", "droid-app", "droid", true),
+		"new:droid-app:/tmp/app:" + threadCommand("droid", "droid-app", "droid"),
 		"session:status=off",
 		"session:set-titles=on",
 		"session:set-titles-string=" + threadTitleFormat(),
@@ -130,6 +129,35 @@ func TestCreateGeneratesUniqueName(t *testing.T) {
 	}
 	if created != "droid-app-2" {
 		t.Fatalf("created session = %q", created)
+	}
+}
+
+func TestAttachSwitchesClientInsideTmux(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-123/default,1,0")
+	original := switchClient
+	t.Cleanup(func() {
+		switchClient = original
+	})
+
+	var switched string
+	switchClient = func(target string) error {
+		switched = target
+		return nil
+	}
+
+	if err := Attach("droid-app-2"); err != nil {
+		t.Fatalf("Attach() error = %v", err)
+	}
+	if switched != "droid-app-2" {
+		t.Fatalf("switched target = %q", switched)
+	}
+}
+
+func TestClientHooksDoNotTargetLiteralHookClient(t *testing.T) {
+	for _, hook := range threadHooks() {
+		if (hook.name == "client-attached" || hook.name == "client-session-changed") && hook.command != "refresh-client" {
+			t.Fatalf("%s command = %q", hook.name, hook.command)
+		}
 	}
 }
 

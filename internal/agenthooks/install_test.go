@@ -1,6 +1,7 @@
 package agenthooks
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"os"
@@ -20,33 +21,33 @@ func TestInstallAllWritesSupportedAgentHooks(t *testing.T) {
 	}
 
 	factoryPath := filepath.Join(home, ".factory", "hooks.json")
-	assertJSONHook(t, factoryPath, "UserPromptSubmit", agentEventCommand("droid", "user-prompt-submit", "working", false, true))
-	assertJSONHook(t, factoryPath, "PreToolUse", agentEventCommand("droid", "pre-tool-use", "working", false, true))
-	assertJSONHook(t, factoryPath, "PostToolUse", agentEventCommand("droid", "post-tool-use", "working", false, true))
-	assertJSONHook(t, factoryPath, "Notification", agentEventCommand("droid", "notification", "input", true, true))
-	assertJSONHook(t, factoryPath, "Stop", agentEventCommand("droid", "stop", "idle", true, true))
-	assertJSONHook(t, factoryPath, "SessionEnd", agentEventCommand("droid", "session-end", "idle", false, true))
+	assertJSONHook(t, factoryPath, "UserPromptSubmit", agentEventCommand("droid", "user-prompt-submit", stateWorking, false))
+	assertJSONHook(t, factoryPath, "PreToolUse", agentEventCommand("droid", "pre-tool-use", stateWorking, false))
+	assertJSONHook(t, factoryPath, "PostToolUse", agentEventCommand("droid", "post-tool-use", stateWorking, false))
+	assertJSONHook(t, factoryPath, "Notification", agentEventCommand("droid", "notification", stateInput, true))
+	assertJSONHook(t, factoryPath, "Stop", agentEventCommand("droid", "stop", stateIdle, true))
+	assertJSONHook(t, factoryPath, "SessionEnd", agentEventCommand("droid", "session-end", stateIdle, false))
 
 	claudePath := filepath.Join(home, ".claude", "settings.json")
-	assertJSONHook(t, claudePath, "UserPromptSubmit", agentEventCommand("claude", "user-prompt-submit", "working", false, true))
-	assertJSONHook(t, claudePath, "PreToolUse", agentEventCommand("claude", "pre-tool-use", "working", false, true))
-	assertJSONHook(t, claudePath, "PermissionRequest", agentEventCommand("claude", "permission-request", "permission", true, true))
-	assertJSONHook(t, claudePath, "PermissionDenied", agentEventCommand("claude", "permission-denied", "error", true, true))
-	assertJSONHook(t, claudePath, "Elicitation", agentEventCommand("claude", "elicitation", "input", true, true))
-	assertJSONHook(t, claudePath, "Notification", agentEventCommand("claude", "notification", "input", true, true))
-	assertJSONHook(t, claudePath, "Stop", agentEventCommand("claude", "stop", "idle", true, true))
+	assertJSONHook(t, claudePath, "UserPromptSubmit", agentEventCommand("claude", "user-prompt-submit", stateWorking, false))
+	assertJSONHook(t, claudePath, "PreToolUse", agentEventCommand("claude", "pre-tool-use", stateWorking, false))
+	assertJSONHook(t, claudePath, "PermissionRequest", agentEventCommand("claude", "permission-request", statePermission, true))
+	assertJSONHook(t, claudePath, "PermissionDenied", agentEventCommand("claude", "permission-denied", stateError, true))
+	assertJSONHook(t, claudePath, "Elicitation", agentEventCommand("claude", "elicitation", stateInput, true))
+	assertJSONHook(t, claudePath, "Notification", agentEventCommand("claude", "notification", stateInput, true))
+	assertJSONHook(t, claudePath, "Stop", agentEventCommand("claude", "stop", stateIdle, true))
 	claude := readJSONFile(t, claudePath)
 	if claude["preferredNotifChannel"] != "terminal_bell" {
 		t.Fatalf("preferredNotifChannel = %#v", claude["preferredNotifChannel"])
 	}
 
 	codexPath := filepath.Join(home, ".codex", "hooks.json")
-	assertJSONHook(t, codexPath, "SessionStart", agentEventCommand("codex", "session-start", "idle", false, true))
-	assertJSONHook(t, codexPath, "UserPromptSubmit", agentEventCommand("codex", "user-prompt-submit", "working", false, true))
-	assertJSONHook(t, codexPath, "PreToolUse", agentEventCommand("codex", "pre-tool-use", "working", false, true))
-	assertJSONHook(t, codexPath, "PermissionRequest", agentEventCommand("codex", "permission-request", "permission", true, true))
-	assertJSONHook(t, codexPath, "PostToolUse", agentEventCommand("codex", "post-tool-use", "working", false, true))
-	assertJSONHook(t, codexPath, "Stop", agentEventCommand("codex", "stop", "idle", true, true))
+	assertJSONHook(t, codexPath, "SessionStart", agentEventCommand("codex", "session-start", stateIdle, false))
+	assertJSONHook(t, codexPath, "UserPromptSubmit", agentEventCommand("codex", "user-prompt-submit", stateWorking, false))
+	assertJSONHook(t, codexPath, "PreToolUse", agentEventCommand("codex", "pre-tool-use", stateWorking, false))
+	assertJSONHook(t, codexPath, "PermissionRequest", agentEventCommand("codex", "permission-request", statePermission, true))
+	assertJSONHook(t, codexPath, "PostToolUse", agentEventCommand("codex", "post-tool-use", stateWorking, false))
+	assertJSONHook(t, codexPath, "Stop", agentEventCommand("codex", "stop", stateIdle, true))
 
 	pluginPath := filepath.Join(home, ".config", "opencode", "plugins", "kitmux-zed-bell.js")
 	// #nosec G304 -- test path is under t.TempDir.
@@ -54,8 +55,11 @@ func TestInstallAllWritesSupportedAgentHooks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read opencode plugin: %v", err)
 	}
-	if string(plugin) != openCodePlugin() {
+	if string(plugin) != openCodePlugin(kitmuxCommand()) {
 		t.Fatalf("unexpected opencode plugin:\n%s", string(plugin))
+	}
+	if !bytes.Contains(plugin, []byte(`const kitmux = "kitmux"`)) {
+		t.Fatalf("opencode plugin missing kitmux command constant:\n%s", string(plugin))
 	}
 }
 
@@ -85,7 +89,7 @@ func TestInstallAllUpgradesLegacyBellHooks(t *testing.T) {
 					"hooks": []any{
 						map[string]any{
 							"type":    "command",
-							"command": legacyStateBellCommand("input"),
+							"command": legacyStateBellCommand(stateInput),
 						},
 					},
 				},
@@ -99,8 +103,8 @@ func TestInstallAllUpgradesLegacyBellHooks(t *testing.T) {
 	if _, err := InstallAll(home); err != nil {
 		t.Fatalf("InstallAll() error = %v", err)
 	}
-	assertJSONHook(t, path, "PermissionRequest", agentEventCommand("codex", "permission-request", "permission", true, true))
-	if hasJSONCommand(t, path, "PermissionRequest", legacyStateBellCommand("input")) {
+	assertJSONHook(t, path, "PermissionRequest", agentEventCommand("codex", "permission-request", statePermission, true))
+	if hasJSONCommand(t, path, "PermissionRequest", legacyStateBellCommand(stateInput)) {
 		t.Fatalf("legacy bell command was not upgraded")
 	}
 }
@@ -115,7 +119,7 @@ func TestInstallAllUpgradesLegacyWorkingHooks(t *testing.T) {
 					"hooks": []any{
 						map[string]any{
 							"type":    "command",
-							"command": legacyStateCommand("working"),
+							"command": legacyStateCommand(stateWorking),
 						},
 					},
 				},
@@ -129,8 +133,8 @@ func TestInstallAllUpgradesLegacyWorkingHooks(t *testing.T) {
 	if _, err := InstallAll(home); err != nil {
 		t.Fatalf("InstallAll() error = %v", err)
 	}
-	assertJSONHook(t, path, "UserPromptSubmit", agentEventCommand("droid", "user-prompt-submit", "working", false, true))
-	if hasJSONCommand(t, path, "UserPromptSubmit", legacyStateCommand("working")) {
+	assertJSONHook(t, path, "UserPromptSubmit", agentEventCommand("droid", "user-prompt-submit", stateWorking, false))
+	if hasJSONCommand(t, path, "UserPromptSubmit", legacyStateCommand(stateWorking)) {
 		t.Fatalf("legacy working command was not upgraded")
 	}
 }
@@ -146,7 +150,7 @@ func TestInstallAllUpgradesUnwrappedAgentEventHooks(t *testing.T) {
 					"hooks": []any{
 						map[string]any{
 							"type":    "command",
-							"command": rawAgentEventCommand("droid", "pre-tool-use", "working", false, true),
+							"command": rawAgentEventCommand("droid", "pre-tool-use", stateWorking, false, true),
 						},
 					},
 				},
@@ -160,13 +164,69 @@ func TestInstallAllUpgradesUnwrappedAgentEventHooks(t *testing.T) {
 	if _, err := InstallAll(home); err != nil {
 		t.Fatalf("InstallAll() error = %v", err)
 	}
-	command := agentEventCommand("droid", "pre-tool-use", "working", false, true)
+	command := agentEventCommand("droid", "pre-tool-use", stateWorking, false)
 	assertJSONHook(t, path, "PreToolUse", command)
-	if hasJSONCommand(t, path, "PreToolUse", rawAgentEventCommand("droid", "pre-tool-use", "working", false, true)) {
+	if hasJSONCommand(t, path, "PreToolUse", rawAgentEventCommand("droid", "pre-tool-use", stateWorking, false, true)) {
 		t.Fatalf("unwrapped agent-event command was not upgraded")
 	}
 	if countJSONCommand(t, path, "PreToolUse", command) != 1 {
 		t.Fatalf("expected upgraded command once, got config %#v", readJSONFile(t, path))
+	}
+}
+
+func TestInstallAllUpgradesAmbientTmuxAgentEventHooks(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, ".factory", "hooks.json")
+	oldCommand := legacyAmbientAgentEventCommand("droid", "pre-tool-use", stateWorking, false, true)
+	oldRawCommand := rawAgentEventCommand("droid", "pre-tool-use", stateWorking, false, true)
+	command := agentEventCommand("droid", "pre-tool-use", stateWorking, false)
+	customCommand := "echo keep-custom-hook"
+	legacyDoc := map[string]any{
+		"hooks": map[string]any{
+			"PreToolUse": []any{
+				map[string]any{
+					"matcher": "*",
+					"hooks": []any{
+						map[string]any{
+							"type":    "command",
+							"command": oldCommand,
+						},
+						map[string]any{
+							"type":    "command",
+							"command": oldRawCommand,
+						},
+						map[string]any{
+							"type":    "command",
+							"command": command,
+						},
+						map[string]any{
+							"type":    "command",
+							"command": customCommand,
+						},
+					},
+				},
+			},
+		},
+	}
+	if err := writeJSON(path, legacyDoc); err != nil {
+		t.Fatalf("write legacy config: %v", err)
+	}
+
+	if _, err := InstallAll(home); err != nil {
+		t.Fatalf("InstallAll() error = %v", err)
+	}
+	assertJSONHook(t, path, "PreToolUse", command)
+	if hasJSONCommand(t, path, "PreToolUse", oldCommand) {
+		t.Fatalf("ambient tmux agent-event command was not upgraded")
+	}
+	if hasJSONCommand(t, path, "PreToolUse", oldRawCommand) {
+		t.Fatalf("raw agent-event command was not upgraded")
+	}
+	if countJSONCommand(t, path, "PreToolUse", command) != 1 {
+		t.Fatalf("expected upgraded command once, got config %#v", readJSONFile(t, path))
+	}
+	if countJSONCommand(t, path, "PreToolUse", customCommand) != 1 {
+		t.Fatalf("custom command was removed, got config %#v", readJSONFile(t, path))
 	}
 }
 
@@ -180,9 +240,9 @@ func TestInstallDroidEnablesAndWritesSettingsHooks(t *testing.T) {
 	if settings["enableHooks"] != true {
 		t.Fatalf("enableHooks = %#v", settings["enableHooks"])
 	}
-	assertJSONHook(t, settingsPath, "UserPromptSubmit", agentEventCommand("droid", "user-prompt-submit", "working", false, true))
-	assertJSONHook(t, settingsPath, "Stop", agentEventCommand("droid", "stop", "idle", true, true))
-	assertJSONHook(t, settingsPath, "Notification", agentEventCommand("droid", "notification", "input", true, true))
+	assertJSONHook(t, settingsPath, "UserPromptSubmit", agentEventCommand("droid", "user-prompt-submit", stateWorking, false))
+	assertJSONHook(t, settingsPath, "Stop", agentEventCommand("droid", "stop", stateIdle, true))
+	assertJSONHook(t, settingsPath, "Notification", agentEventCommand("droid", "notification", stateInput, true))
 
 	// Idempotent: existing settings keys are preserved and no spurious change.
 	settings["customKey"] = "keep-me"
@@ -211,7 +271,7 @@ func TestInstallWritesOnlyRequestedAgentHooks(t *testing.T) {
 	if result.AgentID != "droid" || !result.Changed {
 		t.Fatalf("Install() result = %#v", result)
 	}
-	assertJSONHook(t, filepath.Join(home, ".factory", "hooks.json"), "Notification", agentEventCommand("droid", "notification", "input", true, true))
+	assertJSONHook(t, filepath.Join(home, ".factory", "hooks.json"), "Notification", agentEventCommand("droid", "notification", stateInput, true))
 	assertMissing(t, filepath.Join(home, ".claude", "settings.json"))
 	assertMissing(t, filepath.Join(home, ".codex", "hooks.json"))
 }
@@ -254,7 +314,7 @@ func TestInstallUsesCodexHooksForCodexCloud(t *testing.T) {
 	if result.AgentID != "codex" {
 		t.Fatalf("Install() result = %#v", result)
 	}
-	assertJSONHook(t, filepath.Join(home, ".codex", "hooks.json"), "Stop", agentEventCommand("codex", "stop", "idle", true, true))
+	assertJSONHook(t, filepath.Join(home, ".codex", "hooks.json"), "Stop", agentEventCommand("codex", "stop", stateIdle, true))
 }
 
 func TestInstallUnsupportedAgent(t *testing.T) {

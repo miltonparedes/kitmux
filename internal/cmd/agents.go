@@ -16,6 +16,11 @@ import (
 	"github.com/miltonparedes/kitmux/internal/tmux"
 )
 
+var (
+	agentThreadOps       = agentthread.DefaultOps
+	installLaunchHooksFn = installLaunchHooks
+)
+
 func addAgentCommands(parent *cobra.Command) {
 	for _, agent := range agents.DefaultAgents() {
 		parent.AddCommand(agentCmd(agent))
@@ -45,24 +50,24 @@ func agentCmd(agent agents.Agent) *cobra.Command {
 			if !ok {
 				return fmt.Errorf("unknown mode %q for %s", modeID, agent.ID)
 			}
-			if err := installLaunchHooks(agent.ID); err != nil {
+			if err := installLaunchHooksFn(agent.ID); err != nil {
 				return err
 			}
 			if headless {
-				return agentthread.EnsureAndAttach(agentthread.Spec{
+				return agentthread.CreateAndAttach(agentthread.Spec{
 					AgentID: agent.ID,
 					ModeID:  mode.ID,
 					Dir:     dir,
 					Name:    name,
-				}, agentthread.DefaultOps())
+				}, agentThreadOps())
 			}
 			return execShell(agent.ID, agent.FullCommand(mode), dir)
 		},
 	}
-	cmd.Flags().BoolVar(&headless, "headless", false, "run or attach this agent as a persistent tmux thread")
+	cmd.Flags().BoolVar(&headless, "headless", false, "create and attach a new persistent tmux thread")
 	cmd.Flags().StringVar(&modeID, "mode", "default", "agent mode")
 	cmd.Flags().StringVar(&dir, "dir", "", "working directory (defaults to current directory)")
-	cmd.Flags().StringVar(&name, "name", "", "headless session name (defaults to agent-project)")
+	cmd.Flags().StringVar(&name, "name", "", "headless session base name (defaults to agent-project)")
 	return cmd
 }
 

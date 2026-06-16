@@ -24,7 +24,7 @@ func TestLaunchAgentAutoSidepanelWhenWide(t *testing.T) {
 	m := New(ModeAgents)
 	m.launchAgent(messages.LaunchAgentMsg{AgentID: "codex", ModeID: "default", Target: "pane"})
 
-	if calls.sent != trackedCommand("codex", "codex", "") {
+	if calls.sent != trackedCommand("codex", "codex") {
 		t.Fatalf("expected codex to be sent, got %q", calls.sent)
 	}
 	if calls.sidepanelCommand != "kitmux sidepanel" {
@@ -44,7 +44,7 @@ func TestLaunchAgentAutoSidepanelSkipsWhenNarrow(t *testing.T) {
 	m := New(ModeAgents)
 	m.launchAgent(messages.LaunchAgentMsg{AgentID: "codex", ModeID: "default", Target: "pane"})
 
-	if calls.sent != trackedCommand("codex", "codex", "") {
+	if calls.sent != trackedCommand("codex", "codex") {
 		t.Fatalf("expected codex to be sent, got %q", calls.sent)
 	}
 	if calls.sidepanelCommand != "" {
@@ -86,7 +86,7 @@ func TestLaunchAgentExplicitSplitDoesNotStartSidepanel(t *testing.T) {
 	m := New(ModeAgents)
 	m.launchAgent(messages.LaunchAgentMsg{AgentID: "codex", ModeID: "default", Target: "split"})
 
-	if calls.split != trackedCommand("codex", "codex", "") {
+	if calls.split != trackedCommand("codex", "codex") {
 		t.Fatalf("expected explicit split command codex, got %q", calls.split)
 	}
 	if calls.sidepanelCommand != "" {
@@ -218,8 +218,8 @@ func stubAgentLaunch(t *testing.T, width int, widthErr error) *launchCalls {
 	return calls
 }
 
-func trackedCommand(agentID, command, sessionName string) string {
-	return agentenv.WrapTmuxCommand(agentID, sessionName, command, false)
+func trackedCommand(agentID, command string) string {
+	return agentenv.WrapTmuxCommand(agentID, "", command, false)
 }
 
 func TestSidepanelLaunchAgentCreatesWindowAndSplitWhenWide(t *testing.T) {
@@ -236,7 +236,7 @@ func TestSidepanelLaunchAgentCreatesWindowAndSplitWhenWide(t *testing.T) {
 	if calls.windowDir != "/tmp/repo" {
 		t.Fatalf("expected window dir /tmp/repo, got %q", calls.windowDir)
 	}
-	if calls.windowCommand != trackedCommand("codex", "codex", "") {
+	if calls.windowCommand != trackedCommand("codex", "codex") {
 		t.Fatalf("expected codex command, got %q", calls.windowCommand)
 	}
 	if calls.sidepanelCommand != "kitmux sidepanel" {
@@ -254,7 +254,7 @@ func TestSidepanelLaunchAgentSkipsSplitWhenNarrow(t *testing.T) {
 	calls := stubAgentLaunch(t, 100, nil)
 	m := New(ModeSidepanel)
 	_ = m.launchSidepanelAgent(messages.LaunchSidepanelAgentMsg{AgentID: "aichat", ModeID: "default", Dir: "/tmp/repo"})()
-	if calls.windowCommand != trackedCommand("aichat", "aichat", "") {
+	if calls.windowCommand != trackedCommand("aichat", "aichat") {
 		t.Fatalf("expected aichat command, got %q", calls.windowCommand)
 	}
 	if calls.sidepanelCommand != "" {
