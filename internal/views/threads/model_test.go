@@ -13,6 +13,8 @@ import (
 	"github.com/miltonparedes/kitmux/internal/tmux"
 )
 
+const droidKitmuxSession = "droid-kitmux"
+
 func TestBuildRowsKeepsHeadlessDetailedAndSkipsDuplicatePane(t *testing.T) {
 	sessions := []tmux.Session{
 		{Name: "droid-app", Path: "/repo/app", Activity: 10, Thread: true, AgentID: "droid", AgentState: "idle", ThreadTitle: "custom thread title", AgentSessionID: "11111111-1111-4111-8111-111111111111"},
@@ -121,7 +123,7 @@ func TestReconcilePaneTitleRenamesSyncsLivePaneTitleOverride(t *testing.T) {
 		return nil
 	}
 	syncThreadPrefix = func(sessionName, prefix string) error {
-		if sessionName != "droid-kitmux" {
+		if sessionName != droidKitmuxSession {
 			t.Fatalf("prefix session = %q", sessionName)
 		}
 		syncedPrefix = prefix
@@ -141,7 +143,7 @@ func TestReconcilePaneTitleRenamesSyncsLivePaneTitleOverride(t *testing.T) {
 		Title:       "hello test",
 		ThreadTitle: "hello test",
 		PaneTitle:   "⛬ test name",
-		SessionName: "droid-kitmux",
+		SessionName: droidKitmuxSession,
 		Path:        "/repo/app",
 	}})
 
@@ -151,13 +153,13 @@ func TestReconcilePaneTitleRenamesSyncsLivePaneTitleOverride(t *testing.T) {
 	if !rows[0].TitleOverride {
 		t.Fatal("expected title override")
 	}
-	if syncedSession != "droid-kitmux" || syncedTitle != "test name" {
+	if syncedSession != droidKitmuxSession || syncedTitle != "test name" {
 		t.Fatalf("synced session/title = %q/%q", syncedSession, syncedTitle)
 	}
 	if syncedPrefix != "⛬" {
 		t.Fatalf("prefix = %q", syncedPrefix)
 	}
-	if refreshedSession != "droid-kitmux" {
+	if refreshedSession != droidKitmuxSession {
 		t.Fatalf("refreshed session = %q", refreshedSession)
 	}
 }
@@ -179,7 +181,7 @@ func TestReconcilePaneTitleRenamesIgnoresDefaultAgentTitle(t *testing.T) {
 		Title:       "custom title",
 		ThreadTitle: "custom title",
 		PaneTitle:   "Droid",
-		SessionName: "droid-kitmux",
+		SessionName: droidKitmuxSession,
 	}})
 
 	if rows[0].Title != "custom title" || rows[0].ThreadTitle != "custom title" {
@@ -213,7 +215,7 @@ func TestReconcilePaneTitleRenamesPersistsFirstLiveRename(t *testing.T) {
 		AgentState:  "idle",
 		Title:       "⛬ issue triage",
 		PaneTitle:   "⛬ issue triage",
-		SessionName: "droid-kitmux",
+		SessionName: droidKitmuxSession,
 		Path:        "/repo/app",
 	}})
 
@@ -241,14 +243,14 @@ func TestRepairThreadTitlePrefixesKeepsAgentIconForIdleRenamedThreads(t *testing
 	refreshThreadClient = func(string) error { return nil }
 
 	rows := repairThreadTitlePrefixes([]Row{
-		{Kind: RowHeadless, AgentID: "droid", AgentSymbol: "⛬", AgentState: "idle", Title: "Greeting the assistant", TitleOverride: true, SessionName: "droid-kitmux"},
+		{Kind: RowHeadless, AgentID: "droid", AgentSymbol: "⛬", AgentState: "idle", Title: "Greeting the assistant", TitleOverride: true, SessionName: droidKitmuxSession},
 		{Kind: RowHeadless, AgentID: "claude", AgentSymbol: "✳", AgentState: "working", Title: "Still working", TitleOverride: true, SessionName: "claude-kitmux"},
 	})
 
 	if rows[0].Title != "Greeting the assistant" {
 		t.Fatalf("title changed = %q", rows[0].Title)
 	}
-	if len(synced) != 1 || synced[0] != "droid-kitmux=⛬" {
+	if len(synced) != 1 || synced[0] != droidKitmuxSession+"=⛬" {
 		t.Fatalf("synced prefixes = %#v", synced)
 	}
 }
@@ -344,7 +346,7 @@ func TestRenameHeadlessSyncsThreadAndPaneTitle(t *testing.T) {
 
 	var threadTitle, paneTarget, paneTitle, prefix, refreshed string
 	syncThreadTitle = func(sessionName, title string) error {
-		if sessionName != "droid-kitmux" {
+		if sessionName != droidKitmuxSession {
 			t.Fatalf("thread session = %q", sessionName)
 		}
 		threadTitle = title
@@ -369,7 +371,7 @@ func TestRenameHeadlessSyncsThreadAndPaneTitle(t *testing.T) {
 		AgentID:     "droid",
 		AgentSymbol: "⛬",
 		AgentState:  "idle",
-		SessionName: "droid-kitmux",
+		SessionName: droidKitmuxSession,
 		PaneID:      "%51",
 		PanePID:     6396,
 	}, "Hello")
@@ -382,7 +384,7 @@ func TestRenameHeadlessSyncsThreadAndPaneTitle(t *testing.T) {
 	if prefix != "⛬" {
 		t.Fatalf("prefix = %q", prefix)
 	}
-	if refreshed != "droid-kitmux" {
+	if refreshed != droidKitmuxSession {
 		t.Fatalf("refreshed = %q", refreshed)
 	}
 }

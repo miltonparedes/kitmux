@@ -253,9 +253,9 @@ func TestSidepanelLaunchAgentSkipsSplitWhenNarrow(t *testing.T) {
 
 	calls := stubAgentLaunch(t, 100, nil)
 	m := New(ModeSidepanel)
-	_ = m.launchSidepanelAgent(messages.LaunchSidepanelAgentMsg{AgentID: "aichat", ModeID: "default", Dir: "/tmp/repo"})()
-	if calls.windowCommand != trackedCommand("aichat", "aichat") {
-		t.Fatalf("expected aichat command, got %q", calls.windowCommand)
+	_ = m.launchSidepanelAgent(messages.LaunchSidepanelAgentMsg{AgentID: "opencode", ModeID: "default", Dir: "/tmp/repo"})()
+	if calls.windowCommand != trackedCommand("opencode", "opencode") {
+		t.Fatalf("expected opencode command, got %q", calls.windowCommand)
 	}
 	if calls.sidepanelCommand != "" {
 		t.Fatalf("expected no sidepanel split, got %q", calls.sidepanelCommand)

@@ -32,7 +32,7 @@ func TestResumeCommand(t *testing.T) {
 }
 
 func TestResumeCommandUnsupported(t *testing.T) {
-	_, err := ResumeCommand("gemini", "id")
+	_, err := ResumeCommand("unsupported", "id")
 	if !errors.Is(err, ErrUnsupported) {
 		t.Fatalf("error = %v, want ErrUnsupported", err)
 	}

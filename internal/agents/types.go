@@ -58,23 +58,6 @@ var defaultAgents = []Agent{
 		},
 	},
 	{
-		ID:      "gemini",
-		Name:    "Gemini CLI",
-		Command: "gemini",
-		Modes: []AgentMode{
-			{ID: "default", Name: "Default", Flags: ""},
-		},
-	},
-	{
-		ID:      "aichat",
-		Name:    "AIChat",
-		Command: "aichat",
-		Modes: []AgentMode{
-			{ID: "default", Name: "Interactive", Flags: ""},
-			{ID: "execute", Name: "Execute", Flags: "-e"},
-		},
-	},
-	{
 		ID:      "opencode",
 		Name:    "OpenCode",
 		Command: "opencode",

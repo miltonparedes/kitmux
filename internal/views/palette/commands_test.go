@@ -9,6 +9,12 @@ func TestIsValidCommand_Canonical(t *testing.T) {
 	if !IsValidCommand("switch_session") {
 		t.Error("expected switch_session to be a valid command")
 	}
+	if IsValidCommand("launch_gemini") {
+		t.Error("expected launch_gemini to be invalid")
+	}
+	if IsValidCommand("launch_aichat") {
+		t.Error("expected launch_aichat to be invalid")
+	}
 	if IsValidCommand("nope") {
 		t.Error("expected 'nope' to be invalid")
 	}

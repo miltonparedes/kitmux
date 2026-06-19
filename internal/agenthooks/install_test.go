@@ -352,7 +352,7 @@ func countPreToolUseJSONCommand(t *testing.T, path, command string) int {
 }
 
 func TestInstallUnsupportedAgent(t *testing.T) {
-	_, err := Install("gemini", t.TempDir())
+	_, err := Install("unsupported", t.TempDir())
 	if !errors.Is(err, ErrUnsupportedAgent) {
 		t.Fatalf("expected ErrUnsupportedAgent, got %v", err)
 	}

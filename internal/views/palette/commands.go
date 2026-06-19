@@ -132,18 +132,6 @@ func DefaultCommands() []Command {
 			Category:    "Agent",
 		},
 		{
-			ID:          "launch_gemini",
-			Title:       "Launch Gemini CLI",
-			Description: "Start Gemini CLI in the current pane",
-			Category:    "Agent",
-		},
-		{
-			ID:          "launch_aichat",
-			Title:       "Launch AIChat",
-			Description: "Start AIChat in the current pane",
-			Category:    "Agent",
-		},
-		{
 			ID:          "launch_opencode",
 			Title:       "Launch OpenCode",
 			Description: "Start OpenCode in the current pane",

@@ -27,6 +27,12 @@ func TestFindAndFindMode(t *testing.T) {
 	if a.FullCommand(mode) != "codex" {
 		t.Fatalf("expected codex command, got %q", a.FullCommand(mode))
 	}
+	if _, ok := Find("gemini"); ok {
+		t.Fatal("expected gemini to be unsupported")
+	}
+	if _, ok := Find("aichat"); ok {
+		t.Fatal("expected aichat to be unsupported")
+	}
 }
 
 func TestCommandMapKeepsFirstAgentForDuplicateCommands(t *testing.T) {
@@ -39,6 +45,12 @@ func TestCommandMapKeepsFirstAgentForDuplicateCommands(t *testing.T) {
 	}
 	if !IsAgentCommand("cursor-agent") {
 		t.Fatal("expected cursor-agent to be detected as an agent command")
+	}
+	if IsAgentCommand("gemini") {
+		t.Fatal("expected gemini to be unsupported")
+	}
+	if IsAgentCommand("aichat") {
+		t.Fatal("expected aichat to be unsupported")
 	}
 }
 
