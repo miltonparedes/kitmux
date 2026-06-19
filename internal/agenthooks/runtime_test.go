@@ -241,7 +241,7 @@ func TestRunAgentEventPreToolAskUserIsInputNoSpinner(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunAgentEvent() error = %v", err)
 	}
-	if paneOptions[agentStateOption] != stateInput || paneOptions[agentTitlePrefixOption] != "?" {
+	if paneOptions[agentStateOption] != stateInput || paneOptions[agentTitlePrefixOption] != "⮞" {
 		t.Fatalf("paneOptions = %#v", paneOptions)
 	}
 	if spinnerStarted {
@@ -390,7 +390,7 @@ func TestTitlePrefixRevertsToAgentSymbolWhenIdle(t *testing.T) {
 		want  string
 	}{
 		{stateWorking, "Android app", SpinnerFrames[0]},
-		{stateInput, "Android app", "?"},
+		{stateInput, "Android app", "⮞"},
 		{statePermission, "Android app", "!"},
 		{stateError, "Android app", "×"},
 		{stateIdle, "⛬ Android app", "⛬"},

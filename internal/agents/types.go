@@ -27,24 +27,24 @@ var defaultAgents = []Agent{
 		},
 	},
 	{
-		ID:      "codex-cloud",
-		Name:    "Codex Cloud",
-		Symbol:  "›",
-		Command: "codex",
-		Modes: []AgentMode{
-			{ID: "default", Name: "Cloud", Flags: "cloud"},
-		},
-	},
-	{
 		ID:      "codex",
 		Name:    "Codex CLI",
-		Symbol:  "›",
+		Symbol:  "⌾",
 		Command: "codex",
 		Modes: []AgentMode{
 			{ID: "default", Name: "Default", Flags: ""},
 			{ID: "exec", Name: "Exec", Flags: "--approval-mode full-auto"},
 			{ID: "review", Name: "Review", Flags: "--approval-mode review"},
 			{ID: "apply", Name: "Apply", Flags: "--approval-mode auto-edit"},
+		},
+	},
+	{
+		ID:      "cursor",
+		Name:    "Cursor CLI",
+		Symbol:  "⌬",
+		Command: "cursor-agent",
+		Modes: []AgentMode{
+			{ID: "default", Name: "Default", Flags: ""},
 		},
 	},
 	{

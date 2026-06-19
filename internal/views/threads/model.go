@@ -35,6 +35,8 @@ type Row struct {
 	WindowIndex  int
 	PaneIndex    int
 	Path         string
+	Project      string
+	Branch       string
 	Attached     bool
 	Activity     int64
 }
@@ -116,11 +118,11 @@ func (m Model) handleMouse(msg tea.MouseMsg) (Model, tea.Cmd) {
 	if msg.Button != tea.MouseButtonLeft || msg.Action != tea.MouseActionRelease {
 		return m, nil
 	}
-	row := msg.Y - 1
-	if row < 0 {
+	rel := msg.Y - headerLines
+	if rel < 0 {
 		return m, nil
 	}
-	idx := m.scroll + row
+	idx := m.scroll + rel/linesPerCard
 	if idx < 0 || idx >= len(m.rows) {
 		return m, nil
 	}
@@ -241,16 +243,42 @@ func (m *Model) ensureVisible() {
 	if m.scroll < 0 {
 		m.scroll = 0
 	}
-	viewHeight := m.height - 2
-	if viewHeight < 1 {
-		viewHeight = 1
-	}
+	perView := m.cardsPerView()
 	if m.cursor < m.scroll {
 		m.scroll = m.cursor
 	}
-	if m.cursor >= m.scroll+viewHeight {
-		m.scroll = m.cursor - viewHeight + 1
+	if m.cursor >= m.scroll+perView {
+		m.scroll = m.cursor - perView + 1
 	}
+}
+
+// linesPerCard is the rendered height of one agent card: a title line and a
+// dim meta line, with no spacer between cards.
+const linesPerCard = 2
+
+// headerLines (title + blank) and footerLines (separator + help) are the fixed
+// chrome rows framing the scrollable card area.
+const (
+	headerLines = 2
+	footerLines = 2
+)
+
+// contentHeight returns the number of rows available for cards.
+func (m Model) contentHeight() int {
+	avail := m.height - headerLines - footerLines
+	if avail < 1 {
+		avail = 1
+	}
+	return avail
+}
+
+// cardsPerView returns how many agent cards fit in the visible area.
+func (m Model) cardsPerView() int {
+	n := m.contentHeight() / linesPerCard
+	if n < 1 {
+		n = 1
+	}
+	return n
 }
 
 func loadCmd() tea.Cmd {
@@ -269,7 +297,19 @@ func syncSupportAndLoadCmd() tea.Cmd {
 func loadRows() loadedMsg {
 	sessions, _ := tmux.ListSessions()
 	panes, _ := tmux.ListPanes()
-	return loadedMsg{rows: buildRows(sessions, panes)}
+	return loadedMsg{rows: enrichGitMeta(buildRows(sessions, panes))}
+}
+
+func enrichGitMeta(rows []Row) []Row {
+	for i := range rows {
+		if rows[i].Path == "" {
+			continue
+		}
+		meta := pathGitMeta(rows[i].Path)
+		rows[i].Project = meta.project
+		rows[i].Branch = meta.branch
+	}
+	return rows
 }
 
 func buildRows(sessions []tmux.Session, panes []tmux.Pane) []Row {

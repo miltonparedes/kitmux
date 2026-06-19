@@ -102,7 +102,7 @@ func installerForAgent(agentID string) (func(string) (Result, error), bool) {
 		return installDroid, true
 	case "claude":
 		return installClaude, true
-	case "codex", "codex-cloud":
+	case "codex":
 		return installCodex, true
 	case "opencode":
 		return installOpenCode, true

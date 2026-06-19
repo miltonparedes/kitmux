@@ -84,6 +84,19 @@ var (
 	DiffRemoved = lipgloss.NewStyle().
 			Foreground(Red)
 
+	// Thread view selection (full-width highlight bar, codex-style)
+	SelectionBar = lipgloss.NewStyle().
+			Background(Dim)
+
+	SelectionTitle = lipgloss.NewStyle().
+			Background(Dim).
+			Foreground(lipgloss.Color("15")).
+			Bold(true)
+
+	SelectionMeta = lipgloss.NewStyle().
+			Background(Dim).
+			Foreground(lipgloss.Color("7"))
+
 	// Agent styles
 	AgentName = lipgloss.NewStyle()
 

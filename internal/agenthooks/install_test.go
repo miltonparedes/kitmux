@@ -351,19 +351,6 @@ func countPreToolUseJSONCommand(t *testing.T, path, command string) int {
 	return count
 }
 
-func TestInstallUsesCodexHooksForCodexCloud(t *testing.T) {
-	home := t.TempDir()
-
-	result, err := Install("codex-cloud", home)
-	if err != nil {
-		t.Fatalf("Install() error = %v", err)
-	}
-	if result.AgentID != "codex" {
-		t.Fatalf("Install() result = %#v", result)
-	}
-	assertJSONHook(t, filepath.Join(home, ".codex", "hooks.json"), "Stop", shimAgentEventCommand(home, "codex", "stop"))
-}
-
 func TestInstallUnsupportedAgent(t *testing.T) {
 	_, err := Install("gemini", t.TempDir())
 	if !errors.Is(err, ErrUnsupportedAgent) {

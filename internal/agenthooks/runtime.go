@@ -381,7 +381,7 @@ func titlePrefix(state, agentID, paneTitle string) string {
 	case stateWorking:
 		return SpinnerFrames[0]
 	case stateInput:
-		return "?"
+		return "⮞"
 	case statePermission:
 		return "!"
 	case stateError:
@@ -418,7 +418,7 @@ func stripLeadingStateGlyph(title string) string {
 	return title
 }
 
-const statusGlyphs = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⠂⠆⠤⠰⠠⠐⛬✳✻✶✢✤✱›"
+const statusGlyphs = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⠂⠆⠤⠰⠠⠐⛬✳✻✶✢✤✱›⌾⌬⮞"
 
 func agentSymbol(agentID string) string {
 	if agent, ok := agents.Find(agentID); ok {

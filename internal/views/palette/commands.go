@@ -114,15 +114,15 @@ func DefaultCommands() []Command {
 			Category:    "Agent",
 		},
 		{
-			ID:          "launch_codex_cloud",
-			Title:       "Launch Codex Cloud",
-			Description: "Browse Codex Cloud tasks in the current pane",
-			Category:    "Agent",
-		},
-		{
 			ID:          "launch_codex",
 			Title:       "Launch Codex CLI",
 			Description: "Start Codex CLI in the current pane",
+			Category:    "Agent",
+		},
+		{
+			ID:          "launch_cursor",
+			Title:       "Launch Cursor CLI",
+			Description: "Start Cursor CLI in the current pane",
 			Category:    "Agent",
 		},
 		{

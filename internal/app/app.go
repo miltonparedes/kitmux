@@ -745,14 +745,14 @@ func (m Model) execAgentCommand(id string) (tea.Model, tea.Cmd, bool) {
 	switch id {
 	case "launch_droid":
 		return m, launchAgentCmd("droid"), true
-	case "launch_codex_cloud":
-		return m, launchAgentCmd("codex-cloud"), true
 	case "launch_claude":
 		return m, launchAgentCmd("claude"), true
 	case "launch_gemini":
 		return m, launchAgentCmd("gemini"), true
 	case "launch_codex":
 		return m, launchAgentCmd("codex"), true
+	case "launch_cursor":
+		return m, launchAgentCmd("cursor"), true
 	case "launch_aichat":
 		return m, launchAgentCmd("aichat"), true
 	case "launch_opencode":

@@ -2,9 +2,9 @@ package agents
 
 import "testing"
 
-func TestDefaultAgentsPrioritizesDroidCodexCloudCodex(t *testing.T) {
+func TestDefaultAgentsPrioritizesCoreAgentCLIs(t *testing.T) {
 	got := DefaultAgents()
-	want := []string{"droid", "codex-cloud", "codex"}
+	want := []string{"droid", "codex", "cursor"}
 	if len(got) < len(want) {
 		t.Fatalf("expected at least %d agents, got %d", len(want), len(got))
 	}
@@ -16,16 +16,16 @@ func TestDefaultAgentsPrioritizesDroidCodexCloudCodex(t *testing.T) {
 }
 
 func TestFindAndFindMode(t *testing.T) {
-	a, ok := Find("codex-cloud")
+	a, ok := Find("codex")
 	if !ok {
-		t.Fatal("expected codex-cloud agent")
+		t.Fatal("expected codex agent")
 	}
 	mode, ok := FindMode(a, "default")
 	if !ok {
-		t.Fatal("expected default codex-cloud mode")
+		t.Fatal("expected default codex mode")
 	}
-	if a.FullCommand(mode) != "codex cloud" {
-		t.Fatalf("expected codex cloud command, got %q", a.FullCommand(mode))
+	if a.FullCommand(mode) != "codex" {
+		t.Fatalf("expected codex command, got %q", a.FullCommand(mode))
 	}
 }
 
@@ -36,6 +36,9 @@ func TestCommandMapKeepsFirstAgentForDuplicateCommands(t *testing.T) {
 	}
 	if !IsAgentCommand("droid") {
 		t.Fatal("expected droid to be detected as an agent command")
+	}
+	if !IsAgentCommand("cursor-agent") {
+		t.Fatal("expected cursor-agent to be detected as an agent command")
 	}
 }
 
@@ -60,7 +63,15 @@ func TestAgentDisplayNameUsesSymbol(t *testing.T) {
 	if !ok {
 		t.Fatal("expected codex agent")
 	}
-	if codex.DisplayName() != "› Codex CLI" {
+	if codex.DisplayName() != "⌾ Codex CLI" {
 		t.Fatalf("Codex DisplayName() = %q", codex.DisplayName())
+	}
+
+	cursor, ok := Find("cursor")
+	if !ok {
+		t.Fatal("expected cursor agent")
+	}
+	if cursor.DisplayName() != "⌬ Cursor CLI" {
+		t.Fatalf("Cursor DisplayName() = %q", cursor.DisplayName())
 	}
 }

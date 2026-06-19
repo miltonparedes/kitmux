@@ -37,35 +37,39 @@ func TestBuildRowsKeepsHeadlessDetailedAndSkipsDuplicatePane(t *testing.T) {
 	}
 }
 
-func TestRowLabelUsesStateIconAndAvoidsIdleSymbolDuplication(t *testing.T) {
+func TestRowIconAndTitleComposeStateGlyphWithoutDuplication(t *testing.T) {
+	compose := func(row Row) string {
+		return rowIcon(row, 0) + " " + rowTitle(row)
+	}
+
 	working := Row{AgentSymbol: "⛬", AgentState: "working", Title: "feat/threads"}
-	if got := rowLabel(working, 0); got != "⠋ feat/threads" {
-		t.Fatalf("working rowLabel = %q", got)
+	if got := compose(working); got != "⠋ feat/threads" {
+		t.Fatalf("working = %q", got)
 	}
 
 	input := Row{AgentSymbol: "✳", AgentState: "input", Title: "fix title"}
-	if got := rowLabel(input, 0); got != "? fix title" {
-		t.Fatalf("input rowLabel = %q", got)
+	if got := compose(input); got != "⮞ fix title" {
+		t.Fatalf("input = %q", got)
 	}
 
 	permission := Row{AgentSymbol: "✳", AgentState: "permission", Title: "needs approval"}
-	if got := rowLabel(permission, 0); got != "! needs approval" {
-		t.Fatalf("permission rowLabel = %q", got)
+	if got := compose(permission); got != "! needs approval" {
+		t.Fatalf("permission = %q", got)
 	}
 
 	codexWorking := Row{AgentID: "codex", AgentSymbol: "›", AgentState: "working", Title: "⠹ kitmux"}
-	if got := rowLabel(codexWorking, 0); got != "⠋ kitmux" {
-		t.Fatalf("codex working rowLabel = %q", got)
+	if got := compose(codexWorking); got != "⠋ kitmux" {
+		t.Fatalf("codex working = %q", got)
 	}
 
 	droidWorkingWithNativePrefix := Row{AgentID: "droid", AgentSymbol: "⛬", AgentState: "working", Title: "⠂ ⛬ Android app"}
-	if got := rowLabel(droidWorkingWithNativePrefix, 0); got != "⠋ Android app" {
-		t.Fatalf("droid working rowLabel = %q", got)
+	if got := compose(droidWorkingWithNativePrefix); got != "⠋ Android app" {
+		t.Fatalf("droid working = %q", got)
 	}
 
 	idle := Row{AgentSymbol: "⛬", AgentState: "idle", Title: "⛬ Droid · app"}
-	if got := rowLabel(idle, 0); got != "⛬ Droid · app" {
-		t.Fatalf("idle rowLabel = %q", got)
+	if got := compose(idle); got != "⛬ Droid · app" {
+		t.Fatalf("idle = %q", got)
 	}
 }
 
