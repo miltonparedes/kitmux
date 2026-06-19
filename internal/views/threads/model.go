@@ -81,6 +81,12 @@ var (
 	syncPaneTitle       = tmux.SetPaneTitle
 	refreshThreadClient = tmux.RefreshClients
 	createThread        = agentthread.Create
+	resolveAgentSession = agentresume.ResolveSessionID
+	persistAgentSession = tmux.SetAgentSessionID
+	resumeAgentCommand  = agentresume.ResumeCommand
+	wrapThreadCommand   = agentthread.ThreadCommand
+	respawnThreadPane   = tmux.RespawnPaneInDir
+	applyThreadSupport  = agentthread.ApplySupport
 )
 
 func New(launchDir ...string) Model {
@@ -657,38 +663,43 @@ func killHeadlessCmd(sessionName string) tea.Cmd {
 
 func relaunchHeadlessCmd(row Row) tea.Cmd {
 	return func() tea.Msg {
-		if row.Kind != RowHeadless {
-			return loadCmd()()
-		}
-		sessionID := strings.TrimSpace(row.AgentSessionID)
-		if sessionID == "" {
-			resolvedID, err := agentresume.ResolveSessionID(agentresume.Target{
-				AgentID: row.AgentID,
-				PanePID: row.PanePID,
-			})
-			if err != nil {
-				return loadCmd()()
-			}
-			sessionID = resolvedID
-			_ = tmux.SetAgentSessionID(row.SessionName, sessionID)
-		}
-		resumeCommand, err := agentresume.ResumeCommand(row.AgentID, sessionID)
-		if err != nil {
-			return loadCmd()()
-		}
-		target := rowPaneTarget(row)
-		command := agentthread.ThreadCommand(row.AgentID, row.SessionName, resumeCommand)
-		if err := tmux.RespawnPaneInDir(target, row.Path, command); err != nil {
-			return loadCmd()()
-		}
-		_ = agentthread.ApplySupport(agentthread.SupportSpec{
-			SessionName:  row.SessionName,
-			TargetPane:   target,
-			AgentID:      row.AgentID,
-			InitialTitle: rowTitle(row),
-		}, agentthread.DefaultOps())
+		_ = relaunchHeadless(row)
 		return loadCmd()()
 	}
+}
+
+func relaunchHeadless(row Row) error {
+	if row.Kind != RowHeadless {
+		return nil
+	}
+	sessionID := strings.TrimSpace(row.AgentSessionID)
+	if sessionID == "" {
+		resolvedID, err := resolveAgentSession(agentresume.Target{
+			AgentID: row.AgentID,
+			PanePID: row.PanePID,
+		})
+		if err != nil {
+			return err
+		}
+		sessionID = resolvedID
+	}
+	_ = persistAgentSession(row.SessionName, sessionID)
+	resumeCommand, err := resumeAgentCommand(row.AgentID, sessionID)
+	if err != nil {
+		return err
+	}
+	target := rowPaneTarget(row)
+	command := wrapThreadCommand(row.AgentID, row.SessionName, resumeCommand)
+	if err := respawnThreadPane(target, row.Path, command); err != nil {
+		return err
+	}
+	_ = applyThreadSupport(agentthread.SupportSpec{
+		SessionName:  row.SessionName,
+		TargetPane:   target,
+		AgentID:      row.AgentID,
+		InitialTitle: rowTitle(row),
+	}, agentthread.DefaultOps())
+	return nil
 }
 
 func renameRowCmd(row Row, title string) tea.Cmd {

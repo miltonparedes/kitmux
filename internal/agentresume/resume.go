@@ -76,7 +76,7 @@ func lsofPaths(pid int) ([]string, error) {
 func sessionIDFromPaths(agentID string, paths []string) (string, error) {
 	switch agentID {
 	case "droid":
-		return bestPathID(paths, isDroidSessionPath, sessionIDFromPath)
+		return bestPathID(paths, isDroidSessionPath, droidSessionIDFromPath)
 	case "codex":
 		return bestPathID(paths, isCodexRolloutPath, codexThreadIDFromPath)
 	case "claude":
@@ -123,7 +123,9 @@ func bestPathID(paths []string, match pathPredicate, extract pathIDFunc) (string
 
 func isDroidSessionPath(path string) bool {
 	base := filepath.Base(path)
-	return strings.Contains(path, string(filepath.Separator)+".factory"+string(filepath.Separator)+"sessions"+string(filepath.Separator)) &&
+	factoryDir := string(filepath.Separator) + ".factory" + string(filepath.Separator)
+	return (strings.Contains(path, factoryDir+"sessions"+string(filepath.Separator)) ||
+		strings.Contains(path, factoryDir+"projects"+string(filepath.Separator))) &&
 		(strings.HasSuffix(base, ".jsonl") || strings.HasSuffix(base, ".settings.json"))
 }
 
@@ -159,10 +161,30 @@ func isOpenCodeSessionPath(path string) bool {
 		strings.Contains(path, string(filepath.Separator)+sessionDir+string(filepath.Separator))
 }
 
-var uuidPattern = regexp.MustCompile(
-	`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`,
+var (
+	uuidPattern = regexp.MustCompile(
+		`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`,
+	)
+	opencodeSessionPattern = regexp.MustCompile(`ses_[A-Za-z0-9]+`)
+	opaqueSessionPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$`)
 )
-var opencodeSessionPattern = regexp.MustCompile(`ses_[A-Za-z0-9]+`)
+
+func droidSessionIDFromPath(path string) string {
+	if id := sessionIDFromPath(path); id != "" {
+		return id
+	}
+	base := filepath.Base(path)
+	for _, suffix := range []string{".settings.json", ".jsonl"} {
+		if !strings.HasSuffix(base, suffix) {
+			continue
+		}
+		candidate := strings.TrimSuffix(base, suffix)
+		if opaqueSessionPattern.MatchString(candidate) {
+			return candidate
+		}
+	}
+	return ""
+}
 
 func sessionIDFromPath(path string) string {
 	return uuidPattern.FindString(filepath.Base(path))

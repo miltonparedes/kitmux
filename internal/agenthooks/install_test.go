@@ -32,7 +32,15 @@ func TestInstallAllWritesSupportedAgentHooks(t *testing.T) {
 	assertJSONHook(t, factoryPath, "Stop", shimAgentEventCommand(home, "droid", "stop"))
 	assertJSONHook(t, factoryPath, "SessionEnd", shimAgentEventCommand(home, "droid", "session-end"))
 	assertNoInlineHookState(t, factoryPath)
-	assertMissing(t, filepath.Join(home, ".factory", "settings.json"))
+	factorySettingsPath := filepath.Join(home, ".factory", "settings.json")
+	assertJSONHook(t, factorySettingsPath, "UserPromptSubmit", shimAgentEventCommand(home, "droid", "user-prompt-submit"))
+	assertJSONHook(t, factorySettingsPath, "PreToolUse", shimAgentEventCommand(home, "droid", "pre-tool-use"))
+	assertJSONHook(t, factorySettingsPath, "Notification", shimAgentEventCommand(home, "droid", "notification"))
+	factorySettings := readJSONFile(t, factorySettingsPath)
+	if factorySettings["enableHooks"] != true {
+		t.Fatalf("factory enableHooks = %#v", factorySettings["enableHooks"])
+	}
+	assertNoInlineHookState(t, factorySettingsPath)
 
 	claudePath := filepath.Join(home, ".claude", "settings.json")
 	assertJSONHook(t, claudePath, "UserPromptSubmit", shimAgentEventCommand(home, "claude", "user-prompt-submit"))
@@ -246,13 +254,13 @@ func TestInstallAllUpgradesAmbientTmuxAgentEventHooks(t *testing.T) {
 	}
 }
 
-func TestInstallDroidUsesHooksJSONAndCleansSettingsHooks(t *testing.T) {
+func TestInstallDroidUsesHooksJSONAndSettingsHooks(t *testing.T) {
 	home := t.TempDir()
 	settingsPath := filepath.Join(home, ".factory", "settings.json")
 	oldCommand := agentenv.WrapHookCommand("droid", rawAgentEventCommand("droid", "pre-tool-use", stateWorking, false, true))
 	customCommand := "echo keep-custom-hook"
 	settings := map[string]any{
-		"enableHooks": true,
+		"enableHooks": false,
 		"customKey":   "keep-me",
 		"hooks": map[string]any{
 			"PreToolUse": []any{
@@ -280,10 +288,11 @@ func TestInstallDroidUsesHooksJSONAndCleansSettingsHooks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Install() error = %v", err)
 	}
-	if result.Path != filepath.Join(home, ".factory", "hooks.json") || !result.Changed {
+	hooksPath := filepath.Join(home, ".factory", "hooks.json")
+	if result.Path != settingsPath || !result.Changed {
 		t.Fatalf("Install() result = %#v", result)
 	}
-	assertJSONHook(t, result.Path, "PreToolUse", shimAgentEventCommand(home, "droid", "pre-tool-use"))
+	assertJSONHook(t, hooksPath, "PreToolUse", shimAgentEventCommand(home, "droid", "pre-tool-use"))
 	updatedSettings := readJSONFile(t, settingsPath)
 	if updatedSettings["enableHooks"] != true || updatedSettings["customKey"] != "keep-me" {
 		t.Fatalf("settings keys were not preserved: %#v", updatedSettings)
@@ -291,8 +300,8 @@ func TestInstallDroidUsesHooksJSONAndCleansSettingsHooks(t *testing.T) {
 	if hasJSONCommand(t, settingsPath, "PreToolUse", oldCommand) {
 		t.Fatalf("old droid settings hook was not cleaned")
 	}
-	if hasJSONCommand(t, settingsPath, "PreToolUse", shimAgentEventCommand(home, "droid", "pre-tool-use")) {
-		t.Fatalf("droid settings retained canonical hook")
+	if !hasJSONCommand(t, settingsPath, "PreToolUse", shimAgentEventCommand(home, "droid", "pre-tool-use")) {
+		t.Fatalf("droid settings missing canonical hook")
 	}
 	if countPreToolUseJSONCommand(t, settingsPath, customCommand) != 1 {
 		t.Fatalf("custom settings hook was not preserved: %#v", readJSONFile(t, settingsPath))
@@ -318,7 +327,12 @@ func TestInstallWritesOnlyRequestedAgentHooks(t *testing.T) {
 		t.Fatalf("Install() result = %#v", result)
 	}
 	assertJSONHook(t, filepath.Join(home, ".factory", "hooks.json"), "Notification", shimAgentEventCommand(home, "droid", "notification"))
-	assertMissing(t, filepath.Join(home, ".factory", "settings.json"))
+	settingsPath := filepath.Join(home, ".factory", "settings.json")
+	assertJSONHook(t, settingsPath, "Notification", shimAgentEventCommand(home, "droid", "notification"))
+	settings := readJSONFile(t, settingsPath)
+	if settings["enableHooks"] != true {
+		t.Fatalf("settings enableHooks = %#v", settings["enableHooks"])
+	}
 	assertMissing(t, filepath.Join(home, ".claude", "settings.json"))
 	assertMissing(t, filepath.Join(home, ".codex", "hooks.json"))
 }

@@ -125,11 +125,11 @@ func installDroid(home string) (Result, error) {
 	}
 
 	settingsPath := filepath.Join(home, ".factory", "settings.json")
-	changedSettings, err := cleanupDroidSettingsHooks(settingsPath, hooks)
+	changedSettings, err := installDroidSettingsHooks(settingsPath, hooks)
 	if err != nil {
-		return Result{AgentID: "droid", Path: hooksPath, Changed: changedShim || changedHooks || changedSettings}, err
+		return Result{AgentID: "droid", Path: settingsPath, Changed: changedShim || changedHooks || changedSettings}, err
 	}
-	return Result{AgentID: "droid", Path: hooksPath, Changed: changedShim || changedHooks || changedSettings}, nil
+	return Result{AgentID: "droid", Path: settingsPath, Changed: changedShim || changedHooks || changedSettings}, nil
 }
 
 func droidHookSpecs(shimPath string) []hookSpec {
@@ -144,14 +144,13 @@ func droidHookSpecs(shimPath string) []hookSpec {
 	}
 }
 
-func cleanupDroidSettingsHooks(path string, hooks []hookSpec) (bool, error) {
-	if _, err := os.Stat(path); errors.Is(err, os.ErrNotExist) {
-		return false, nil
-	} else if err != nil {
-		return false, err
-	}
+func installDroidSettingsHooks(path string, hooks []hookSpec) (bool, error) {
 	return updateJSON(path, func(doc map[string]any) bool {
-		return removeCommandHooks(doc, hooks)
+		changed := setBool(doc, "enableHooks", true)
+		if addCommandHooks(doc, hooks) {
+			changed = true
+		}
+		return changed
 	})
 }
 
@@ -356,6 +355,14 @@ func setString(doc map[string]any, key, value string) bool {
 	return true
 }
 
+func setBool(doc map[string]any, key string, value bool) bool {
+	if got, ok := doc[key].(bool); ok && got == value {
+		return false
+	}
+	doc[key] = value
+	return true
+}
+
 func addCommandHooks(doc map[string]any, hooks []hookSpec) bool {
 	rawHooks, _ := doc["hooks"].(map[string]any)
 	if rawHooks == nil {
@@ -368,35 +375,6 @@ func addCommandHooks(doc map[string]any, hooks []hookSpec) bool {
 		if addCommandHook(rawHooks, spec) {
 			changed = true
 		}
-	}
-	return changed
-}
-
-func removeCommandHooks(doc map[string]any, hooks []hookSpec) bool {
-	rawHooks, _ := doc["hooks"].(map[string]any)
-	if rawHooks == nil {
-		return false
-	}
-
-	changed := false
-	for _, spec := range hooks {
-		groups, _ := rawHooks[spec.Event].([]any)
-		if len(groups) == 0 {
-			continue
-		}
-		nextGroups, removed := removeAgentEventHooks(groups, spec)
-		if !removed {
-			continue
-		}
-		changed = true
-		if len(nextGroups) == 0 {
-			delete(rawHooks, spec.Event)
-		} else {
-			rawHooks[spec.Event] = nextGroups
-		}
-	}
-	if changed && len(rawHooks) == 0 {
-		delete(doc, "hooks")
 	}
 	return changed
 }
@@ -432,59 +410,6 @@ func addCommandHook(rawHooks map[string]any, spec hookSpec) bool {
 	}
 	rawHooks[spec.Event] = append(groups, group)
 	return true
-}
-
-func removeAgentEventHooks(groups []any, spec hookSpec) ([]any, bool) {
-	changed := false
-	out := make([]any, 0, len(groups))
-	for _, group := range groups {
-		groupMap, ok := group.(map[string]any)
-		if !ok {
-			out = append(out, group)
-			continue
-		}
-		hooks, ok := groupMap["hooks"].([]any)
-		if !ok {
-			out = append(out, group)
-			continue
-		}
-		nextHooks, groupChanged := removeAgentEventGroup(hooks, spec)
-		if len(nextHooks) == 0 {
-			changed = true
-			continue
-		}
-		if groupChanged {
-			groupMap["hooks"] = nextHooks
-			changed = true
-		}
-		out = append(out, group)
-	}
-	if len(out) != len(groups) {
-		changed = true
-	}
-	return out, changed
-}
-
-func removeAgentEventGroup(hooks []any, spec hookSpec) ([]any, bool) {
-	changed := false
-	nextHooks := make([]any, 0, len(hooks))
-	for _, hook := range hooks {
-		if isOwnedCommandHook(hook, spec) {
-			changed = true
-			continue
-		}
-		nextHooks = append(nextHooks, hook)
-	}
-	return nextHooks, changed
-}
-
-func isOwnedCommandHook(hook any, spec hookSpec) bool {
-	hookMap, ok := hook.(map[string]any)
-	command, _ := hookMap[hookCommandKey].(string)
-	if !ok || hookMap[hookTypeKey] != hookTypeCommand {
-		return false
-	}
-	return isAgentEventCommand(command, spec) || hasExactCommand(command, spec.ReplaceCommands)
 }
 
 func normalizeAgentEventHooks(groups []any, spec hookSpec) ([]any, bool) {
@@ -562,15 +487,6 @@ func hasFlagValue(command, flag, value string) bool {
 		strings.Contains(command, flag+"="+value) ||
 		strings.Contains(command, flag+" "+hookShellQuote(value)) ||
 		strings.Contains(command, flag+"="+hookShellQuote(value))
-}
-
-func hasExactCommand(command string, values []string) bool {
-	for _, value := range values {
-		if command == value {
-			return true
-		}
-	}
-	return false
 }
 
 func dedupeCommandHooks(groups []any, command string) ([]any, bool) {

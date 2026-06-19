@@ -14,7 +14,7 @@ func TestResumeCommand(t *testing.T) {
 		id    string
 		want  string
 	}{
-		{"droid", "11111111-1111-4111-8111-111111111111", "droid --resume '11111111-1111-4111-8111-111111111111'"},
+		{"droid", "abc123", "droid --resume 'abc123'"},
 		{"codex", "22222222-2222-4222-8222-222222222222", "codex resume '22222222-2222-4222-8222-222222222222'"},
 		{"claude", "33333333-3333-4333-8333-333333333333", "claude --resume '33333333-3333-4333-8333-333333333333'"},
 		{"cursor", "44444444-4444-4444-8444-444444444444", "cursor-agent --resume '44444444-4444-4444-8444-444444444444'"},
@@ -50,6 +50,11 @@ func TestSessionIDFromPaths(t *testing.T) {
 			agent: "droid",
 			path:  filepath.Join(root, ".factory", "sessions", "-tmp-app", "11111111-1111-4111-8111-111111111111.jsonl"),
 			want:  "11111111-1111-4111-8111-111111111111",
+		},
+		{
+			agent: "droid",
+			path:  filepath.Join(root, ".factory", "projects", "-tmp-app", "abc123.jsonl"),
+			want:  "abc123",
 		},
 		{
 			agent: "codex",

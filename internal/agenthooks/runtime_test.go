@@ -131,6 +131,41 @@ func TestRunAgentEventPersistsSessionIDFromHookPayload(t *testing.T) {
 	}
 }
 
+func TestRunAgentEventPersistsDroidOpaqueSessionIDFromHookPayload(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_ID", "droid")
+	t.Setenv("KITMUX_TMUX_SESSION", "droid-app")
+	t.Setenv("KITMUX_TMUX_PANE", "%3")
+	t.Setenv("KITMUX_TMUX_THREAD", "1")
+	paneOptions := make(map[string]string)
+	sessionOptions := make(map[string]string)
+	payload := `{"hook_event_name":"SessionStart","session_id":"abc123","transcript_path":"/Users/me/.factory/projects/app/33333333-3333-4333-8333-333333333333.jsonl"}`
+
+	err := RunAgentEvent(AgentEvent{Agent: "droid", StdinJSON: true}, strings.NewReader(payload), nil, StateOps{
+		CurrentPaneTitle: func() (string, error) { return "Droid · app", nil },
+		SetPaneOption: func(_, option, value string) error {
+			paneOptions[option] = value
+			return nil
+		},
+		SetSessionOption: func(_, option, value string) error {
+			sessionOptions[option] = value
+			return nil
+		},
+		EmitBell:              func(_ io.Writer) error { return nil },
+		StartSpinner:          func(SpinnerTarget) error { return nil },
+		RefreshSessionClients: func(string) {},
+		Now:                   func() time.Time { return time.UnixMilli(999) },
+	})
+	if err != nil {
+		t.Fatalf("RunAgentEvent() error = %v", err)
+	}
+	if paneOptions[agentSessionIDOption] != "abc123" {
+		t.Fatalf("pane session id = %q", paneOptions[agentSessionIDOption])
+	}
+	if sessionOptions[agentSessionIDOption] != "abc123" {
+		t.Fatalf("session id = %q", sessionOptions[agentSessionIDOption])
+	}
+}
+
 func TestRunAgentEventKeepsTrackedThreadsIsolated(t *testing.T) {
 	paneOptions := map[string]map[string]string{}
 	sessionOptions := map[string]map[string]string{}

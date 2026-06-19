@@ -363,11 +363,13 @@ func deriveAgentSessionID(eventName string, input hookInput) string {
 		input.ThreadID,
 		input.ConversationID,
 	}
-	if eventKey(eventName) == "sessionstart" {
-		candidates = append(candidates, input.ID)
-	}
 	for _, candidate := range candidates {
-		if id := extractSessionID(candidate); id != "" {
+		if id := extractExplicitSessionID(candidate); id != "" {
+			return id
+		}
+	}
+	if eventKey(eventName) == "sessionstart" {
+		if id := extractSessionID(input.ID); id != "" {
 			return id
 		}
 	}
@@ -379,10 +381,24 @@ func deriveAgentSessionID(eventName string, input hookInput) string {
 	return ""
 }
 
-var sessionUUIDPattern = regexp.MustCompile(
-	`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`,
+var (
+	sessionUUIDPattern = regexp.MustCompile(
+		`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`,
+	)
+	openCodeSessionIDPattern = regexp.MustCompile(`ses_[A-Za-z0-9]+`)
+	opaqueSessionIDPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$`)
 )
-var openCodeSessionIDPattern = regexp.MustCompile(`ses_[A-Za-z0-9]+`)
+
+func extractExplicitSessionID(value string) string {
+	if id := extractSessionID(value); id != "" {
+		return id
+	}
+	value = strings.TrimSpace(value)
+	if opaqueSessionIDPattern.MatchString(value) {
+		return value
+	}
+	return ""
+}
 
 func extractSessionID(value string) string {
 	value = strings.TrimSpace(value)

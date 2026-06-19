@@ -1,12 +1,17 @@
 package threads
 
 import (
+	"fmt"
+	"os"
+	"os/exec"
+	"strings"
 	"testing"
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/miltonparedes/kitmux/internal/agentrename"
+	"github.com/miltonparedes/kitmux/internal/agentresume"
 	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/agentthread"
 	"github.com/miltonparedes/kitmux/internal/app/messages"
@@ -227,6 +232,184 @@ func TestReconcilePaneTitleRenamesPersistsFirstLiveRename(t *testing.T) {
 	}
 }
 
+func TestReconcilePaneTitleRenamesSupportsRegisteredAgents(t *testing.T) {
+	tests := []struct {
+		name       string
+		row        Row
+		wantTitle  string
+		wantPrefix string
+	}{
+		{
+			name: "claude",
+			row: Row{
+				Kind:        RowHeadless,
+				AgentID:     "claude",
+				AgentName:   "Claude Code",
+				AgentSymbol: "✳",
+				AgentState:  "idle",
+				ThreadTitle: "old claude title",
+				PaneTitle:   "✳ review auth flow",
+				SessionName: "claude-kitmux",
+				Path:        "/repo/app",
+			},
+			wantTitle:  "review auth flow",
+			wantPrefix: "✳",
+		},
+		{
+			name: "cursor",
+			row: Row{
+				Kind:        RowHeadless,
+				AgentID:     "cursor",
+				AgentName:   "Cursor CLI",
+				AgentSymbol: "⌬",
+				AgentState:  "idle",
+				ThreadTitle: "old cursor title",
+				PaneTitle:   "⌬ fix search panel",
+				SessionName: "cursor-kitmux",
+				Path:        "/repo/app",
+			},
+			wantTitle:  "fix search panel",
+			wantPrefix: "⌬",
+		},
+		{
+			name: "opencode",
+			row: Row{
+				Kind:        RowHeadless,
+				AgentID:     "opencode",
+				AgentName:   "OpenCode",
+				AgentState:  "idle",
+				ThreadTitle: "old opencode title",
+				PaneTitle:   "audit release notes",
+				SessionName: "opencode-kitmux",
+				Path:        "/repo/app",
+			},
+			wantTitle:  "audit release notes",
+			wantPrefix: "O",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			originalSync := syncThreadTitle
+			originalPrefix := syncThreadPrefix
+			originalRefresh := refreshThreadClient
+			t.Cleanup(func() {
+				syncThreadTitle = originalSync
+				syncThreadPrefix = originalPrefix
+				refreshThreadClient = originalRefresh
+			})
+
+			var syncedSession, syncedTitle, syncedPrefix, refreshedSession string
+			syncThreadTitle = func(sessionName, title string) error {
+				syncedSession = sessionName
+				syncedTitle = title
+				return nil
+			}
+			syncThreadPrefix = func(sessionName, prefix string) error {
+				syncedPrefix = prefix
+				return nil
+			}
+			refreshThreadClient = func(sessionName string) error {
+				refreshedSession = sessionName
+				return nil
+			}
+
+			rows := reconcilePaneTitleRenames([]Row{tt.row})
+
+			if rows[0].Title != tt.wantTitle || rows[0].ThreadTitle != tt.wantTitle {
+				t.Fatalf("titles = %q/%q, want %q", rows[0].Title, rows[0].ThreadTitle, tt.wantTitle)
+			}
+			if syncedSession != tt.row.SessionName || syncedTitle != tt.wantTitle {
+				t.Fatalf("synced session/title = %q/%q", syncedSession, syncedTitle)
+			}
+			if syncedPrefix != tt.wantPrefix {
+				t.Fatalf("prefix = %q, want %q", syncedPrefix, tt.wantPrefix)
+			}
+			if refreshedSession != tt.row.SessionName {
+				t.Fatalf("refreshed session = %q", refreshedSession)
+			}
+		})
+	}
+}
+
+func TestReconcilePaneTitleRenamesAgainstTmux(t *testing.T) {
+	if os.Getenv("KITMUX_TMUX_INTEGRATION") != "1" {
+		t.Skip("set KITMUX_TMUX_INTEGRATION=1 to run tmux integration validation")
+	}
+	if _, err := exec.LookPath("tmux"); err != nil {
+		t.Skip("tmux not available")
+	}
+
+	tests := []struct {
+		agent      string
+		paneTitle  string
+		wantTitle  string
+		wantPrefix string
+	}{
+		{agent: "claude", paneTitle: "✳ review auth flow", wantTitle: "review auth flow", wantPrefix: "✳"},
+		{agent: "cursor", paneTitle: "⌬ fix search panel", wantTitle: "fix search panel", wantPrefix: "⌬"},
+		{agent: "opencode", paneTitle: "audit release notes", wantTitle: "audit release notes", wantPrefix: "O"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.agent, func(t *testing.T) {
+			sessionName := fmt.Sprintf("kitmux-test-%s-%d", tt.agent, time.Now().UnixNano())
+			tmuxRun(t, "new-session", "-d", "-s", sessionName, "sleep 60")
+			t.Cleanup(func() {
+				_ = exec.Command("tmux", "kill-session", "-t", sessionName).Run()
+			})
+			tmuxRun(t, "set-option", "-q", "-t", sessionName, "@kitmux_thread", "1")
+			tmuxRun(t, "set-option", "-q", "-t", sessionName, "@kitmux_agent", tt.agent)
+			tmuxRun(t, "set-option", "-q", "-t", sessionName, "@kitmux_agent_state", "idle")
+			tmuxRun(t, "set-option", "-q", "-t", sessionName, "@kitmux_thread_title", "old "+tt.agent)
+			tmuxRun(t, "select-pane", "-t", sessionName, "-T", tt.paneTitle)
+
+			msg := loadRows()
+			row, ok := findRowBySession(msg.rows, sessionName)
+			if !ok {
+				t.Fatalf("session %q not found in rows", sessionName)
+			}
+			if row.Title != tt.wantTitle || row.ThreadTitle != tt.wantTitle {
+				t.Fatalf("row titles = %q/%q, want %q", row.Title, row.ThreadTitle, tt.wantTitle)
+			}
+
+			gotTitle := strings.TrimSpace(tmuxOutput(t, "show-option", "-qv", "-t", sessionName, "@kitmux_thread_title"))
+			if gotTitle != tt.wantTitle {
+				t.Fatalf("@kitmux_thread_title = %q, want %q", gotTitle, tt.wantTitle)
+			}
+			gotPrefix := strings.TrimSpace(tmuxOutput(t, "show-option", "-qv", "-t", sessionName, "@kitmux_agent_title_prefix"))
+			if gotPrefix != tt.wantPrefix {
+				t.Fatalf("@kitmux_agent_title_prefix = %q, want %q", gotPrefix, tt.wantPrefix)
+			}
+		})
+	}
+}
+
+func tmuxRun(t *testing.T, args ...string) {
+	t.Helper()
+	if out, err := exec.Command("tmux", args...).CombinedOutput(); err != nil {
+		t.Fatalf("tmux %s: %v\n%s", strings.Join(args, " "), err, strings.TrimSpace(string(out)))
+	}
+}
+
+func tmuxOutput(t *testing.T, args ...string) string {
+	t.Helper()
+	out, err := exec.Command("tmux", args...).Output()
+	if err != nil {
+		t.Fatalf("tmux %s: %v", strings.Join(args, " "), err)
+	}
+	return string(out)
+}
+
+func findRowBySession(rows []Row, sessionName string) (Row, bool) {
+	for _, row := range rows {
+		if row.SessionName == sessionName {
+			return row, true
+		}
+	}
+	return Row{}, false
+}
+
 func TestRepairThreadTitlePrefixesKeepsAgentIconForIdleRenamedThreads(t *testing.T) {
 	originalPrefix := syncThreadPrefix
 	originalRefresh := refreshThreadClient
@@ -319,6 +502,72 @@ func TestRelaunchKeyReturnsCommandForHeadlessRows(t *testing.T) {
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
 	if cmd == nil {
 		t.Fatal("expected relaunch command")
+	}
+}
+
+func TestRelaunchHeadlessUsesPersistedDroidSessionID(t *testing.T) {
+	originalResolve := resolveAgentSession
+	originalPersist := persistAgentSession
+	originalWrap := wrapThreadCommand
+	originalRespawn := respawnThreadPane
+	originalSupport := applyThreadSupport
+	t.Cleanup(func() {
+		resolveAgentSession = originalResolve
+		persistAgentSession = originalPersist
+		wrapThreadCommand = originalWrap
+		respawnThreadPane = originalRespawn
+		applyThreadSupport = originalSupport
+	})
+
+	resolveAgentSession = func(agentresume.Target) (string, error) {
+		t.Fatal("resolveAgentSession should not run when the row has a session id")
+		return "", nil
+	}
+	var persistedSession, persistedID string
+	persistAgentSession = func(sessionName, id string) error {
+		persistedSession = sessionName
+		persistedID = id
+		return nil
+	}
+	wrapThreadCommand = func(agentID, sessionName, command string) string {
+		if agentID != "droid" || sessionName != droidKitmuxSession {
+			t.Fatalf("wrap target = %q/%q", agentID, sessionName)
+		}
+		return "wrapped:" + command
+	}
+	var respawnTarget, respawnDir, respawnCommand string
+	respawnThreadPane = func(targetPane, dir, command string) error {
+		respawnTarget = targetPane
+		respawnDir = dir
+		respawnCommand = command
+		return nil
+	}
+	var supportSpec agentthread.SupportSpec
+	applyThreadSupport = func(spec agentthread.SupportSpec, _ agentthread.Ops) error {
+		supportSpec = spec
+		return nil
+	}
+
+	err := relaunchHeadless(Row{
+		Kind:           RowHeadless,
+		AgentID:        "droid",
+		SessionName:    droidKitmuxSession,
+		PaneID:         "%51",
+		Path:           "/repo/app",
+		Title:          "Droid app",
+		AgentSessionID: "abc123",
+	})
+	if err != nil {
+		t.Fatalf("relaunchHeadless() error = %v", err)
+	}
+	if persistedSession != droidKitmuxSession || persistedID != "abc123" {
+		t.Fatalf("persisted session/id = %q/%q", persistedSession, persistedID)
+	}
+	if respawnTarget != "%51" || respawnDir != "/repo/app" || respawnCommand != "wrapped:droid --resume 'abc123'" {
+		t.Fatalf("respawn = %q %q %q", respawnTarget, respawnDir, respawnCommand)
+	}
+	if supportSpec.SessionName != droidKitmuxSession || supportSpec.TargetPane != "%51" || supportSpec.AgentID != "droid" {
+		t.Fatalf("support spec = %#v", supportSpec)
 	}
 }
 
