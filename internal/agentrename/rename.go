@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,7 +17,7 @@ import (
 	"strings"
 	"time"
 
-	_ "modernc.org/sqlite"
+	_ "modernc.org/sqlite" // register sqlite database driver
 )
 
 var ErrUnsupported = errors.New("agent rename unsupported")
@@ -245,7 +246,10 @@ func setCodexThreadName(threadID, title string) error {
 	}); err != nil {
 		return err
 	}
+	return waitCodexRenameResponse(stdout, &stderr)
+}
 
+func waitCodexRenameResponse(stdout io.Reader, stderr *bytes.Buffer) error {
 	scanner := bufio.NewScanner(stdout)
 	for scanner.Scan() {
 		var msg map[string]any

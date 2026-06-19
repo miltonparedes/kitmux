@@ -65,7 +65,7 @@ func (m Model) footerLine() string {
 		right := theme.HelpStyle.Render("enter save   esc cancel ")
 		return padBetween(left, right, m.width)
 	}
-	help := theme.HelpStyle.Render(" ⏎ open   n new   r rename   d/K kill   ctrl+r refresh   q quit")
+	help := theme.HelpStyle.Render(" ⏎ open   n new   r rename   R relaunch   d/K kill   ctrl+r refresh   q quit")
 	pager := ""
 	if len(m.rows) > 0 {
 		pager = theme.TreeMeta.Render(fmt.Sprintf("%d / %d ", m.cursor+1, len(m.rows)))

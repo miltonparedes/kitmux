@@ -22,6 +22,7 @@ func ListSessions() ([]Session, error) {
 		"#{@kitmux_agent_detail}",
 		"#{@kitmux_agent_updated}",
 		"#{@kitmux_thread_title}",
+		"#{@kitmux_agent_session_id}",
 	}, "\t")
 	out, err := exec.Command("tmux", "list-sessions", "-F",
 		format).Output()
@@ -41,7 +42,7 @@ func parseSessionsOutput(output string) []Session {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 12)
+		parts := strings.SplitN(line, "\t", 13)
 		if len(parts) < 3 {
 			continue
 		}
@@ -55,18 +56,19 @@ func parseSessionsOutput(output string) []Session {
 			activity, _ = strconv.ParseInt(parts[4], 10, 64)
 		}
 		sessions = append(sessions, Session{
-			Name:         parts[0],
-			Windows:      wins,
-			Attached:     parts[2] == "1",
-			Path:         path,
-			Activity:     activity,
-			Thread:       len(parts) >= 6 && parts[5] == "1",
-			AgentID:      sessionAgentID(parts),
-			AgentState:   sessionAgentState(parts),
-			AgentEvent:   sessionAgentEvent(parts),
-			AgentDetail:  sessionAgentDetail(parts),
-			AgentUpdated: sessionAgentUpdated(parts),
-			ThreadTitle:  sessionThreadTitle(parts),
+			Name:           parts[0],
+			Windows:        wins,
+			Attached:       parts[2] == "1",
+			Path:           path,
+			Activity:       activity,
+			Thread:         len(parts) >= 6 && parts[5] == "1",
+			AgentID:        sessionAgentID(parts),
+			AgentState:     sessionAgentState(parts),
+			AgentEvent:     sessionAgentEvent(parts),
+			AgentDetail:    sessionAgentDetail(parts),
+			AgentUpdated:   sessionAgentUpdated(parts),
+			ThreadTitle:    sessionThreadTitle(parts),
+			AgentSessionID: sessionAgentSessionID(parts),
 		})
 	}
 	return sessions
@@ -113,6 +115,13 @@ func sessionThreadTitle(parts []string) string {
 		return ""
 	}
 	return parts[11]
+}
+
+func sessionAgentSessionID(parts []string) string {
+	if len(parts) < 13 {
+		return ""
+	}
+	return parts[12]
 }
 
 func NormalSessions(sessions []Session) []Session {
@@ -328,7 +337,19 @@ func SetPaneTitle(target, title string) error {
 }
 
 func SetThreadTitle(sessionName, title string) error {
-	return SetSessionOption(sessionName, "@kitmux_thread_title", title)
+	return SetSessionOption(sessionName, "@kitmux_thread_title", singleLineOptionValue(title))
+}
+
+func SetThreadTitlePrefix(sessionName, prefix string) error {
+	return SetSessionOption(sessionName, "@kitmux_agent_title_prefix", prefix)
+}
+
+func singleLineOptionValue(value string) string {
+	return strings.TrimSpace(strings.NewReplacer("\t", " ", "\n", " ", "\r", " ").Replace(value))
+}
+
+func SetAgentSessionID(sessionName, id string) error {
+	return SetSessionOption(sessionName, "@kitmux_agent_session_id", id)
 }
 
 func RefreshClients(sessionName string) error {
@@ -457,6 +478,23 @@ func SplitWindowInDirPercent(targetPane, dir, command string, percent int) (stri
 	return strings.TrimSpace(string(out)), nil
 }
 
+func RespawnPaneInDir(targetPane, dir, command string) error {
+	args := []string{"respawn-pane", "-k"}
+	if targetPane != "" {
+		args = append(args, "-t", targetPane)
+	}
+	if dir != "" {
+		args = append(args, "-c", dir)
+	}
+	if command != "" {
+		args = append(args, command)
+	}
+	if err := exec.Command("tmux", args...).Run(); err != nil {
+		return fmt.Errorf("respawn-pane: %w", err)
+	}
+	return nil
+}
+
 func SelectLayout(target, layout string) error {
 	return exec.Command("tmux", "select-layout", "-t", target, layout).Run()
 }
@@ -467,6 +505,7 @@ func ListPanes() ([]Pane, error) {
 		"#{session_name}",
 		"#{window_index}",
 		"#{pane_index}",
+		"#{pane_id}",
 		"#{pane_current_command}",
 		"#{pane_pid}",
 		"#{pane_current_path}",
@@ -475,6 +514,7 @@ func ListPanes() ([]Pane, error) {
 		"#{@kitmux_agent_event}",
 		"#{@kitmux_agent_detail}",
 		"#{@kitmux_agent_updated}",
+		"#{@kitmux_agent_session_id}",
 	}, "\t")
 	out, err := exec.Command("tmux", "list-panes", "-a", "-F", format).Output()
 	if err != nil {
@@ -482,58 +522,59 @@ func ListPanes() ([]Pane, error) {
 	}
 	var panes []Pane
 	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
-		if line == "" {
-			continue
+		if pane, ok := parsePaneLine(line); ok {
+			panes = append(panes, pane)
 		}
-		parts := strings.SplitN(line, "\t", 11)
-		if len(parts) < 4 {
-			continue
-		}
-		winIdx, _ := strconv.Atoi(parts[1])
-		paneIdx, _ := strconv.Atoi(parts[2])
-		var pid int
-		if len(parts) >= 5 {
-			pid, _ = strconv.Atoi(parts[4])
-		}
-		var path string
-		if len(parts) >= 6 {
-			path = parts[5]
-		}
-		var title string
-		if len(parts) >= 7 {
-			title = parts[6]
-		}
-		var agentState string
-		if len(parts) >= 8 {
-			agentState = parts[7]
-		}
-		var agentEvent string
-		if len(parts) >= 9 {
-			agentEvent = parts[8]
-		}
-		var agentDetail string
-		if len(parts) >= 10 {
-			agentDetail = parts[9]
-		}
-		var agentUpdated int64
-		if len(parts) >= 11 {
-			agentUpdated, _ = strconv.ParseInt(parts[10], 10, 64)
-		}
-		panes = append(panes, Pane{
-			SessionName:  parts[0],
-			WindowIndex:  winIdx,
-			PaneIndex:    paneIdx,
-			Command:      parts[3],
-			PID:          pid,
-			Path:         path,
-			Title:        title,
-			AgentState:   agentState,
-			AgentEvent:   agentEvent,
-			AgentDetail:  agentDetail,
-			AgentUpdated: agentUpdated,
-		})
 	}
 	return panes, nil
+}
+
+func parsePaneLine(line string) (Pane, bool) {
+	if line == "" {
+		return Pane{}, false
+	}
+	parts := strings.SplitN(line, "\t", 13)
+	if len(parts) < 5 {
+		return Pane{}, false
+	}
+	winIdx, _ := strconv.Atoi(parts[1])
+	paneIdx, _ := strconv.Atoi(parts[2])
+	pane := Pane{
+		SessionName: parts[0],
+		WindowIndex: winIdx,
+		PaneIndex:   paneIdx,
+		ID:          parts[3],
+		Command:     parts[4],
+	}
+	applyPaneOptionalFields(&pane, parts)
+	return pane, true
+}
+
+func applyPaneOptionalFields(pane *Pane, parts []string) {
+	if len(parts) >= 6 {
+		pane.PID, _ = strconv.Atoi(parts[5])
+	}
+	if len(parts) >= 7 {
+		pane.Path = parts[6]
+	}
+	if len(parts) >= 8 {
+		pane.Title = parts[7]
+	}
+	if len(parts) >= 9 {
+		pane.AgentState = parts[8]
+	}
+	if len(parts) >= 10 {
+		pane.AgentEvent = parts[9]
+	}
+	if len(parts) >= 11 {
+		pane.AgentDetail = parts[10]
+	}
+	if len(parts) >= 12 {
+		pane.AgentUpdated, _ = strconv.ParseInt(parts[11], 10, 64)
+	}
+	if len(parts) >= 13 {
+		pane.AgentSessionID = parts[12]
+	}
 }
 
 // DisplayPopup opens a tmux popup running the given command.

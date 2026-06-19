@@ -6,6 +6,8 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"time"
@@ -22,6 +24,7 @@ const (
 	agentUpdatedOption      = "@kitmux_agent_updated"
 	agentTitlePrefixOption  = "@kitmux_agent_title_prefix"
 	agentTitleDisplayOption = "@kitmux_agent_title_display"
+	agentSessionIDOption    = "@kitmux_agent_session_id"
 )
 
 const (
@@ -79,6 +82,14 @@ type hookInput struct {
 	EventType        string         `json:"type"`
 	NotificationType string         `json:"notification_type"`
 	ToolInput        map[string]any `json:"tool_input"`
+	SessionID        string         `json:"session_id"`
+	SessionIDCamel   string         `json:"sessionId"`
+	SessionIDUpper   string         `json:"sessionID"`
+	ThreadID         string         `json:"thread_id"`
+	ConversationID   string         `json:"conversation_id"`
+	TranscriptPath   string         `json:"transcript_path"`
+	SessionPath      string         `json:"session_path"`
+	ID               string         `json:"id"`
 }
 
 func DefaultStateOps() StateOps {
@@ -123,6 +134,7 @@ func RunAgentEvent(event AgentEvent, in io.Reader, out io.Writer, ops StateOps) 
 	logHookEvent(event, eventName, state, ctx, rawInput)
 
 	detail := sanitizeDetail(firstNonEmpty(event.Detail, deriveDetail(input)))
+	sessionID := deriveAgentSessionID(eventName, input)
 	updated := fmt.Sprintf("%d", ops.Now().UnixMilli())
 	prefix := ""
 	displayTitle := ""
@@ -134,9 +146,9 @@ func RunAgentEvent(event AgentEvent, in io.Reader, out io.Writer, ops StateOps) 
 		}
 	}
 
-	setPaneOptions(ops, ctx.PaneID, state, eventName, detail, updated, prefix, displayTitle)
+	setPaneOptions(ops, ctx.PaneID, state, eventName, detail, updated, prefix, displayTitle, sessionID)
 	if shouldSyncSession(ctx) {
-		setSessionOptions(ops, ctx.SessionName, state, eventName, detail, updated, prefix, displayTitle)
+		setSessionOptions(ops, ctx.SessionName, state, eventName, detail, updated, prefix, displayTitle, sessionID)
 		ops.RefreshSessionClients(ctx.SessionName)
 		if state == stateWorking && prefix != "" {
 			_ = ops.StartSpinner(SpinnerTarget{
@@ -189,7 +201,7 @@ func hasTmuxTarget(ctx tmux.ThreadContext) bool {
 	return ctx.PaneID != "" || shouldSyncSession(ctx)
 }
 
-func setPaneOptions(ops StateOps, paneID, state, eventName, detail, updated, prefix, displayTitle string) {
+func setPaneOptions(ops StateOps, paneID, state, eventName, detail, updated, prefix, displayTitle, sessionID string) {
 	if paneID == "" {
 		return
 	}
@@ -202,9 +214,12 @@ func setPaneOptions(ops StateOps, paneID, state, eventName, detail, updated, pre
 	_ = set(agentUpdatedOption, updated)
 	_ = set(agentTitlePrefixOption, prefix)
 	_ = set(agentTitleDisplayOption, displayTitle)
+	if sessionID != "" {
+		_ = set(agentSessionIDOption, sessionID)
+	}
 }
 
-func setSessionOptions(ops StateOps, sessionName, state, eventName, detail, updated, prefix, displayTitle string) {
+func setSessionOptions(ops StateOps, sessionName, state, eventName, detail, updated, prefix, displayTitle, sessionID string) {
 	if sessionName == "" {
 		return
 	}
@@ -220,6 +235,9 @@ func setSessionOptions(ops StateOps, sessionName, state, eventName, detail, upda
 	_ = set(agentUpdatedOption, updated)
 	_ = set(agentTitlePrefixOption, prefix)
 	_ = set(agentTitleDisplayOption, displayTitle)
+	if sessionID != "" {
+		_ = set(agentSessionIDOption, sessionID)
+	}
 }
 
 func readHookInputRaw(in io.Reader) (hookInput, []byte) {
@@ -335,6 +353,46 @@ func deriveDetail(input hookInput) string {
 		return description
 	}
 	return ""
+}
+
+func deriveAgentSessionID(eventName string, input hookInput) string {
+	candidates := []string{
+		input.SessionID,
+		input.SessionIDCamel,
+		input.SessionIDUpper,
+		input.ThreadID,
+		input.ConversationID,
+	}
+	if eventKey(eventName) == "sessionstart" {
+		candidates = append(candidates, input.ID)
+	}
+	for _, candidate := range candidates {
+		if id := extractSessionID(candidate); id != "" {
+			return id
+		}
+	}
+	for _, path := range []string{input.TranscriptPath, input.SessionPath} {
+		if id := extractSessionID(filepath.Base(path)); id != "" {
+			return id
+		}
+	}
+	return ""
+}
+
+var sessionUUIDPattern = regexp.MustCompile(
+	`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`,
+)
+var openCodeSessionIDPattern = regexp.MustCompile(`ses_[A-Za-z0-9]+`)
+
+func extractSessionID(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return ""
+	}
+	if id := sessionUUIDPattern.FindString(value); id != "" {
+		return id
+	}
+	return openCodeSessionIDPattern.FindString(value)
 }
 
 func normalizeState(state string) (string, error) {

@@ -11,6 +11,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"github.com/miltonparedes/kitmux/internal/agentrename"
+	"github.com/miltonparedes/kitmux/internal/agentresume"
 	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/agentthread"
 	"github.com/miltonparedes/kitmux/internal/app/messages"
@@ -25,24 +26,29 @@ const (
 )
 
 type Row struct {
-	Kind         RowKind
-	AgentID      string
-	AgentName    string
-	AgentSymbol  string
-	AgentState   string
-	AgentEvent   string
-	AgentDetail  string
-	AgentUpdated int64
-	Title        string
-	SessionName  string
-	WindowIndex  int
-	PaneIndex    int
-	PanePID      int
-	Path         string
-	Project      string
-	Branch       string
-	Attached     bool
-	Activity     int64
+	Kind           RowKind
+	AgentID        string
+	AgentName      string
+	AgentSymbol    string
+	AgentState     string
+	AgentEvent     string
+	AgentDetail    string
+	AgentUpdated   int64
+	Title          string
+	TitleOverride  bool
+	ThreadTitle    string
+	PaneTitle      string
+	SessionName    string
+	WindowIndex    int
+	PaneIndex      int
+	PaneID         string
+	PanePID        int
+	AgentSessionID string
+	Path           string
+	Project        string
+	Branch         string
+	Attached       bool
+	Activity       int64
 }
 
 type Model struct {
@@ -57,6 +63,7 @@ type Model struct {
 	renameInput  textinput.Model
 	agentIndex   int
 	spinnerFrame int
+	launchDir    string
 }
 
 type loadedMsg struct {
@@ -70,14 +77,33 @@ const refreshEveryFrames = 6
 var (
 	lookupAgentTitle    = agentrename.Title
 	syncThreadTitle     = tmux.SetThreadTitle
+	syncThreadPrefix    = tmux.SetThreadTitlePrefix
+	syncPaneTitle       = tmux.SetPaneTitle
 	refreshThreadClient = tmux.RefreshClients
+	createThread        = agentthread.Create
 )
 
-func New() Model {
+func New(launchDir ...string) Model {
 	ri := textinput.New()
 	ri.Prompt = "Rename: "
 	ri.CharLimit = 96
-	return Model{agents: agents.DefaultAgents(), renameInput: ri}
+	return Model{
+		agents:      agents.DefaultAgents(),
+		renameInput: ri,
+		launchDir:   resolveLaunchDir(launchDir...),
+	}
+}
+
+func resolveLaunchDir(values ...string) string {
+	for _, value := range values {
+		if dir := strings.TrimSpace(value); dir != "" {
+			return dir
+		}
+	}
+	if cwd, err := filepath.Abs("."); err == nil {
+		return cwd
+	}
+	return ""
 }
 
 func (m Model) Init() tea.Cmd {
@@ -200,12 +226,17 @@ func (m Model) handleAction(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	case "ctrl+r":
 		return m, loadCmd(), true
-	case "r", "R":
+	case "r":
 		if row := m.selected(); row != nil {
 			m.renaming = true
 			m.renameInput.SetValue(rowTitle(*row))
 			m.renameInput.Focus()
 			return m, textinput.Blink, true
+		}
+		return m, nil, true
+	case "R":
+		if row := m.selected(); row != nil && row.Kind == RowHeadless {
+			return m, relaunchHeadlessCmd(*row), true
 		}
 		return m, nil, true
 	case "esc", "q":
@@ -244,7 +275,7 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "enter":
 		m.picking = false
 		if m.agentIndex >= 0 && m.agentIndex < len(m.agents) {
-			return m, newHeadlessCmd(m.agents[m.agentIndex])
+			return m, newHeadlessCmd(m.agents[m.agentIndex], m.launchDir)
 		}
 	case "esc":
 		m.picking = false
@@ -343,8 +374,56 @@ func loadRows() loadedMsg {
 	sessions, _ := tmux.ListSessions()
 	panes, _ := tmux.ListPanes()
 	rows := buildRows(sessions, panes)
+	rows = reconcilePaneTitleRenames(rows)
 	rows = enrichAgentTitles(rows)
+	rows = repairThreadTitlePrefixes(rows)
 	return loadedMsg{rows: enrichGitMeta(rows)}
+}
+
+func reconcilePaneTitleRenames(rows []Row) []Row {
+	for i := range rows {
+		row := rows[i]
+		if row.Kind != RowHeadless || row.SessionName == "" || row.PaneTitle == "" {
+			continue
+		}
+		title := livePaneThreadTitle(row)
+		if title == "" || title == row.ThreadTitle {
+			continue
+		}
+		rows[i].Title = title
+		rows[i].ThreadTitle = title
+		rows[i].TitleOverride = true
+		_ = syncThreadTitle(row.SessionName, title)
+		if prefix := staticThreadTitlePrefix(rows[i]); prefix != "" {
+			_ = syncThreadPrefix(row.SessionName, prefix)
+		}
+		_ = refreshThreadClient(row.SessionName)
+	}
+	return rows
+}
+
+func livePaneThreadTitle(row Row) string {
+	title := strings.TrimSpace(stripLeadingStatusGlyph(row.PaneTitle))
+	if title == "" || isDefaultPaneTitle(row, title) {
+		return ""
+	}
+	return title
+}
+
+func isDefaultPaneTitle(row Row, title string) bool {
+	defaults := []string{row.AgentID, row.AgentName, row.SessionName}
+	if row.Path != "" && row.AgentName != "" {
+		project := filepath.Base(filepath.Clean(row.Path))
+		if project != "." && project != string(filepath.Separator) && project != "" {
+			defaults = append(defaults, row.AgentName+" · "+project)
+		}
+	}
+	for _, value := range defaults {
+		if value != "" && strings.EqualFold(strings.TrimSpace(value), title) {
+			return true
+		}
+	}
+	return false
 }
 
 func enrichAgentTitles(rows []Row) []Row {
@@ -365,12 +444,40 @@ func enrichAgentTitles(rows []Row) []Row {
 			continue
 		}
 		rows[i].Title = title
+		rows[i].ThreadTitle = title
+		rows[i].TitleOverride = true
 		if row.SessionName != "" {
 			_ = syncThreadTitle(row.SessionName, title)
+			if prefix := staticThreadTitlePrefix(rows[i]); prefix != "" {
+				_ = syncThreadPrefix(row.SessionName, prefix)
+			}
 			_ = refreshThreadClient(row.SessionName)
 		}
 	}
 	return rows
+}
+
+func repairThreadTitlePrefixes(rows []Row) []Row {
+	for i := range rows {
+		row := rows[i]
+		if row.Kind != RowHeadless || !row.TitleOverride || row.SessionName == "" {
+			continue
+		}
+		prefix := staticThreadTitlePrefix(row)
+		if prefix == "" {
+			continue
+		}
+		_ = syncThreadPrefix(row.SessionName, prefix)
+		_ = refreshThreadClient(row.SessionName)
+	}
+	return rows
+}
+
+func staticThreadTitlePrefix(row Row) string {
+	if row.AgentState != "" && row.AgentState != "idle" {
+		return ""
+	}
+	return rowSymbol(row)
 }
 
 func enrichGitMeta(rows []Row) []Row {
@@ -403,20 +510,27 @@ func buildRows(sessions []tmux.Session, panes []tmux.Pane) []Row {
 		}
 		threadSet[session.Name] = struct{}{}
 		rows = append(rows, Row{
-			Kind:         RowHeadless,
-			AgentID:      session.AgentID,
-			AgentName:    agentName,
-			AgentSymbol:  agentSymbol,
-			AgentState:   agentState,
-			AgentEvent:   agentEvent,
-			AgentDetail:  agentDetail,
-			AgentUpdated: agentUpdated,
-			Title:        firstNonEmpty(session.ThreadTitle, pane.Title),
-			SessionName:  session.Name,
-			PanePID:      pane.PID,
-			Path:         path,
-			Attached:     session.Attached,
-			Activity:     session.Activity,
+			Kind:           RowHeadless,
+			AgentID:        session.AgentID,
+			AgentName:      agentName,
+			AgentSymbol:    agentSymbol,
+			AgentState:     agentState,
+			AgentEvent:     agentEvent,
+			AgentDetail:    agentDetail,
+			AgentUpdated:   agentUpdated,
+			Title:          firstNonEmpty(session.ThreadTitle, pane.Title),
+			TitleOverride:  session.ThreadTitle != "",
+			ThreadTitle:    session.ThreadTitle,
+			PaneTitle:      pane.Title,
+			SessionName:    session.Name,
+			WindowIndex:    pane.WindowIndex,
+			PaneIndex:      pane.PaneIndex,
+			PaneID:         pane.ID,
+			PanePID:        pane.PID,
+			AgentSessionID: firstNonEmpty(session.AgentSessionID, pane.AgentSessionID),
+			Path:           path,
+			Attached:       session.Attached,
+			Activity:       session.Activity,
 		})
 	}
 
@@ -430,20 +544,22 @@ func buildRows(sessions []tmux.Session, panes []tmux.Pane) []Row {
 			continue
 		}
 		rows = append(rows, Row{
-			Kind:         RowEphemeral,
-			AgentID:      agent.ID,
-			AgentName:    agent.Name,
-			AgentSymbol:  agent.Symbol,
-			AgentState:   normalizeAgentState(pane.AgentState, pane.AgentUpdated),
-			AgentEvent:   pane.AgentEvent,
-			AgentDetail:  pane.AgentDetail,
-			AgentUpdated: pane.AgentUpdated,
-			Title:        pane.Title,
-			SessionName:  pane.SessionName,
-			WindowIndex:  pane.WindowIndex,
-			PaneIndex:    pane.PaneIndex,
-			PanePID:      pane.PID,
-			Path:         pane.Path,
+			Kind:           RowEphemeral,
+			AgentID:        agent.ID,
+			AgentName:      agent.Name,
+			AgentSymbol:    agent.Symbol,
+			AgentState:     normalizeAgentState(pane.AgentState, pane.AgentUpdated),
+			AgentEvent:     pane.AgentEvent,
+			AgentDetail:    pane.AgentDetail,
+			AgentUpdated:   pane.AgentUpdated,
+			Title:          pane.Title,
+			SessionName:    pane.SessionName,
+			WindowIndex:    pane.WindowIndex,
+			PaneIndex:      pane.PaneIndex,
+			PaneID:         pane.ID,
+			PanePID:        pane.PID,
+			AgentSessionID: pane.AgentSessionID,
+			Path:           pane.Path,
 		})
 	}
 
@@ -539,33 +655,83 @@ func killHeadlessCmd(sessionName string) tea.Cmd {
 	}
 }
 
-func renameRowCmd(row Row, title string) tea.Cmd {
+func relaunchHeadlessCmd(row Row) tea.Cmd {
 	return func() tea.Msg {
-		switch row.Kind {
-		case RowHeadless:
-			_ = syncThreadTitle(row.SessionName, title)
-			_ = refreshThreadClient(row.SessionName)
-			_ = agentrename.Rename(agentrename.Target{
+		if row.Kind != RowHeadless {
+			return loadCmd()()
+		}
+		sessionID := strings.TrimSpace(row.AgentSessionID)
+		if sessionID == "" {
+			resolvedID, err := agentresume.ResolveSessionID(agentresume.Target{
 				AgentID: row.AgentID,
 				PanePID: row.PanePID,
-			}, title)
-		case RowEphemeral:
-			target := fmt.Sprintf("%s:%d.%d", row.SessionName, row.WindowIndex, row.PaneIndex)
-			_ = tmux.SetPaneTitle(target, title)
+			})
+			if err != nil {
+				return loadCmd()()
+			}
+			sessionID = resolvedID
+			_ = tmux.SetAgentSessionID(row.SessionName, sessionID)
 		}
+		resumeCommand, err := agentresume.ResumeCommand(row.AgentID, sessionID)
+		if err != nil {
+			return loadCmd()()
+		}
+		target := rowPaneTarget(row)
+		command := agentthread.ThreadCommand(row.AgentID, row.SessionName, resumeCommand)
+		if err := tmux.RespawnPaneInDir(target, row.Path, command); err != nil {
+			return loadCmd()()
+		}
+		_ = agentthread.ApplySupport(agentthread.SupportSpec{
+			SessionName:  row.SessionName,
+			TargetPane:   target,
+			AgentID:      row.AgentID,
+			InitialTitle: rowTitle(row),
+		}, agentthread.DefaultOps())
 		return loadCmd()()
 	}
 }
 
-func newHeadlessCmd(agent agents.Agent) tea.Cmd {
+func renameRowCmd(row Row, title string) tea.Cmd {
 	return func() tea.Msg {
-		dir, err := tmux.CurrentPanePath()
-		if err != nil || dir == "" {
-			if cwd, cwdErr := filepath.Abs("."); cwdErr == nil {
-				dir = cwd
-			}
+		_ = renameRow(row, title)
+		return loadCmd()()
+	}
+}
+
+func renameRow(row Row, title string) error {
+	switch row.Kind {
+	case RowHeadless:
+		if err := syncThreadTitle(row.SessionName, title); err != nil {
+			return err
 		}
-		resolved, err := agentthread.Create(agentthread.Spec{AgentID: agent.ID, Dir: dir}, agentthread.DefaultOps())
+		if title != "" {
+			_ = syncPaneTitle(rowPaneTarget(row), title)
+		}
+		if prefix := staticThreadTitlePrefix(row); prefix != "" {
+			_ = syncThreadPrefix(row.SessionName, prefix)
+		}
+		_ = refreshThreadClient(row.SessionName)
+		_ = agentrename.Rename(agentrename.Target{
+			AgentID: row.AgentID,
+			PanePID: row.PanePID,
+		}, title)
+	case RowEphemeral:
+		return syncPaneTitle(rowPaneTarget(row), title)
+	}
+	return nil
+}
+
+func rowPaneTarget(row Row) string {
+	if row.PaneID != "" {
+		return row.PaneID
+	}
+	return fmt.Sprintf("%s:%d.%d", row.SessionName, row.WindowIndex, row.PaneIndex)
+}
+
+func newHeadlessCmd(agent agents.Agent, launchDir string) tea.Cmd {
+	return func() tea.Msg {
+		dir := resolveLaunchDir(launchDir)
+		resolved, err := createThread(agentthread.Spec{AgentID: agent.ID, Dir: dir}, agentthread.DefaultOps())
 		if err != nil {
 			return loadedMsg{}
 		}

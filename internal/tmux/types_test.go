@@ -28,8 +28,8 @@ func TestThreadSessionsFiltersNormalSessions(t *testing.T) {
 	}
 }
 
-func TestParseSessionsOutputReadsThreadTitle(t *testing.T) {
-	output := "codex-kitmux\t1\t1\t/Users/me/kitmux\t1781300000\t1\tcodex\tworking\tturn\tcmd\t1781300000000\tRenamed thread\n"
+func TestParseSessionsOutputReadsThreadTitleAndAgentSessionID(t *testing.T) {
+	output := "codex-kitmux\t1\t1\t/Users/me/kitmux\t1781300000\t1\tcodex\tworking\tturn\tcmd\t1781300000000\tRenamed thread\t22222222-2222-4222-8222-222222222222\n"
 
 	got := parseSessionsOutput(output)
 	if len(got) != 1 {
@@ -41,5 +41,15 @@ func TestParseSessionsOutputReadsThreadTitle(t *testing.T) {
 	}
 	if session.ThreadTitle != "Renamed thread" {
 		t.Fatalf("ThreadTitle = %q", session.ThreadTitle)
+	}
+	if session.AgentSessionID != "22222222-2222-4222-8222-222222222222" {
+		t.Fatalf("AgentSessionID = %q", session.AgentSessionID)
+	}
+}
+
+func TestSingleLineOptionValue(t *testing.T) {
+	got := singleLineOptionValue(" hello\n  world\tagain\r ")
+	if got != "hello   world again" {
+		t.Fatalf("singleLineOptionValue() = %q", got)
 	}
 }

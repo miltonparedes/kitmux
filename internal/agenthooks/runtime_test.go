@@ -96,6 +96,41 @@ func TestRunStateEventSyncsSessionForThread(t *testing.T) {
 	}
 }
 
+func TestRunAgentEventPersistsSessionIDFromHookPayload(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_ID", "claude")
+	t.Setenv("KITMUX_TMUX_SESSION", "claude-app")
+	t.Setenv("KITMUX_TMUX_PANE", "%3")
+	t.Setenv("KITMUX_TMUX_THREAD", "1")
+	paneOptions := make(map[string]string)
+	sessionOptions := make(map[string]string)
+	payload := `{"hook_event_name":"SessionStart","session_id":"33333333-3333-4333-8333-333333333333"}`
+
+	err := RunAgentEvent(AgentEvent{Agent: "claude", StdinJSON: true}, strings.NewReader(payload), nil, StateOps{
+		CurrentPaneTitle: func() (string, error) { return "Claude · app", nil },
+		SetPaneOption: func(_, option, value string) error {
+			paneOptions[option] = value
+			return nil
+		},
+		SetSessionOption: func(_, option, value string) error {
+			sessionOptions[option] = value
+			return nil
+		},
+		EmitBell:              func(_ io.Writer) error { return nil },
+		StartSpinner:          func(SpinnerTarget) error { return nil },
+		RefreshSessionClients: func(string) {},
+		Now:                   func() time.Time { return time.UnixMilli(999) },
+	})
+	if err != nil {
+		t.Fatalf("RunAgentEvent() error = %v", err)
+	}
+	if paneOptions[agentSessionIDOption] != "33333333-3333-4333-8333-333333333333" {
+		t.Fatalf("pane session id = %q", paneOptions[agentSessionIDOption])
+	}
+	if sessionOptions[agentSessionIDOption] != "33333333-3333-4333-8333-333333333333" {
+		t.Fatalf("session id = %q", sessionOptions[agentSessionIDOption])
+	}
+}
+
 func TestRunAgentEventKeepsTrackedThreadsIsolated(t *testing.T) {
 	paneOptions := map[string]map[string]string{}
 	sessionOptions := map[string]map[string]string{}

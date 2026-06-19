@@ -180,6 +180,10 @@ func Create(spec Spec, ops Ops) (Resolved, error) {
 }
 
 func threadCommand(agentID, sessionName, command string) string {
+	return ThreadCommand(agentID, sessionName, command)
+}
+
+func ThreadCommand(agentID, sessionName, command string) string {
 	exe, err := os.Executable()
 	if err != nil || exe == "" {
 		return agentenv.WrapTmuxCommand(agentID, sessionName, command, true)
@@ -300,6 +304,7 @@ func createdSessionOptions() []sessionOption {
 		{"@kitmux_agent_title_prefix", ""},
 		{"@kitmux_agent_title_display", ""},
 		{"@kitmux_thread_title", ""},
+		{"@kitmux_agent_session_id", ""},
 	}
 }
 
@@ -343,7 +348,8 @@ func agentName(agentID string) string {
 func threadTitleFormat() string {
 	return "#{?#{@kitmux_agent_title_prefix},#{@kitmux_agent_title_prefix}" +
 		"#{?#{@kitmux_thread_title}, #{@kitmux_thread_title}," +
-		"#{?#{@kitmux_agent_title_display}, #{@kitmux_agent_title_display},}},#{?#{@kitmux_thread_title},#{@kitmux_thread_title},#{pane_title}}}"
+		"#{?#{@kitmux_agent_title_display}, #{@kitmux_agent_title_display},}}," +
+		"#{?#{@kitmux_thread_title},#{@kitmux_thread_title},#{pane_title}}}"
 }
 
 const supportVersion = "5"
