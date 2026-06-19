@@ -6,12 +6,13 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/miltonparedes/kitmux/internal/agentrename"
 	"github.com/miltonparedes/kitmux/internal/tmux"
 )
 
 func TestBuildRowsKeepsHeadlessDetailedAndSkipsDuplicatePane(t *testing.T) {
 	sessions := []tmux.Session{
-		{Name: "droid-app", Path: "/repo/app", Activity: 10, Thread: true, AgentID: "droid", AgentState: "idle"},
+		{Name: "droid-app", Path: "/repo/app", Activity: 10, Thread: true, AgentID: "droid", AgentState: "idle", ThreadTitle: "custom thread title"},
 		{Name: "work", Path: "/repo/app"},
 	}
 	panes := []tmux.Pane{
@@ -26,7 +27,7 @@ func TestBuildRowsKeepsHeadlessDetailedAndSkipsDuplicatePane(t *testing.T) {
 	if rows[0].Kind != RowHeadless || rows[0].AgentID != "droid" {
 		t.Fatalf("headless row = %#v", rows[0])
 	}
-	if rows[0].Title != "feat/threads" || rows[0].AgentState != "working" || rows[0].AgentSymbol != "⛬" {
+	if rows[0].Title != "custom thread title" || rows[0].AgentState != "working" || rows[0].AgentSymbol != "⛬" {
 		t.Fatalf("headless title/state/symbol = %#v", rows[0])
 	}
 	if rows[1].Kind != RowEphemeral || rows[1].AgentID != "codex" {
@@ -34,6 +35,52 @@ func TestBuildRowsKeepsHeadlessDetailedAndSkipsDuplicatePane(t *testing.T) {
 	}
 	if rows[1].AgentState != "input" {
 		t.Fatalf("ephemeral state = %q", rows[1].AgentState)
+	}
+}
+
+func TestEnrichAgentTitlesUsesCodexThreadTitleAndSyncsTmux(t *testing.T) {
+	originalLookup := lookupAgentTitle
+	originalSync := syncThreadTitle
+	originalRefresh := refreshThreadClient
+	t.Cleanup(func() {
+		lookupAgentTitle = originalLookup
+		syncThreadTitle = originalSync
+		refreshThreadClient = originalRefresh
+	})
+
+	var syncedSession, syncedTitle, refreshedSession string
+	lookupAgentTitle = func(target agentrename.Target) (string, error) {
+		if target.AgentID != "codex" || target.PanePID != 67488 {
+			t.Fatalf("target = %#v", target)
+		}
+		return "improve rename", nil
+	}
+	syncThreadTitle = func(sessionName, title string) error {
+		syncedSession = sessionName
+		syncedTitle = title
+		return nil
+	}
+	refreshThreadClient = func(sessionName string) error {
+		refreshedSession = sessionName
+		return nil
+	}
+
+	rows := enrichAgentTitles([]Row{{
+		Kind:        RowHeadless,
+		AgentID:     "codex",
+		Title:       "⠋ kitmux",
+		SessionName: "codex-kitmux",
+		PanePID:     67488,
+	}})
+
+	if rows[0].Title != "improve rename" {
+		t.Fatalf("title = %q", rows[0].Title)
+	}
+	if syncedSession != "codex-kitmux" || syncedTitle != "improve rename" {
+		t.Fatalf("synced session/title = %q/%q", syncedSession, syncedTitle)
+	}
+	if refreshedSession != "codex-kitmux" {
+		t.Fatalf("refreshed session = %q", refreshedSession)
 	}
 }
 

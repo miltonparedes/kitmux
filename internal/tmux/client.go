@@ -21,18 +21,27 @@ func ListSessions() ([]Session, error) {
 		"#{@kitmux_agent_event}",
 		"#{@kitmux_agent_detail}",
 		"#{@kitmux_agent_updated}",
+		"#{@kitmux_thread_title}",
 	}, "\t")
 	out, err := exec.Command("tmux", "list-sessions", "-F",
 		format).Output()
 	if err != nil {
 		return nil, fmt.Errorf("list-sessions: %w", err)
 	}
+	return parseSessionsOutput(string(out)), nil
+}
+
+func parseSessionsOutput(output string) []Session {
 	var sessions []Session
-	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+	output = strings.TrimRight(output, "\n")
+	if output == "" {
+		return sessions
+	}
+	for _, line := range strings.Split(output, "\n") {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 11)
+		parts := strings.SplitN(line, "\t", 12)
 		if len(parts) < 3 {
 			continue
 		}
@@ -57,9 +66,10 @@ func ListSessions() ([]Session, error) {
 			AgentEvent:   sessionAgentEvent(parts),
 			AgentDetail:  sessionAgentDetail(parts),
 			AgentUpdated: sessionAgentUpdated(parts),
+			ThreadTitle:  sessionThreadTitle(parts),
 		})
 	}
-	return sessions, nil
+	return sessions
 }
 
 func sessionAgentID(parts []string) string {
@@ -96,6 +106,13 @@ func sessionAgentUpdated(parts []string) int64 {
 	}
 	updated, _ := strconv.ParseInt(parts[10], 10, 64)
 	return updated
+}
+
+func sessionThreadTitle(parts []string) string {
+	if len(parts) < 12 {
+		return ""
+	}
+	return parts[11]
 }
 
 func NormalSessions(sessions []Session) []Session {
@@ -308,6 +325,24 @@ func SetCurrentPaneOption(option, value string) error {
 
 func SetPaneTitle(target, title string) error {
 	return exec.Command("tmux", "select-pane", "-t", target, "-T", title).Run()
+}
+
+func SetThreadTitle(sessionName, title string) error {
+	return SetSessionOption(sessionName, "@kitmux_thread_title", title)
+}
+
+func RefreshClients(sessionName string) error {
+	out, err := exec.Command("tmux", "list-clients", "-t", sessionName, "-F", "#{client_name}").Output()
+	if err != nil {
+		return err
+	}
+	for _, client := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if client == "" {
+			continue
+		}
+		_ = exec.Command("tmux", "refresh-client", "-t", client).Run()
+	}
+	return nil
 }
 
 func SetHook(target, hook, command string) error {

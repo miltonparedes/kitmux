@@ -299,6 +299,7 @@ func createdSessionOptions() []sessionOption {
 		{"@kitmux_agent_detail", ""},
 		{"@kitmux_agent_title_prefix", ""},
 		{"@kitmux_agent_title_display", ""},
+		{"@kitmux_thread_title", ""},
 	}
 }
 
@@ -341,10 +342,11 @@ func agentName(agentID string) string {
 
 func threadTitleFormat() string {
 	return "#{?#{@kitmux_agent_title_prefix},#{@kitmux_agent_title_prefix}" +
-		"#{?#{@kitmux_agent_title_display}, #{@kitmux_agent_title_display},},#{pane_title}}"
+		"#{?#{@kitmux_thread_title}, #{@kitmux_thread_title}," +
+		"#{?#{@kitmux_agent_title_display}, #{@kitmux_agent_title_display},}},#{?#{@kitmux_thread_title},#{@kitmux_thread_title},#{pane_title}}}"
 }
 
-const supportVersion = "4"
+const supportVersion = "5"
 
 type threadHook struct {
 	name    string

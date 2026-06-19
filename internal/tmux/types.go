@@ -13,6 +13,7 @@ type Session struct {
 	AgentEvent   string // optional hook event that produced AgentState
 	AgentDetail  string // optional short hook detail, such as a tool or notification reason
 	AgentUpdated int64  // unix milliseconds when AgentState was last written
+	ThreadTitle  string // optional kitmux display title override for agent threads
 }
 
 // ThreadContext describes the tmux session hosting the current process.

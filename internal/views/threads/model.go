@@ -4,10 +4,13 @@ import (
 	"fmt"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
+	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/miltonparedes/kitmux/internal/agentrename"
 	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/agentthread"
 	"github.com/miltonparedes/kitmux/internal/app/messages"
@@ -34,6 +37,7 @@ type Row struct {
 	SessionName  string
 	WindowIndex  int
 	PaneIndex    int
+	PanePID      int
 	Path         string
 	Project      string
 	Branch       string
@@ -49,6 +53,8 @@ type Model struct {
 	height       int
 	width        int
 	picking      bool
+	renaming     bool
+	renameInput  textinput.Model
 	agentIndex   int
 	spinnerFrame int
 }
@@ -61,8 +67,17 @@ type tickMsg struct{}
 
 const refreshEveryFrames = 6
 
+var (
+	lookupAgentTitle    = agentrename.Title
+	syncThreadTitle     = tmux.SetThreadTitle
+	refreshThreadClient = tmux.RefreshClients
+)
+
 func New() Model {
-	return Model{agents: agents.DefaultAgents()}
+	ri := textinput.New()
+	ri.Prompt = "Rename: "
+	ri.CharLimit = 96
+	return Model{agents: agents.DefaultAgents(), renameInput: ri}
 }
 
 func (m Model) Init() tea.Cmd {
@@ -75,7 +90,7 @@ func (m *Model) SetSize(w, h int) {
 }
 
 func (m Model) IsEditing() bool {
-	return m.picking
+	return m.picking || m.renaming
 }
 
 func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
@@ -94,6 +109,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tea.MouseMsg:
 		return m.handleMouse(msg)
 	case tea.KeyMsg:
+		if m.renaming {
+			return m.handleRenameKey(msg)
+		}
 		if m.picking {
 			return m.handlePickerKey(msg)
 		}
@@ -180,12 +198,39 @@ func (m Model) handleAction(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 			return m, killHeadlessCmd(row.SessionName), true
 		}
 		return m, nil, true
-	case "r":
+	case "ctrl+r":
 		return m, loadCmd(), true
+	case "r", "R":
+		if row := m.selected(); row != nil {
+			m.renaming = true
+			m.renameInput.SetValue(rowTitle(*row))
+			m.renameInput.Focus()
+			return m, textinput.Blink, true
+		}
+		return m, nil, true
 	case "esc", "q":
 		return m, tea.Quit, true
 	}
 	return m, nil, false
+}
+
+func (m Model) handleRenameKey(msg tea.KeyMsg) (Model, tea.Cmd) {
+	switch msg.String() {
+	case "enter":
+		m.renaming = false
+		row := m.selected()
+		if row == nil {
+			return m, nil
+		}
+		title := strings.TrimSpace(m.renameInput.Value())
+		return m, renameRowCmd(*row, title)
+	case "esc":
+		m.renaming = false
+		return m, nil
+	}
+	var cmd tea.Cmd
+	m.renameInput, cmd = m.renameInput.Update(msg)
+	return m, cmd
 }
 
 func (m Model) handlePickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
@@ -297,7 +342,35 @@ func syncSupportAndLoadCmd() tea.Cmd {
 func loadRows() loadedMsg {
 	sessions, _ := tmux.ListSessions()
 	panes, _ := tmux.ListPanes()
-	return loadedMsg{rows: enrichGitMeta(buildRows(sessions, panes))}
+	rows := buildRows(sessions, panes)
+	rows = enrichAgentTitles(rows)
+	return loadedMsg{rows: enrichGitMeta(rows)}
+}
+
+func enrichAgentTitles(rows []Row) []Row {
+	for i := range rows {
+		row := rows[i]
+		if row.Kind != RowHeadless || row.PanePID <= 0 {
+			continue
+		}
+		title, err := lookupAgentTitle(agentrename.Target{
+			AgentID: row.AgentID,
+			PanePID: row.PanePID,
+		})
+		if err != nil {
+			continue
+		}
+		title = strings.TrimSpace(title)
+		if title == "" || title == row.Title {
+			continue
+		}
+		rows[i].Title = title
+		if row.SessionName != "" {
+			_ = syncThreadTitle(row.SessionName, title)
+			_ = refreshThreadClient(row.SessionName)
+		}
+	}
+	return rows
 }
 
 func enrichGitMeta(rows []Row) []Row {
@@ -338,8 +411,9 @@ func buildRows(sessions []tmux.Session, panes []tmux.Pane) []Row {
 			AgentEvent:   agentEvent,
 			AgentDetail:  agentDetail,
 			AgentUpdated: agentUpdated,
-			Title:        pane.Title,
+			Title:        firstNonEmpty(session.ThreadTitle, pane.Title),
 			SessionName:  session.Name,
+			PanePID:      pane.PID,
 			Path:         path,
 			Attached:     session.Attached,
 			Activity:     session.Activity,
@@ -368,6 +442,7 @@ func buildRows(sessions []tmux.Session, panes []tmux.Pane) []Row {
 			SessionName:  pane.SessionName,
 			WindowIndex:  pane.WindowIndex,
 			PaneIndex:    pane.PaneIndex,
+			PanePID:      pane.PID,
 			Path:         pane.Path,
 		})
 	}
@@ -464,6 +539,24 @@ func killHeadlessCmd(sessionName string) tea.Cmd {
 	}
 }
 
+func renameRowCmd(row Row, title string) tea.Cmd {
+	return func() tea.Msg {
+		switch row.Kind {
+		case RowHeadless:
+			_ = syncThreadTitle(row.SessionName, title)
+			_ = refreshThreadClient(row.SessionName)
+			_ = agentrename.Rename(agentrename.Target{
+				AgentID: row.AgentID,
+				PanePID: row.PanePID,
+			}, title)
+		case RowEphemeral:
+			target := fmt.Sprintf("%s:%d.%d", row.SessionName, row.WindowIndex, row.PaneIndex)
+			_ = tmux.SetPaneTitle(target, title)
+		}
+		return loadCmd()()
+	}
+}
+
 func newHeadlessCmd(agent agents.Agent) tea.Cmd {
 	return func() tea.Msg {
 		dir, err := tmux.CurrentPanePath()
@@ -478,4 +571,13 @@ func newHeadlessCmd(agent agents.Agent) tea.Cmd {
 		}
 		return messages.SwitchSessionMsg{Name: resolved.SessionName}
 	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
 }
