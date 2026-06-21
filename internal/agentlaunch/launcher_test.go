@@ -132,5 +132,6 @@ func stubOps(calls *launchCalls) Ops {
 			calls.renamedTarget = target
 			return nil
 		},
+		InstallHooks: func(string) error { return nil },
 	}
 }

@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/bubbles/textinput"
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/miltonparedes/kitmux/internal/agentlaunch"
 	"github.com/miltonparedes/kitmux/internal/agentrename"
 	"github.com/miltonparedes/kitmux/internal/agentresume"
 	"github.com/miltonparedes/kitmux/internal/agents"
@@ -74,6 +75,14 @@ type tickMsg struct{}
 
 const refreshEveryFrames = 6
 
+const (
+	agentStateWorking    = "working"
+	agentStateInput      = "input"
+	agentStatePermission = "permission"
+	agentStateError      = "error"
+	agentStateIdle       = "idle"
+)
+
 var (
 	lookupAgentTitle    = agentrename.Title
 	syncThreadTitle     = tmux.SetThreadTitle
@@ -81,6 +90,7 @@ var (
 	syncPaneTitle       = tmux.SetPaneTitle
 	refreshThreadClient = tmux.RefreshClients
 	createThread        = agentthread.Create
+	installThreadHooks  = agentlaunch.InstallHooks
 	resolveAgentSession = agentresume.ResolveSessionID
 	persistAgentSession = tmux.SetAgentSessionID
 	resumeAgentCommand  = agentresume.ResumeCommand
@@ -410,7 +420,7 @@ func reconcilePaneTitleRenames(rows []Row) []Row {
 
 func livePaneThreadTitle(row Row) string {
 	title := strings.TrimSpace(stripLeadingStatusGlyph(row.PaneTitle))
-	if title == "" || isDefaultPaneTitle(row, title) {
+	if title == "" || isDefaultPaneTitle(row, title) || isTransientAgentTitle(title) {
 		return ""
 	}
 	return title
@@ -430,6 +440,11 @@ func isDefaultPaneTitle(row Row, title string) bool {
 		}
 	}
 	return false
+}
+
+func isTransientAgentTitle(title string) bool {
+	title = strings.ToLower(strings.TrimSpace(title))
+	return strings.HasPrefix(title, "worker:") || strings.HasPrefix(title, "subagent:")
 }
 
 func enrichAgentTitles(rows []Row) []Row {
@@ -480,7 +495,7 @@ func repairThreadTitlePrefixes(rows []Row) []Row {
 }
 
 func staticThreadTitlePrefix(row Row) string {
-	if row.AgentState != "" && row.AgentState != "idle" {
+	if row.AgentState != "" && row.AgentState != agentStateIdle {
 		return ""
 	}
 	return rowSymbol(row)
@@ -507,8 +522,8 @@ func buildRows(sessions []tmux.Session, panes []tmux.Pane) []Row {
 		agentName, agentSymbol := agentDisplayParts(session.AgentID)
 		pane := panesBySession[session.Name]
 		agentState, agentEvent, agentDetail, agentUpdated := rowAgentMetadata(
-			agentMetadata{State: pane.AgentState, Event: pane.AgentEvent, Detail: pane.AgentDetail, Updated: pane.AgentUpdated},
 			agentMetadata{State: session.AgentState, Event: session.AgentEvent, Detail: session.AgentDetail, Updated: session.AgentUpdated},
+			agentMetadata{State: pane.AgentState, Event: pane.AgentEvent, Detail: pane.AgentDetail, Updated: pane.AgentUpdated},
 		)
 		path := session.Path
 		if path == "" {
@@ -533,7 +548,7 @@ func buildRows(sessions []tmux.Session, panes []tmux.Pane) []Row {
 			PaneIndex:      pane.PaneIndex,
 			PaneID:         pane.ID,
 			PanePID:        pane.PID,
-			AgentSessionID: firstNonEmpty(session.AgentSessionID, pane.AgentSessionID),
+			AgentSessionID: canonicalAgentSessionID(session.AgentID, firstNonEmpty(session.AgentSessionID, pane.AgentSessionID)),
 			Path:           path,
 			Attached:       session.Attached,
 			Activity:       session.Activity,
@@ -564,7 +579,7 @@ func buildRows(sessions []tmux.Session, panes []tmux.Pane) []Row {
 			PaneIndex:      pane.PaneIndex,
 			PaneID:         pane.ID,
 			PanePID:        pane.PID,
-			AgentSessionID: pane.AgentSessionID,
+			AgentSessionID: canonicalAgentSessionID(agent.ID, pane.AgentSessionID),
 			Path:           pane.Path,
 		})
 	}
@@ -611,29 +626,77 @@ type agentMetadata struct {
 
 func normalizeAgentState(state string, updated int64) string {
 	switch state {
-	case "working":
+	case agentStateWorking:
 		if updated == 0 {
-			return "idle"
+			return agentStateIdle
 		}
 		if time.Since(time.UnixMilli(updated)) > 2*time.Hour {
-			return "idle"
+			return agentStateIdle
 		}
 		return state
-	case "input", "permission", "error", "idle":
+	case agentStateInput, agentStatePermission, agentStateError, agentStateIdle:
 		return state
 	default:
-		return "idle"
+		return agentStateIdle
 	}
 }
 
 func rowAgentMetadata(records ...agentMetadata) (string, string, string, int64) {
+	var best agentMetadata
+	found := false
 	for _, record := range records {
+		if record.State == "" {
+			continue
+		}
 		state := normalizeAgentState(record.State, record.Updated)
-		if state != "idle" || record.State == "idle" {
-			return state, record.Event, record.Detail, record.Updated
+		if state == agentStateIdle && record.State != agentStateIdle {
+			continue
+		}
+		candidate := agentMetadata{
+			State:   state,
+			Event:   record.Event,
+			Detail:  record.Detail,
+			Updated: record.Updated,
+		}
+		if !found || newerAgentMetadata(candidate, best) {
+			best = candidate
+			found = true
 		}
 	}
-	return "idle", "", "", 0
+	if found {
+		return best.State, best.Event, best.Detail, best.Updated
+	}
+	return agentStateIdle, "", "", 0
+}
+
+func newerAgentMetadata(candidate, current agentMetadata) bool {
+	if candidate.Updated == current.Updated {
+		return agentStatePriority(candidate.State) > agentStatePriority(current.State)
+	}
+	if candidate.Updated == 0 {
+		return false
+	}
+	if current.Updated == 0 {
+		return true
+	}
+	return candidate.Updated > current.Updated
+}
+
+func agentStatePriority(state string) int {
+	switch state {
+	case agentStateError:
+		return 5
+	case agentStatePermission:
+		return 4
+	case agentStateInput:
+		return 3
+	case agentStateIdle:
+		return 2
+	case agentStateWorking:
+		return 1
+	default:
+		return 0
+	}
 }
 
 func tickCmd() tea.Cmd {
@@ -672,7 +735,7 @@ func relaunchHeadless(row Row) error {
 	if row.Kind != RowHeadless {
 		return nil
 	}
-	sessionID := strings.TrimSpace(row.AgentSessionID)
+	sessionID := canonicalAgentSessionID(row.AgentID, row.AgentSessionID)
 	if sessionID == "" {
 		resolvedID, err := resolveAgentSession(agentresume.Target{
 			AgentID: row.AgentID,
@@ -681,7 +744,7 @@ func relaunchHeadless(row Row) error {
 		if err != nil {
 			return err
 		}
-		sessionID = resolvedID
+		sessionID = canonicalAgentSessionID(row.AgentID, resolvedID)
 	}
 	_ = persistAgentSession(row.SessionName, sessionID)
 	resumeCommand, err := resumeAgentCommand(row.AgentID, sessionID)
@@ -700,6 +763,10 @@ func relaunchHeadless(row Row) error {
 		InitialTitle: rowTitle(row),
 	}, agentthread.DefaultOps())
 	return nil
+}
+
+func canonicalAgentSessionID(agentID, sessionID string) string {
+	return agentresume.CanonicalSessionID(agentID, sessionID, "")
 }
 
 func renameRowCmd(row Row, title string) tea.Cmd {
@@ -741,6 +808,9 @@ func rowPaneTarget(row Row) string {
 
 func newHeadlessCmd(agent agents.Agent, launchDir string) tea.Cmd {
 	return func() tea.Msg {
+		if err := installThreadHooks(agent.ID); err != nil {
+			return loadedMsg{}
+		}
 		dir := resolveLaunchDir(launchDir)
 		resolved, err := createThread(agentthread.Spec{AgentID: agent.ID, Dir: dir}, agentthread.DefaultOps())
 		if err != nil {

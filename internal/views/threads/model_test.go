@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -48,6 +49,66 @@ func TestBuildRowsKeepsHeadlessDetailedAndSkipsDuplicatePane(t *testing.T) {
 	}
 	if rows[1].AgentState != "input" {
 		t.Fatalf("ephemeral state = %q", rows[1].AgentState)
+	}
+}
+
+func TestRowAgentMetadataUsesNewestExplicitState(t *testing.T) {
+	now := time.Now().UnixMilli()
+	state, event, _, updated := rowAgentMetadata(
+		agentMetadata{State: "input", Event: "notification", Updated: now - 5000},
+		agentMetadata{State: "idle", Event: "stop", Updated: now},
+	)
+	if state != "idle" || event != "stop" || updated != now {
+		t.Fatalf("metadata = %q/%q/%d, want idle/stop/%d", state, event, updated, now)
+	}
+
+	state, event, _, updated = rowAgentMetadata(
+		agentMetadata{State: "working", Event: "pre-tool-use", Updated: now - 5000},
+		agentMetadata{State: "input", Event: "notification", Updated: now},
+	)
+	if state != "input" || event != "notification" || updated != now {
+		t.Fatalf("metadata = %q/%q/%d, want input/notification/%d", state, event, updated, now)
+	}
+}
+
+func TestRowAgentMetadataIgnoresStaleWorkingState(t *testing.T) {
+	now := time.Now().UnixMilli()
+	stale := time.Now().Add(-3 * time.Hour).UnixMilli()
+	state, event, _, updated := rowAgentMetadata(
+		agentMetadata{State: "working", Event: "pre-tool-use", Updated: stale},
+		agentMetadata{State: "idle", Event: "stop", Updated: now},
+	)
+	if state != "idle" || event != "stop" || updated != now {
+		t.Fatalf("metadata = %q/%q/%d, want idle/stop/%d", state, event, updated, now)
+	}
+}
+
+func TestRowAgentMetadataBreaksTimestampTiesTowardAttentionOrIdle(t *testing.T) {
+	now := time.Now().UnixMilli()
+	tests := []struct {
+		name  string
+		left  agentMetadata
+		right agentMetadata
+		want  string
+	}{
+		{
+			name:  "input beats working",
+			left:  agentMetadata{State: "working", Event: "pre-tool-use", Updated: now},
+			right: agentMetadata{State: "input", Event: "notification", Updated: now},
+			want:  "input",
+		},
+		{
+			name:  "idle beats working",
+			left:  agentMetadata{State: "working", Event: "pre-tool-use", Updated: now},
+			right: agentMetadata{State: "idle", Event: "stop", Updated: now},
+			want:  "idle",
+		},
+	}
+	for _, tc := range tests {
+		state, _, _, _ := rowAgentMetadata(tc.left, tc.right)
+		if state != tc.want {
+			t.Fatalf("%s state = %q, want %q", tc.name, state, tc.want)
+		}
 	}
 }
 
@@ -190,6 +251,31 @@ func TestReconcilePaneTitleRenamesIgnoresDefaultAgentTitle(t *testing.T) {
 	}})
 
 	if rows[0].Title != "custom title" || rows[0].ThreadTitle != "custom title" {
+		t.Fatalf("titles changed = %q/%q", rows[0].Title, rows[0].ThreadTitle)
+	}
+}
+
+func TestReconcilePaneTitleRenamesIgnoresWorkerTitle(t *testing.T) {
+	originalSync := syncThreadTitle
+	t.Cleanup(func() {
+		syncThreadTitle = originalSync
+	})
+	syncThreadTitle = func(_, _ string) error {
+		t.Fatal("syncThreadTitle should not run for transient worker title")
+		return nil
+	}
+
+	rows := reconcilePaneTitleRenames([]Row{{
+		Kind:        RowHeadless,
+		AgentID:     "droid",
+		AgentName:   "Droid",
+		Title:       "hooks",
+		ThreadTitle: "hooks",
+		PaneTitle:   "⛬ Worker: Audit hook runtime",
+		SessionName: droidKitmuxSession,
+	}})
+
+	if rows[0].Title != "hooks" || rows[0].ThreadTitle != "hooks" {
 		t.Fatalf("titles changed = %q/%q", rows[0].Title, rows[0].ThreadTitle)
 	}
 }
@@ -571,6 +657,77 @@ func TestRelaunchHeadlessUsesPersistedDroidSessionID(t *testing.T) {
 	}
 }
 
+func TestRelaunchHeadlessCanonicalizesDroidChildSessionID(t *testing.T) {
+	originalResolve := resolveAgentSession
+	originalPersist := persistAgentSession
+	originalWrap := wrapThreadCommand
+	originalRespawn := respawnThreadPane
+	originalSupport := applyThreadSupport
+	t.Cleanup(func() {
+		resolveAgentSession = originalResolve
+		persistAgentSession = originalPersist
+		wrapThreadCommand = originalWrap
+		respawnThreadPane = originalRespawn
+		applyThreadSupport = originalSupport
+	})
+
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	childID := "22222222-2222-4222-8222-222222222222"
+	parentID := "11111111-1111-4111-8111-111111111111"
+	childPath := filepath.Join(root, ".factory", "sessions", "-repo-app", childID+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(childPath), 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(
+		childPath,
+		[]byte(`{"type":"session_start","id":"`+childID+`","callingSessionId":"`+parentID+`"}`+"\n"),
+		0o600,
+	); err != nil {
+		t.Fatalf("write child session: %v", err)
+	}
+
+	resolveAgentSession = func(agentresume.Target) (string, error) {
+		t.Fatal("resolveAgentSession should not run when canonical parent id is available")
+		return "", nil
+	}
+	var persistedID string
+	persistAgentSession = func(_, id string) error {
+		persistedID = id
+		return nil
+	}
+	wrapThreadCommand = func(_, _, command string) string {
+		return "wrapped:" + command
+	}
+	var respawnCommand string
+	respawnThreadPane = func(_, _, command string) error {
+		respawnCommand = command
+		return nil
+	}
+	applyThreadSupport = func(agentthread.SupportSpec, agentthread.Ops) error {
+		return nil
+	}
+
+	err := relaunchHeadless(Row{
+		Kind:           RowHeadless,
+		AgentID:        "droid",
+		SessionName:    droidKitmuxSession,
+		PaneID:         "%51",
+		Path:           "/repo/app",
+		Title:          "hooks",
+		AgentSessionID: childID,
+	})
+	if err != nil {
+		t.Fatalf("relaunchHeadless() error = %v", err)
+	}
+	if persistedID != parentID {
+		t.Fatalf("persisted id = %q, want %q", persistedID, parentID)
+	}
+	if respawnCommand != "wrapped:droid --resume '"+parentID+"'" {
+		t.Fatalf("respawn command = %q", respawnCommand)
+	}
+}
+
 func TestRenameKeyStillStartsRename(t *testing.T) {
 	m := New()
 	m, _ = m.Update(loadedMsg{rows: []Row{{Kind: RowHeadless, SessionName: "droid-app", Title: "Droid app"}}})
@@ -640,14 +797,21 @@ func TestRenameHeadlessSyncsThreadAndPaneTitle(t *testing.T) {
 
 func TestNewHeadlessUsesLaunchDir(t *testing.T) {
 	originalCreateThread := createThread
+	originalInstallHooks := installThreadHooks
 	t.Cleanup(func() {
 		createThread = originalCreateThread
+		installThreadHooks = originalInstallHooks
 	})
 
 	var gotSpec agentthread.Spec
+	var installedAgent string
 	createThread = func(spec agentthread.Spec, _ agentthread.Ops) (agentthread.Resolved, error) {
 		gotSpec = spec
 		return agentthread.Resolved{SessionName: "droid-current"}, nil
+	}
+	installThreadHooks = func(agentID string) error {
+		installedAgent = agentID
+		return nil
 	}
 
 	agent, ok := agents.Find("droid")
@@ -658,6 +822,9 @@ func TestNewHeadlessUsesLaunchDir(t *testing.T) {
 	msg := newHeadlessCmd(agent, "/repo/current")()
 	if gotSpec.Dir != "/repo/current" {
 		t.Fatalf("dir = %q, want launch dir", gotSpec.Dir)
+	}
+	if installedAgent != "droid" {
+		t.Fatalf("installed agent = %q", installedAgent)
 	}
 	if got, ok := msg.(messages.SwitchSessionMsg); !ok || got.Name != "droid-current" {
 		t.Fatalf("msg = %#v", msg)

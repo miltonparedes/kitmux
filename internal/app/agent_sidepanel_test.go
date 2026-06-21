@@ -215,6 +215,7 @@ func stubAgentLaunch(t *testing.T, width int, widthErr error) *launchCalls {
 		calls.sidepanelRatio = percent
 		return "%2", nil
 	}
+	agentLaunchOps.InstallHooks = func(string) error { return nil }
 	return calls
 }
 

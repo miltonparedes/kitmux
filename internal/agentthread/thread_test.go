@@ -3,6 +3,7 @@ package agentthread
 import (
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/miltonparedes/kitmux/internal/tmux"
 )
@@ -198,6 +199,54 @@ func TestInstallAllSupportUpdatesExistingThreads(t *testing.T) {
 	}
 	if !contains(hooks, "droid-app:alert-bell") || !contains(hooks, "codex-api:alert-bell") {
 		t.Fatalf("hooks = %#v", hooks)
+	}
+}
+
+func TestInstallAllSupportClearsStaleWorkingState(t *testing.T) {
+	now := time.UnixMilli(1781897000000)
+	options := map[string]map[string]string{}
+	paneOptions := map[string]map[string]string{}
+	ops := Ops{
+		ListThreads: func() ([]tmux.Session, error) {
+			return []tmux.Session{
+				{Name: "droid-stale", Path: "/tmp/stale", AgentID: "droid", AgentState: "working", AgentUpdated: 2026},
+				{Name: "droid-fresh", Path: "/tmp/fresh", AgentID: "droid", AgentState: "working", AgentUpdated: now.Add(-time.Minute).UnixMilli()},
+			}, nil
+		},
+		SetSessionOption: func(target, option, value string) error {
+			if options[target] == nil {
+				options[target] = map[string]string{}
+			}
+			options[target][option] = value
+			return nil
+		},
+		SetPaneOption: func(target, option, value string) error {
+			if paneOptions[target] == nil {
+				paneOptions[target] = map[string]string{}
+			}
+			paneOptions[target][option] = value
+			return nil
+		},
+		SetWindowOption: func(_, _, _ string) error { return nil },
+		SetHook:         func(_, _, _ string) error { return nil },
+		Now:             func() time.Time { return now },
+	}
+
+	if _, err := InstallAllSupport(ops); err != nil {
+		t.Fatalf("InstallAllSupport() error = %v", err)
+	}
+	stale := options["droid-stale"]
+	if stale["@kitmux_agent_state"] != "idle" ||
+		stale["@kitmux_agent_event"] != "stale-working" ||
+		stale["@kitmux_agent_updated"] != "1781897000000" ||
+		stale["@kitmux_agent_title_prefix"] != "⛬" {
+		t.Fatalf("stale options = %#v", stale)
+	}
+	if paneOptions["droid-stale"]["@kitmux_agent_state"] != "idle" {
+		t.Fatalf("stale pane options = %#v", paneOptions["droid-stale"])
+	}
+	if options["droid-fresh"]["@kitmux_agent_event"] == "stale-working" {
+		t.Fatalf("fresh working state was cleared: %#v", options["droid-fresh"])
 	}
 }
 

@@ -305,11 +305,11 @@ func rowAge(row Row) string {
 
 func stateColor(state string) lipgloss.Color {
 	switch state {
-	case "working":
+	case agentStateWorking:
 		return theme.Accent
-	case "input", "permission":
+	case agentStateInput, agentStatePermission:
 		return theme.Yellow
-	case "error":
+	case agentStateError:
 		return theme.Red
 	default:
 		return theme.Green
@@ -331,13 +331,13 @@ func rowTitle(row Row) string {
 
 func rowIcon(row Row, spinnerFrame int) string {
 	switch row.AgentState {
-	case "working":
+	case agentStateWorking:
 		return spinnerFrames[spinnerFrame%len(spinnerFrames)]
-	case "input":
+	case agentStateInput:
 		return "⮞"
-	case "permission":
+	case agentStatePermission:
 		return "!"
-	case "error":
+	case agentStateError:
 		return "×"
 	default:
 		return rowSymbol(row)

@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/miltonparedes/kitmux/internal/agentenv"
 	"github.com/miltonparedes/kitmux/internal/agentlaunch"
 	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/app/messages"
@@ -949,6 +950,16 @@ func (m Model) launchAgentAB(msg messages.LaunchAgentABMsg) (tea.Model, tea.Cmd)
 		_ = tmux.DisplayMessage(fmt.Sprintf("agent_ab claude template error: %v", err))
 		return m, nil
 	}
+	if err := agentlaunch.InstallHooks("codex"); err != nil {
+		_ = tmux.DisplayMessage(fmt.Sprintf("agent_ab codex hooks error: %v", err))
+		return m, nil
+	}
+	if err := agentlaunch.InstallHooks("claude"); err != nil {
+		_ = tmux.DisplayMessage(fmt.Sprintf("agent_ab claude hooks error: %v", err))
+		return m, nil
+	}
+	codexCmd = agentenv.WrapTmuxCommand("codex", "", codexCmd, false)
+	claudeCmd = agentenv.WrapTmuxCommand("claude", "", claudeCmd, false)
 
 	currentPath, err := tmux.CurrentPanePath()
 	if err != nil {

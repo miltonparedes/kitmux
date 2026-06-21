@@ -1,9 +1,11 @@
 package agentlaunch
 
 import (
+	"errors"
 	"fmt"
 
 	"github.com/miltonparedes/kitmux/internal/agentenv"
+	"github.com/miltonparedes/kitmux/internal/agenthooks"
 	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/config"
 	"github.com/miltonparedes/kitmux/internal/tmux"
@@ -28,6 +30,7 @@ type Ops struct {
 	SplitWindowInDirPercent func(string, string, string, int) (string, error)
 	CurrentClientWidth      func() (int, error)
 	RenameWindow            func(string, string) error
+	InstallHooks            func(string) error
 }
 
 type SessionRequest struct {
@@ -52,11 +55,22 @@ func DefaultOps() Ops {
 		SplitWindowInDirPercent: tmux.SplitWindowInDirPercent,
 		CurrentClientWidth:      tmux.CurrentClientWidth,
 		RenameWindow:            tmux.RenameWindow,
+		InstallHooks:            InstallHooks,
 	}
+}
+
+func InstallHooks(agentID string) error {
+	if _, err := agenthooks.Install(agentID, ""); err != nil && !errors.Is(err, agenthooks.ErrUnsupportedAgent) {
+		return err
+	}
+	return nil
 }
 
 func LaunchCurrent(agent agents.Agent, mode agents.AgentMode, target Target, ops Ops) error {
 	ops = ops.withDefaults()
+	if err := ops.InstallHooks(agent.ID); err != nil {
+		return err
+	}
 	command := agentenv.WrapTmuxCommand(agent.ID, "", agent.FullCommand(mode), false)
 	switch target {
 	case TargetSplit:
@@ -73,6 +87,9 @@ func LaunchCurrent(agent agents.Agent, mode agents.AgentMode, target Target, ops
 
 func LaunchSidepanelWindow(agent agents.Agent, mode agents.AgentMode, dir string, ops Ops) error {
 	ops = ops.withDefaults()
+	if err := ops.InstallHooks(agent.ID); err != nil {
+		return err
+	}
 	paneID, err := ops.NewWindowInDir(agent.ID, dir, agentenv.WrapTmuxCommand(agent.ID, "", agent.FullCommand(mode), false))
 	if err != nil {
 		return err
@@ -82,6 +99,9 @@ func LaunchSidepanelWindow(agent agents.Agent, mode agents.AgentMode, dir string
 
 func LaunchInSession(req SessionRequest, ops Ops) error {
 	ops = ops.withDefaults()
+	if err := ops.InstallHooks(req.Agent.ID); err != nil {
+		return err
+	}
 	command := agentenv.WrapTmuxCommand(req.Agent.ID, req.SessionName, req.Agent.FullCommand(req.Mode), false)
 
 	if req.FreshSession {
@@ -174,6 +194,9 @@ func (ops Ops) withDefaults() Ops {
 	}
 	if ops.RenameWindow == nil {
 		ops.RenameWindow = defaults.RenameWindow
+	}
+	if ops.InstallHooks == nil {
+		ops.InstallHooks = defaults.InstallHooks
 	}
 	return ops
 }

@@ -19,7 +19,7 @@ func TestInstallAllWritesSupportedAgentHooks(t *testing.T) {
 	if err != nil {
 		t.Fatalf("InstallAll() error = %v", err)
 	}
-	if len(results) != 4 {
+	if len(results) != 5 {
 		t.Fatalf("len(results) = %d", len(results))
 	}
 	assertAgentEventShim(t, home)
@@ -32,15 +32,14 @@ func TestInstallAllWritesSupportedAgentHooks(t *testing.T) {
 	assertJSONHook(t, factoryPath, "Stop", shimAgentEventCommand(home, "droid", "stop"))
 	assertJSONHook(t, factoryPath, "SessionEnd", shimAgentEventCommand(home, "droid", "session-end"))
 	assertNoInlineHookState(t, factoryPath)
+
 	factorySettingsPath := filepath.Join(home, ".factory", "settings.json")
-	assertJSONHook(t, factorySettingsPath, "UserPromptSubmit", shimAgentEventCommand(home, "droid", "user-prompt-submit"))
-	assertJSONHook(t, factorySettingsPath, "PreToolUse", shimAgentEventCommand(home, "droid", "pre-tool-use"))
-	assertJSONHook(t, factorySettingsPath, "Notification", shimAgentEventCommand(home, "droid", "notification"))
-	factorySettings := readJSONFile(t, factorySettingsPath)
-	if factorySettings["enableHooks"] != true {
-		t.Fatalf("factory enableHooks = %#v", factorySettings["enableHooks"])
-	}
-	assertNoInlineHookState(t, factorySettingsPath)
+	assertDroidSettingsHook(t, factorySettingsPath, "UserPromptSubmit", shimAgentEventCommand(home, "droid", "user-prompt-submit"))
+	assertDroidSettingsHook(t, factorySettingsPath, "PreToolUse", shimAgentEventCommand(home, "droid", "pre-tool-use"))
+	assertDroidSettingsHook(t, factorySettingsPath, "PostToolUse", shimAgentEventCommand(home, "droid", "post-tool-use"))
+	assertDroidSettingsHook(t, factorySettingsPath, "Notification", shimAgentEventCommand(home, "droid", "notification"))
+	assertDroidSettingsHook(t, factorySettingsPath, "Stop", shimAgentEventCommand(home, "droid", "stop"))
+	assertDroidSettingsHook(t, factorySettingsPath, "SessionEnd", shimAgentEventCommand(home, "droid", "session-end"))
 
 	claudePath := filepath.Join(home, ".claude", "settings.json")
 	assertJSONHook(t, claudePath, "UserPromptSubmit", shimAgentEventCommand(home, "claude", "user-prompt-submit"))
@@ -64,6 +63,16 @@ func TestInstallAllWritesSupportedAgentHooks(t *testing.T) {
 	assertJSONHook(t, codexPath, "PostToolUse", shimAgentEventCommand(home, "codex", "post-tool-use"))
 	assertJSONHook(t, codexPath, "Stop", shimAgentEventCommand(home, "codex", "stop"))
 	assertNoInlineHookState(t, codexPath)
+
+	cursorPath := filepath.Join(home, ".cursor", "hooks.json")
+	assertCursorHook(t, cursorPath, "sessionStart", shimAgentEventCommand(home, "cursor", "session-start"))
+	assertCursorHook(t, cursorPath, "beforeSubmitPrompt", shimAgentEventCommand(home, "cursor", "user-prompt-submit"))
+	assertCursorHook(t, cursorPath, "preToolUse", shimAgentEventCommand(home, "cursor", "pre-tool-use"))
+	assertCursorHook(t, cursorPath, "postToolUse", shimAgentEventCommand(home, "cursor", "post-tool-use"))
+	assertCursorHook(t, cursorPath, "postToolUseFailure", shimAgentEventCommand(home, "cursor", "post-tool-use-failure"))
+	assertCursorHook(t, cursorPath, "stop", shimAgentEventCommand(home, "cursor", "stop"))
+	assertCursorHook(t, cursorPath, "subagentStop", shimAgentEventCommand(home, "cursor", "subagent-stop"))
+	assertCursorHook(t, cursorPath, "sessionEnd", shimAgentEventCommand(home, "cursor", "session-end"))
 
 	pluginPath := filepath.Join(home, ".config", "opencode", "plugins", "kitmux-zed-bell.js")
 	// #nosec G304 -- test path is under t.TempDir.
@@ -254,13 +263,13 @@ func TestInstallAllUpgradesAmbientTmuxAgentEventHooks(t *testing.T) {
 	}
 }
 
-func TestInstallDroidUsesHooksJSONAndSettingsHooks(t *testing.T) {
+func TestInstallDroidWritesHooksJSONAndSettingsHooks(t *testing.T) {
 	home := t.TempDir()
 	settingsPath := filepath.Join(home, ".factory", "settings.json")
 	oldCommand := agentenv.WrapHookCommand("droid", rawAgentEventCommand("droid", "pre-tool-use", stateWorking, false, true))
 	customCommand := "echo keep-custom-hook"
 	settings := map[string]any{
-		"enableHooks": false,
+		"enableHooks": true,
 		"customKey":   "keep-me",
 		"hooks": map[string]any{
 			"PreToolUse": []any{
@@ -316,6 +325,55 @@ func TestInstallDroidUsesHooksJSONAndSettingsHooks(t *testing.T) {
 	}
 }
 
+func TestInstallCursorWritesFlatHooksAndPreservesCustomHooks(t *testing.T) {
+	home := t.TempDir()
+	path := filepath.Join(home, ".cursor", "hooks.json")
+	customCommand := "echo keep-cursor-hook"
+	oldCommand := rawAgentEventCommand("cursor", "pre-tool-use", stateWorking, false, true)
+	doc := map[string]any{
+		"version": float64(1),
+		"hooks": map[string]any{
+			"preToolUse": []any{
+				map[string]any{
+					"type":    "command",
+					"command": oldCommand,
+				},
+				map[string]any{
+					"type":    "command",
+					"command": customCommand,
+				},
+			},
+		},
+	}
+	if err := writeJSON(path, doc); err != nil {
+		t.Fatalf("write cursor config: %v", err)
+	}
+
+	result, err := Install("cursor", home)
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	if result.Path != path || !result.Changed {
+		t.Fatalf("Install() result = %#v", result)
+	}
+	command := shimAgentEventCommand(home, "cursor", "pre-tool-use")
+	assertCursorHook(t, path, "preToolUse", command)
+	if hasCursorJSONCommand(t, path, "preToolUse", oldCommand) {
+		t.Fatalf("old cursor hook was not upgraded")
+	}
+	if !hasCursorJSONCommand(t, path, "preToolUse", customCommand) {
+		t.Fatalf("custom cursor hook was not preserved: %#v", readJSONFile(t, path))
+	}
+
+	result, err = Install("cursor", home)
+	if err != nil {
+		t.Fatalf("second Install() error = %v", err)
+	}
+	if result.Changed {
+		t.Fatalf("cursor install changed on second run")
+	}
+}
+
 func TestInstallWritesOnlyRequestedAgentHooks(t *testing.T) {
 	home := t.TempDir()
 
@@ -327,14 +385,19 @@ func TestInstallWritesOnlyRequestedAgentHooks(t *testing.T) {
 		t.Fatalf("Install() result = %#v", result)
 	}
 	assertJSONHook(t, filepath.Join(home, ".factory", "hooks.json"), "Notification", shimAgentEventCommand(home, "droid", "notification"))
-	settingsPath := filepath.Join(home, ".factory", "settings.json")
-	assertJSONHook(t, settingsPath, "Notification", shimAgentEventCommand(home, "droid", "notification"))
-	settings := readJSONFile(t, settingsPath)
-	if settings["enableHooks"] != true {
-		t.Fatalf("settings enableHooks = %#v", settings["enableHooks"])
-	}
+	assertDroidSettingsHook(t, filepath.Join(home, ".factory", "settings.json"), "Notification", shimAgentEventCommand(home, "droid", "notification"))
 	assertMissing(t, filepath.Join(home, ".claude", "settings.json"))
 	assertMissing(t, filepath.Join(home, ".codex", "hooks.json"))
+	assertMissing(t, filepath.Join(home, ".cursor", "hooks.json"))
+}
+
+func assertDroidSettingsHook(t *testing.T, path, event, command string) {
+	t.Helper()
+	doc := readJSONFile(t, path)
+	if doc["enableHooks"] != true {
+		t.Fatalf("%s enableHooks = %#v", path, doc["enableHooks"])
+	}
+	assertJSONHook(t, path, event, command)
 }
 
 func countPreToolUseJSONCommand(t *testing.T, path, command string) int {
@@ -383,6 +446,38 @@ func assertJSONHook(t *testing.T, path, event, command string) {
 	if !ok || !hasCommand(groups, command) {
 		t.Fatalf("%s missing %s hook %q: %#v", path, event, command, hooks[event])
 	}
+}
+
+func assertCursorHook(t *testing.T, path, event, command string) {
+	t.Helper()
+	doc := readJSONFile(t, path)
+	if doc["version"] != float64(1) {
+		t.Fatalf("%s version = %#v", path, doc["version"])
+	}
+	if !hasCursorJSONCommand(t, path, event, command) {
+		hooks, _ := doc["hooks"].(map[string]any)
+		t.Fatalf("%s missing %s hook %q: %#v", path, event, command, hooks[event])
+	}
+}
+
+func hasCursorJSONCommand(t *testing.T, path, event, command string) bool {
+	t.Helper()
+	doc := readJSONFile(t, path)
+	hooks, ok := doc["hooks"].(map[string]any)
+	if !ok {
+		return false
+	}
+	groups, ok := hooks[event].([]any)
+	if !ok {
+		return false
+	}
+	for _, group := range groups {
+		groupMap, ok := group.(map[string]any)
+		if ok && groupMap["type"] == "command" && groupMap["command"] == command {
+			return true
+		}
+	}
+	return false
 }
 
 func assertAgentEventShim(t *testing.T, home string) {

@@ -107,6 +107,25 @@ func TestSessionIDFromPathsPicksNewestMatchingFile(t *testing.T) {
 	}
 }
 
+func TestCanonicalSessionIDReturnsDroidCallingSession(t *testing.T) {
+	root := t.TempDir()
+	t.Setenv("HOME", root)
+	childID := "22222222-2222-4222-8222-222222222222"
+	parentID := "11111111-1111-4111-8111-111111111111"
+	childPath := filepath.Join(root, ".factory", "sessions", "-tmp-app", childID+".jsonl")
+	writeTestFileContent(t, childPath, `{"type":"session_start","id":"`+childID+`","callingSessionId":"`+parentID+`"}`+"\n")
+
+	if got := CanonicalSessionID("droid", childID, ""); got != parentID {
+		t.Fatalf("CanonicalSessionID() = %q, want %q", got, parentID)
+	}
+	if !IsChildSession("droid", childID, childPath) {
+		t.Fatal("expected droid child session")
+	}
+	if got := CanonicalSessionID("claude", childID, childPath); got != childID {
+		t.Fatalf("non-droid CanonicalSessionID() = %q", got)
+	}
+}
+
 func writeTestFile(t *testing.T, path string, modTime time.Time) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
@@ -117,5 +136,15 @@ func writeTestFile(t *testing.T, path string, modTime time.Time) {
 	}
 	if err := os.Chtimes(path, modTime, modTime); err != nil {
 		t.Fatalf("set times: %v", err)
+	}
+}
+
+func writeTestFileContent(t *testing.T, path, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("write file: %v", err)
 	}
 }

@@ -12,6 +12,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/miltonparedes/kitmux/internal/agentresume"
 	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/agenttrack"
 	"github.com/miltonparedes/kitmux/internal/tmux"
@@ -59,6 +60,8 @@ type StateOps struct {
 	SetCurrentSessionOption func(string, string) error
 	SetPaneOption           func(string, string, string) error
 	SetSessionOption        func(string, string, string) error
+	ShowPaneOption          func(string, string) (string, error)
+	ShowSessionOption       func(string, string) (string, error)
 	EmitBell                func(io.Writer) error
 	StartSpinner            func(SpinnerTarget) error
 	RefreshSessionClients   func(string)
@@ -87,6 +90,8 @@ type hookInput struct {
 	SessionIDUpper   string         `json:"sessionID"`
 	ThreadID         string         `json:"thread_id"`
 	ConversationID   string         `json:"conversation_id"`
+	ChatID           string         `json:"chat_id"`
+	ChatIDCamel      string         `json:"chatId"`
 	TranscriptPath   string         `json:"transcript_path"`
 	SessionPath      string         `json:"session_path"`
 	ID               string         `json:"id"`
@@ -99,6 +104,8 @@ func DefaultStateOps() StateOps {
 		SetCurrentSessionOption: tmux.SetCurrentSessionOption,
 		SetPaneOption:           tmux.SetPaneOption,
 		SetSessionOption:        tmux.SetSessionOption,
+		ShowPaneOption:          tmux.ShowPaneOption,
+		ShowSessionOption:       tmux.ShowSessionOption,
 		EmitBell:                emitBell,
 		StartSpinner:            startSpinner,
 		RefreshSessionClients:   refreshSessionClients,
@@ -124,6 +131,9 @@ func RunAgentEvent(event AgentEvent, in io.Reader, out io.Writer, ops StateOps) 
 	}
 	ctx := targetContext()
 	agentID := firstNonEmpty(event.Agent, ctx.AgentID)
+	if event.Agent != "" && ctx.AgentID != "" && event.Agent != ctx.AgentID {
+		return nil
+	}
 	eventName := sanitizeDetail(firstNonEmpty(event.Event, input.HookEventName, input.EventType))
 	state, err := normalizeState(deriveState(event.State, eventName, input))
 	if err != nil {
@@ -134,17 +144,14 @@ func RunAgentEvent(event AgentEvent, in io.Reader, out io.Writer, ops StateOps) 
 	logHookEvent(event, eventName, state, ctx, rawInput)
 
 	detail := sanitizeDetail(firstNonEmpty(event.Detail, deriveDetail(input)))
+	sessionPath := firstNonEmpty(input.TranscriptPath, input.SessionPath)
 	sessionID := deriveAgentSessionID(eventName, input)
-	updated := fmt.Sprintf("%d", ops.Now().UnixMilli())
-	prefix := ""
-	displayTitle := ""
-	if hasTmuxTarget(ctx) {
-		paneTitle := currentPaneTitle(ops)
-		prefix = titlePrefix(state, agentID, paneTitle)
-		if prefix != "" {
-			displayTitle = stripLeadingStateGlyph(paneTitle)
-		}
+	if shouldIgnoreAgentSessionEvent(agentID, eventName, input, sessionID, sessionPath, ctx, ops) {
+		return nil
 	}
+	sessionID = agentresume.CanonicalSessionID(agentID, sessionID, sessionPath)
+	updated := fmt.Sprintf("%d", ops.Now().UnixMilli())
+	prefix, displayTitle := agentTitleParts(ctx, state, agentID, ops)
 
 	setPaneOptions(ops, ctx.PaneID, state, eventName, detail, updated, prefix, displayTitle, sessionID)
 	if shouldSyncSession(ctx) {
@@ -171,6 +178,68 @@ func RunAgentEvent(event AgentEvent, in io.Reader, out io.Writer, ops StateOps) 
 	return nil
 }
 
+func shouldIgnoreAgentSessionEvent(
+	agentID, eventName string,
+	input hookInput,
+	sessionID, sessionPath string,
+	ctx tmux.ThreadContext,
+	ops StateOps,
+) bool {
+	if agentID != "droid" || sessionID == "" {
+		return false
+	}
+	if agentresume.IsChildSession(agentID, sessionID, sessionPath) {
+		return true
+	}
+	currentID := currentAgentSessionID(agentID, ctx, ops)
+	if currentID == "" {
+		return false
+	}
+	canonicalID := agentresume.CanonicalSessionID(agentID, sessionID, sessionPath)
+	if canonicalID == currentID {
+		return false
+	}
+	return !isDroidMainSessionRestart(eventName, input)
+}
+
+func currentAgentSessionID(agentID string, ctx tmux.ThreadContext, ops StateOps) string {
+	var id string
+	if ctx.SessionName != "" && ops.ShowSessionOption != nil {
+		id, _ = ops.ShowSessionOption(ctx.SessionName, agentSessionIDOption)
+	}
+	if id == "" && ctx.PaneID != "" && ops.ShowPaneOption != nil {
+		id, _ = ops.ShowPaneOption(ctx.PaneID, agentSessionIDOption)
+	}
+	return agentresume.CanonicalSessionID(agentID, id, "")
+}
+
+func isDroidMainSessionRestart(eventName string, input hookInput) bool {
+	if eventKey(eventName) != "sessionstart" {
+		return false
+	}
+	switch eventKey(input.Source) {
+	case "clear", "resume", "compact":
+		return true
+	default:
+		return false
+	}
+}
+
+func agentTitleParts(ctx tmux.ThreadContext, state, agentID string, ops StateOps) (string, string) {
+	if !hasTmuxTarget(ctx) {
+		return "", ""
+	}
+	paneTitle := currentPaneTitle(ops)
+	prefix := titlePrefix(state, agentID, paneTitle)
+	if state == stateWorking && ctx.PaneID == "" {
+		return "", ""
+	}
+	if prefix == "" {
+		return "", ""
+	}
+	return prefix, stripLeadingStateGlyph(paneTitle)
+}
+
 func targetContext() tmux.ThreadContext {
 	ctx := tmux.ThreadContext{}
 	ctx.PaneID = os.Getenv("KITMUX_TMUX_PANE")
@@ -181,14 +250,14 @@ func targetContext() tmux.ThreadContext {
 		ctx.Thread = true
 	}
 	ctx.AgentID = os.Getenv("KITMUX_AGENT_ID")
-	if hasTmuxTarget(ctx) {
-		return ctx
-	}
 	if tracked, ok := resolveAncestorContext(os.Getppid()); ok {
+		if ctx.AgentID != "" && tracked.AgentID != "" && ctx.AgentID != tracked.AgentID {
+			return ctx
+		}
 		ctx.AgentID = firstNonEmpty(ctx.AgentID, tracked.AgentID)
-		ctx.SessionName = tracked.SessionName
-		ctx.PaneID = tracked.PaneID
-		ctx.Thread = tracked.Thread
+		ctx.SessionName = firstNonEmpty(ctx.SessionName, tracked.SessionName)
+		ctx.PaneID = firstNonEmpty(ctx.PaneID, tracked.PaneID)
+		ctx.Thread = ctx.Thread || tracked.Thread
 	}
 	return ctx
 }
@@ -282,7 +351,7 @@ func deriveState(explicit, eventName string, input hookInput) string {
 	}
 	// AskUser (droid) / AskUserQuestion (claude) blocks waiting for the user, so the
 	// PreToolUse phase is an attention state. PostToolUse means the user answered.
-	if strings.HasPrefix(toolKey, "askuser") && !strings.HasPrefix(key, "posttool") {
+	if isAskUserTool(toolKey) && !strings.HasPrefix(key, "posttool") {
 		return stateInput
 	}
 	if key == "elicitationresult" {
@@ -301,9 +370,9 @@ func deriveState(explicit, eventName string, input hookInput) string {
 		return explicit
 	}
 	switch key {
-	case "sessionstart", "stop", "stopfailure", "sessionend", "sessionidle":
+	case "sessionstart", "stop", "stopfailure", "subagentstop", "sessionend", "sessionidle":
 		return stateIdle
-	case "userpromptsubmit", "pretooluse", "posttooluse", "posttoolusefailure", "posttoolbatch",
+	case "userpromptsubmit", "beforesubmitprompt", "pretooluse", "posttooluse", "posttoolusefailure", "posttoolbatch",
 		"toolexecutebefore", "toolexecuteafter", "permissionreplied":
 		return stateWorking
 	default:
@@ -326,11 +395,22 @@ func deriveBell(explicit bool, eventName string) bool {
 
 func notificationState(input hookInput) string {
 	notifType := eventKey(input.NotificationType)
+	message := strings.ToLower(input.Message)
 	if notifType == "permissionprompt" || notifType == "permissionrequest" ||
-		strings.Contains(strings.ToLower(input.Message), statePermission) {
+		strings.Contains(message, statePermission) {
 		return statePermission
 	}
+	if strings.Contains(message, "completed") || strings.Contains(message, "finished") {
+		return stateIdle
+	}
+	if strings.Contains(message, "waiting") || strings.Contains(message, "input") {
+		return stateInput
+	}
 	return stateInput
+}
+
+func isAskUserTool(toolKey string) bool {
+	return strings.Contains(toolKey, "askuser")
 }
 
 func deriveDetail(input hookInput) string {
@@ -362,6 +442,8 @@ func deriveAgentSessionID(eventName string, input hookInput) string {
 		input.SessionIDUpper,
 		input.ThreadID,
 		input.ConversationID,
+		input.ChatID,
+		input.ChatIDCamel,
 	}
 	for _, candidate := range candidates {
 		if id := extractExplicitSessionID(candidate); id != "" {
@@ -540,6 +622,12 @@ func (ops StateOps) withDefaults() StateOps {
 	if ops.SetSessionOption == nil {
 		ops.SetSessionOption = defaults.SetSessionOption
 	}
+	if ops.ShowPaneOption == nil {
+		ops.ShowPaneOption = defaults.ShowPaneOption
+	}
+	if ops.ShowSessionOption == nil {
+		ops.ShowSessionOption = defaults.ShowSessionOption
+	}
 	if ops.EmitBell == nil {
 		ops.EmitBell = defaults.EmitBell
 	}
@@ -606,7 +694,7 @@ func RunSpinner(target SpinnerTarget) error {
 			restoreStaticPrefix(target)
 			return nil
 		case <-ticker.C:
-			state, token, err := readSpinnerState(target.PaneID)
+			state, token, err := readSpinnerState(target.PaneID, target.SessionName)
 			if err != nil {
 				return nil
 			}
@@ -624,7 +712,7 @@ func RunSpinner(target SpinnerTarget) error {
 }
 
 func restoreStaticPrefix(target SpinnerTarget) {
-	state, _, err := readSpinnerState(target.PaneID)
+	state, _, err := readSpinnerState(target.PaneID, target.SessionName)
 	if err != nil || state == stateWorking {
 		return
 	}
@@ -635,9 +723,19 @@ func restoreStaticPrefix(target SpinnerTarget) {
 	setSpinnerPrefix(target.PaneID, target.SessionName, titlePrefix(state, target.AgentID, paneTitle))
 }
 
-func readSpinnerState(paneID string) (string, string, error) {
+func readSpinnerState(paneID, sessionName string) (string, string, error) {
+	if sessionName != "" {
+		state, token, err := readTargetSpinnerState(sessionName)
+		if err == nil && state != "" {
+			return state, token, nil
+		}
+	}
+	return readTargetSpinnerState(paneID)
+}
+
+func readTargetSpinnerState(target string) (string, string, error) {
 	format := fmt.Sprintf("#{%s}\t#{%s}", agentStateOption, agentUpdatedOption)
-	out, err := exec.Command("tmux", "display-message", "-p", "-t", paneID, format).Output()
+	out, err := exec.Command("tmux", "display-message", "-p", "-t", target, format).Output()
 	if err != nil {
 		return "", "", err
 	}

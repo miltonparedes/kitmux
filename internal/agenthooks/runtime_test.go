@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"fmt"
 	"io"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -166,6 +168,121 @@ func TestRunAgentEventPersistsDroidOpaqueSessionIDFromHookPayload(t *testing.T) 
 	}
 }
 
+func TestRunAgentEventIgnoresDroidChildSessionEvents(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_ID", "droid")
+	t.Setenv("KITMUX_TMUX_SESSION", "droid-app")
+	t.Setenv("KITMUX_TMUX_PANE", "%3")
+	t.Setenv("KITMUX_TMUX_THREAD", "1")
+
+	root := t.TempDir()
+	childID := "22222222-2222-4222-8222-222222222222"
+	parentID := "11111111-1111-4111-8111-111111111111"
+	childPath := filepath.Join(root, ".factory", "sessions", "-repo-app", childID+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(childPath), 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(
+		childPath,
+		[]byte(`{"type":"session_start","id":"`+childID+`","callingSessionId":"`+parentID+`"}`+"\n"),
+		0o600,
+	); err != nil {
+		t.Fatalf("write child session: %v", err)
+	}
+
+	paneOptions := make(map[string]string)
+	sessionOptions := make(map[string]string)
+	spinnerStarted := false
+	payload := `{"hook_event_name":"Stop","session_id":"` + childID + `","transcript_path":"` + childPath + `"}`
+	err := RunAgentEvent(AgentEvent{Agent: "droid", StdinJSON: true}, strings.NewReader(payload), nil, StateOps{
+		CurrentPaneTitle: func() (string, error) { return "⠹ hooks", nil },
+		SetPaneOption: func(_, option, value string) error {
+			paneOptions[option] = value
+			return nil
+		},
+		SetSessionOption: func(_, option, value string) error {
+			sessionOptions[option] = value
+			return nil
+		},
+		StartSpinner: func(SpinnerTarget) error {
+			spinnerStarted = true
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunAgentEvent() error = %v", err)
+	}
+	if len(paneOptions) != 0 || len(sessionOptions) != 0 || spinnerStarted {
+		t.Fatalf("child event wrote pane=%#v session=%#v spinner=%t", paneOptions, sessionOptions, spinnerStarted)
+	}
+}
+
+func TestRunAgentEventIgnoresDroidMismatchedNestedSessionID(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_ID", "droid")
+	t.Setenv("KITMUX_TMUX_SESSION", "droid-app")
+	t.Setenv("KITMUX_TMUX_PANE", "%3")
+	t.Setenv("KITMUX_TMUX_THREAD", "1")
+
+	parentID := "11111111-1111-4111-8111-111111111111"
+	nestedID := "22222222-2222-4222-8222-222222222222"
+	paneOptions := make(map[string]string)
+	sessionOptions := make(map[string]string)
+	payload := `{"hook_event_name":"SessionStart","session_id":"` + nestedID + `","source":"startup"}`
+	err := RunAgentEvent(AgentEvent{Agent: "droid", StdinJSON: true}, strings.NewReader(payload), nil, StateOps{
+		CurrentPaneTitle: func() (string, error) { return "hooks", nil },
+		SetPaneOption: func(_, option, value string) error {
+			paneOptions[option] = value
+			return nil
+		},
+		SetSessionOption: func(_, option, value string) error {
+			sessionOptions[option] = value
+			return nil
+		},
+		ShowSessionOption: func(_, option string) (string, error) {
+			if option == agentSessionIDOption {
+				return parentID, nil
+			}
+			return "", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunAgentEvent() error = %v", err)
+	}
+	if len(paneOptions) != 0 || len(sessionOptions) != 0 {
+		t.Fatalf("nested event wrote pane=%#v session=%#v", paneOptions, sessionOptions)
+	}
+}
+
+func TestRunAgentEventAcceptsDroidSessionIDWhenThreadHasNoSessionID(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_ID", "droid")
+	t.Setenv("KITMUX_TMUX_SESSION", "droid-app")
+	t.Setenv("KITMUX_TMUX_PANE", "%3")
+	t.Setenv("KITMUX_TMUX_THREAD", "1")
+
+	sessionOptions := make(map[string]string)
+	sessionID := "11111111-1111-4111-8111-111111111111"
+	payload := `{"hook_event_name":"SessionStart","session_id":"` + sessionID + `","source":"startup"}`
+	err := RunAgentEvent(AgentEvent{Agent: "droid", StdinJSON: true}, strings.NewReader(payload), nil, StateOps{
+		CurrentPaneTitle: func() (string, error) { return "hooks", nil },
+		SetPaneOption:    func(_, _, _ string) error { return nil },
+		SetSessionOption: func(_, option, value string) error {
+			sessionOptions[option] = value
+			return nil
+		},
+		ShowSessionOption: func(_, option string) (string, error) {
+			if option == agentSessionIDOption {
+				return "", nil
+			}
+			return "", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunAgentEvent() error = %v", err)
+	}
+	if sessionOptions[agentSessionIDOption] != sessionID {
+		t.Fatalf("session id = %q", sessionOptions[agentSessionIDOption])
+	}
+}
+
 func TestRunAgentEventKeepsTrackedThreadsIsolated(t *testing.T) {
 	paneOptions := map[string]map[string]string{}
 	sessionOptions := map[string]map[string]string{}
@@ -260,7 +377,167 @@ func TestRunStateEventRejectsUnknownState(t *testing.T) {
 	}
 }
 
+func TestRunAgentEventIgnoresDifferentTrackedAgent(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_ID", "droid")
+	t.Setenv("KITMUX_TMUX_SESSION", "droid-app")
+	t.Setenv("KITMUX_TMUX_PANE", "%1")
+	t.Setenv("KITMUX_TMUX_THREAD", "1")
+
+	paneOptions := make(map[string]string)
+	sessionOptions := make(map[string]string)
+	err := RunAgentEvent(AgentEvent{Agent: "cursor", Event: "pre-tool-use"}, nil, nil, StateOps{
+		CurrentPaneTitle: func() (string, error) { return "hooks", nil },
+		SetPaneOption: func(_, option, value string) error {
+			paneOptions[option] = value
+			return nil
+		},
+		SetSessionOption: func(_, option, value string) error {
+			sessionOptions[option] = value
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunAgentEvent() error = %v", err)
+	}
+	if len(paneOptions) != 0 || len(sessionOptions) != 0 {
+		t.Fatalf("cross-agent event wrote pane=%#v session=%#v", paneOptions, sessionOptions)
+	}
+}
+
+func TestRunAgentEventDoesNotMergeMismatchedAncestorAgent(t *testing.T) {
+	originalResolve := resolveAncestorContext
+	t.Cleanup(func() { resolveAncestorContext = originalResolve })
+	resolveAncestorContext = func(int) (agenttrack.Context, bool) {
+		return agenttrack.Context{
+			AgentID:     "droid",
+			SessionName: "droid-thread",
+			PaneID:      "%7",
+			Thread:      true,
+		}, true
+	}
+	t.Setenv("KITMUX_AGENT_ID", "cursor")
+	t.Setenv("KITMUX_TMUX_PANE", "%1")
+	t.Setenv("KITMUX_TMUX_SESSION", "")
+	t.Setenv("KITMUX_TMUX_THREAD", "")
+
+	paneOptions := make(map[string]string)
+	sessionOptions := make(map[string]string)
+	err := RunAgentEvent(AgentEvent{Agent: "cursor", Event: "pre-tool-use"}, nil, nil, StateOps{
+		CurrentPaneTitle: func() (string, error) { return "cursor", nil },
+		SetPaneOption: func(target, option, value string) error {
+			if target != "%1" {
+				t.Fatalf("pane target = %q", target)
+			}
+			paneOptions[option] = value
+			return nil
+		},
+		SetSessionOption: func(_, option, value string) error {
+			sessionOptions[option] = value
+			return nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunAgentEvent() error = %v", err)
+	}
+	if paneOptions[agentStateOption] != stateWorking {
+		t.Fatalf("paneOptions = %#v", paneOptions)
+	}
+	if len(sessionOptions) != 0 {
+		t.Fatalf("mismatched ancestor session was merged: %#v", sessionOptions)
+	}
+}
+
+func TestRunAgentEventMergesMissingPaneFromRegistry(t *testing.T) {
+	originalResolve := resolveAncestorContext
+	t.Cleanup(func() { resolveAncestorContext = originalResolve })
+	resolveAncestorContext = func(int) (agenttrack.Context, bool) {
+		return agenttrack.Context{
+			AgentID:     "droid",
+			SessionName: "droid-app",
+			PaneID:      "%9",
+			Thread:      true,
+		}, true
+	}
+
+	t.Setenv("KITMUX_AGENT_ID", "droid")
+	t.Setenv("KITMUX_TMUX_SESSION", "droid-app")
+	t.Setenv("KITMUX_TMUX_PANE", "")
+	t.Setenv("KITMUX_TMUX_THREAD", "1")
+	paneOptions := make(map[string]string)
+	sessionOptions := make(map[string]string)
+	var spinner SpinnerTarget
+	err := RunAgentEvent(AgentEvent{Event: "pre-tool-use", State: stateWorking}, nil, nil, StateOps{
+		CurrentPaneTitle: func() (string, error) { return "Droid app", nil },
+		SetPaneOption: func(target, option, value string) error {
+			if target != "%9" {
+				t.Fatalf("pane target = %q", target)
+			}
+			paneOptions[option] = value
+			return nil
+		},
+		SetSessionOption: func(target, option, value string) error {
+			if target != "droid-app" {
+				t.Fatalf("session target = %q", target)
+			}
+			sessionOptions[option] = value
+			return nil
+		},
+		EmitBell: func(_ io.Writer) error { return nil },
+		StartSpinner: func(target SpinnerTarget) error {
+			spinner = target
+			return nil
+		},
+		RefreshSessionClients: func(string) {},
+		Now:                   func() time.Time { return time.UnixMilli(42) },
+	})
+	if err != nil {
+		t.Fatalf("RunAgentEvent() error = %v", err)
+	}
+	if paneOptions[agentStateOption] != stateWorking || sessionOptions[agentStateOption] != stateWorking {
+		t.Fatalf("pane=%#v session=%#v", paneOptions, sessionOptions)
+	}
+	if spinner.PaneID != "%9" || spinner.SessionName != "droid-app" || spinner.Token != "42" {
+		t.Fatalf("spinner = %#v", spinner)
+	}
+}
+
+func TestRunAgentEventDoesNotLeaveStaticSpinnerWithoutPane(t *testing.T) {
+	originalResolve := resolveAncestorContext
+	t.Cleanup(func() { resolveAncestorContext = originalResolve })
+	resolveAncestorContext = func(int) (agenttrack.Context, bool) {
+		return agenttrack.Context{}, false
+	}
+
+	t.Setenv("KITMUX_AGENT_ID", "droid")
+	t.Setenv("KITMUX_TMUX_SESSION", "droid-app")
+	t.Setenv("KITMUX_TMUX_PANE", "")
+	t.Setenv("KITMUX_TMUX_THREAD", "1")
+	sessionOptions := make(map[string]string)
+	spinnerStarted := false
+	err := RunAgentEvent(AgentEvent{Event: "pre-tool-use", State: stateWorking}, nil, nil, StateOps{
+		CurrentPaneTitle: func() (string, error) { return "Droid app", nil },
+		SetSessionOption: func(_, option, value string) error {
+			sessionOptions[option] = value
+			return nil
+		},
+		EmitBell:              func(_ io.Writer) error { return nil },
+		StartSpinner:          func(SpinnerTarget) error { spinnerStarted = true; return nil },
+		RefreshSessionClients: func(string) {},
+		Now:                   func() time.Time { return time.UnixMilli(43) },
+	})
+	if err != nil {
+		t.Fatalf("RunAgentEvent() error = %v", err)
+	}
+	if sessionOptions[agentTitlePrefixOption] != "" {
+		t.Fatalf("static spinner prefix = %q", sessionOptions[agentTitlePrefixOption])
+	}
+	if spinnerStarted {
+		t.Fatal("spinner should not start without a pane")
+	}
+}
+
 func TestRunAgentEventDerivesPermissionAndDetailFromHookJSON(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_ID", "codex")
 	t.Setenv("KITMUX_TMUX_PANE", "%1")
 	paneOptions := make(map[string]string)
 	var bells int
@@ -319,10 +596,59 @@ func TestRunAgentEventPreToolAskUserIsInputNoSpinner(t *testing.T) {
 	}
 }
 
+func TestRunAgentEventMapsCursorPromptSubmitAndSubagentStop(t *testing.T) {
+	tests := []struct {
+		name      string
+		eventName string
+		wantState string
+	}{
+		{name: "before submit prompt", eventName: "beforeSubmitPrompt", wantState: stateWorking},
+		{name: "subagent stop", eventName: "subagentStop", wantState: stateIdle},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clearTrackingEnv(t)
+			t.Setenv("KITMUX_AGENT_ID", "cursor")
+			t.Setenv("KITMUX_TMUX_PANE", "%1")
+			paneOptions := make(map[string]string)
+			err := RunAgentEvent(AgentEvent{Agent: "cursor", StdinJSON: true}, strings.NewReader(`{"hook_event_name":"`+tt.eventName+`","chat_id":"44444444-4444-4444-8444-444444444444"}`), nil, StateOps{
+				CurrentPaneTitle: func() (string, error) { return "⌬ cursor task", nil },
+				SetPaneOption: func(_, option, value string) error {
+					paneOptions[option] = value
+					return nil
+				},
+			})
+			if err != nil {
+				t.Fatalf("RunAgentEvent() error = %v", err)
+			}
+			if paneOptions[agentStateOption] != tt.wantState {
+				t.Fatalf("state = %q, want %q", paneOptions[agentStateOption], tt.wantState)
+			}
+			if paneOptions[agentSessionIDOption] != "44444444-4444-4444-8444-444444444444" {
+				t.Fatalf("session id = %q", paneOptions[agentSessionIDOption])
+			}
+		})
+	}
+}
+
 func TestDeriveStatePostToolAskUserIsWorking(t *testing.T) {
 	state := deriveState(stateWorking, "post-tool-use", hookInput{ToolName: "AskUser"})
 	if state != stateWorking {
 		t.Fatalf("post-tool AskUser state = %q, want working", state)
+	}
+}
+
+func TestDeriveStateNamespacedAskUserIsInput(t *testing.T) {
+	state := deriveState(stateWorking, "pre-tool-use", hookInput{ToolName: "mcp__factory__AskUser"})
+	if state != stateInput {
+		t.Fatalf("namespaced AskUser state = %q, want input", state)
+	}
+}
+
+func TestNotificationStateCompletedIsIdle(t *testing.T) {
+	state := notificationState(hookInput{Message: "Task completed successfully"})
+	if state != stateIdle {
+		t.Fatalf("completed notification state = %q, want idle", state)
 	}
 }
 

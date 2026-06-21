@@ -59,6 +59,7 @@ func (i Installer) InstallAll() ([]Result, error) {
 		installDroid,
 		installClaude,
 		installCodex,
+		installCursor,
 		installOpenCode,
 	}
 	results := make([]Result, 0, len(installers))
@@ -104,6 +105,8 @@ func installerForAgent(agentID string) (func(string) (Result, error), bool) {
 		return installClaude, true
 	case "codex":
 		return installCodex, true
+	case "cursor":
+		return installCursor, true
 	case "opencode":
 		return installOpenCode, true
 	default:
@@ -202,6 +205,25 @@ func installCodex(home string) (Result, error) {
 	return Result{AgentID: "codex", Path: path, Changed: changedShim || changed}, err
 }
 
+func installCursor(home string) (Result, error) {
+	shimPath, changedShim, err := installAgentEventShim(home)
+	if err != nil {
+		return Result{AgentID: "cursor", Path: shimPath, Changed: changedShim}, err
+	}
+	path := filepath.Join(home, ".cursor", "hooks.json")
+	changed, err := installCursorHooks(path, []hookSpec{
+		eventHook(shimPath, "cursor", "sessionStart", "", "session-start", stateIdle, false),
+		eventHook(shimPath, "cursor", "beforeSubmitPrompt", "", "user-prompt-submit", stateWorking, false),
+		eventHook(shimPath, "cursor", "preToolUse", "", "pre-tool-use", stateWorking, false),
+		eventHook(shimPath, "cursor", "postToolUse", "", "post-tool-use", stateWorking, false),
+		eventHook(shimPath, "cursor", "postToolUseFailure", "", "post-tool-use-failure", stateWorking, false),
+		eventHook(shimPath, "cursor", "stop", "", "stop", stateIdle, true),
+		eventHook(shimPath, "cursor", "subagentStop", "", "subagent-stop", stateIdle, false),
+		eventHook(shimPath, "cursor", "sessionEnd", "", "session-end", stateIdle, false),
+	})
+	return Result{AgentID: "cursor", Path: path, Changed: changedShim || changed}, err
+}
+
 func installOpenCode(home string) (Result, error) {
 	path := filepath.Join(home, ".config", "opencode", "plugins", "kitmux-zed-bell.js")
 	content := []byte(openCodePlugin(kitmuxCommand()))
@@ -225,6 +247,24 @@ func installOpenCode(home string) (Result, error) {
 func installJSONHooks(path string, hooks []hookSpec) (bool, error) {
 	return updateJSON(path, func(doc map[string]any) bool {
 		return addCommandHooks(doc, hooks)
+	})
+}
+
+func installCursorHooks(path string, hooks []hookSpec) (bool, error) {
+	return updateJSON(path, func(doc map[string]any) bool {
+		changed := setNumber(doc, "version", 1)
+		rawHooks, _ := doc["hooks"].(map[string]any)
+		if rawHooks == nil {
+			rawHooks = make(map[string]any)
+			doc["hooks"] = rawHooks
+			changed = true
+		}
+		for _, spec := range hooks {
+			if addCursorCommandHook(rawHooks, spec) {
+				changed = true
+			}
+		}
+		return changed
 	})
 }
 
@@ -363,6 +403,21 @@ func setBool(doc map[string]any, key string, value bool) bool {
 	return true
 }
 
+func setNumber(doc map[string]any, key string, value float64) bool {
+	switch got := doc[key].(type) {
+	case float64:
+		if got == value {
+			return false
+		}
+	case int:
+		if float64(got) == value {
+			return false
+		}
+	}
+	doc[key] = value
+	return true
+}
+
 func addCommandHooks(doc map[string]any, hooks []hookSpec) bool {
 	rawHooks, _ := doc["hooks"].(map[string]any)
 	if rawHooks == nil {
@@ -377,6 +432,35 @@ func addCommandHooks(doc map[string]any, hooks []hookSpec) bool {
 		}
 	}
 	return changed
+}
+
+func addCursorCommandHook(rawHooks map[string]any, spec hookSpec) bool {
+	groups, _ := rawHooks[spec.Event].([]any)
+	changed := replaceCursorCommands(groups, spec.ReplaceCommands, spec.Command)
+	if normalizedGroups, normalized := normalizeCursorAgentEventHooks(groups, spec); normalized {
+		groups = normalizedGroups
+		rawHooks[spec.Event] = groups
+		changed = true
+	}
+	if dedupedGroups, deduped := dedupeCursorCommandHooks(groups, spec.Command); deduped {
+		groups = dedupedGroups
+		rawHooks[spec.Event] = groups
+		changed = true
+	}
+	if hasCursorCommand(groups, spec.Command) {
+		return changed
+	}
+
+	group := map[string]any{
+		hookTypeKey:    hookTypeCommand,
+		hookCommandKey: spec.Command,
+		"timeout":      float64(5),
+	}
+	if spec.Matcher != "" {
+		group["matcher"] = spec.Matcher
+	}
+	rawHooks[spec.Event] = append(groups, group)
+	return true
 }
 
 func addCommandHook(rawHooks map[string]any, spec hookSpec) bool {
@@ -473,6 +557,33 @@ func shouldDropAgentEventHook(hook any, spec hookSpec, seenCurrent *bool) bool {
 	return true
 }
 
+func normalizeCursorAgentEventHooks(groups []any, spec hookSpec) ([]any, bool) {
+	if spec.AgentID == "" || spec.AgentEvent == "" {
+		return groups, false
+	}
+	seenCurrent := false
+	changed := false
+	out := make([]any, 0, len(groups))
+	for _, group := range groups {
+		groupMap, ok := group.(map[string]any)
+		command, _ := groupMap[hookCommandKey].(string)
+		if !ok || groupMap[hookTypeKey] != hookTypeCommand || !isAgentEventCommand(command, spec) {
+			out = append(out, group)
+			continue
+		}
+		if command == spec.Command && !seenCurrent {
+			seenCurrent = true
+			out = append(out, group)
+			continue
+		}
+		changed = true
+	}
+	if len(out) != len(groups) {
+		changed = true
+	}
+	return out, changed
+}
+
 func isAgentEventCommand(command string, spec hookSpec) bool {
 	if !hasFlagValue(command, "--agent", spec.AgentID) || !hasFlagValue(command, "--event", spec.AgentEvent) {
 		return false
@@ -532,6 +643,27 @@ func dedupeCommandHooks(groups []any, command string) ([]any, bool) {
 	return out, changed
 }
 
+func dedupeCursorCommandHooks(groups []any, command string) ([]any, bool) {
+	seen := false
+	changed := false
+	out := make([]any, 0, len(groups))
+	for _, group := range groups {
+		groupMap, ok := group.(map[string]any)
+		if ok && groupMap[hookTypeKey] == hookTypeCommand && groupMap[hookCommandKey] == command {
+			if seen {
+				changed = true
+				continue
+			}
+			seen = true
+		}
+		out = append(out, group)
+	}
+	if len(out) != len(groups) {
+		changed = true
+	}
+	return out, changed
+}
+
 func replaceCommands(groups []any, oldCommands []string, newCommand string) bool {
 	if len(oldCommands) == 0 {
 		return false
@@ -563,6 +695,30 @@ func replaceCommands(groups []any, oldCommands []string, newCommand string) bool
 	return changed
 }
 
+func replaceCursorCommands(groups []any, oldCommands []string, newCommand string) bool {
+	if len(oldCommands) == 0 {
+		return false
+	}
+	replace := make(map[string]struct{}, len(oldCommands))
+	for _, command := range oldCommands {
+		replace[command] = struct{}{}
+	}
+
+	changed := false
+	for _, group := range groups {
+		groupMap, ok := group.(map[string]any)
+		if !ok {
+			continue
+		}
+		command, _ := groupMap[hookCommandKey].(string)
+		if _, ok := replace[command]; ok {
+			groupMap[hookCommandKey] = newCommand
+			changed = true
+		}
+	}
+	return changed
+}
+
 func hasCommand(groups []any, command string) bool {
 	for _, group := range groups {
 		groupMap, ok := group.(map[string]any)
@@ -578,6 +734,19 @@ func hasCommand(groups []any, command string) bool {
 			if hookMap[hookTypeKey] == hookTypeCommand && hookMap[hookCommandKey] == command {
 				return true
 			}
+		}
+	}
+	return false
+}
+
+func hasCursorCommand(groups []any, command string) bool {
+	for _, group := range groups {
+		groupMap, ok := group.(map[string]any)
+		if !ok {
+			continue
+		}
+		if groupMap[hookTypeKey] == hookTypeCommand && groupMap[hookCommandKey] == command {
+			return true
 		}
 	}
 	return false

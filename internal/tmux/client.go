@@ -352,6 +352,22 @@ func SetAgentSessionID(sessionName, id string) error {
 	return SetSessionOption(sessionName, "@kitmux_agent_session_id", id)
 }
 
+func ShowSessionOption(target, option string) (string, error) {
+	out, err := exec.Command("tmux", "show-option", "-qv", "-t", target, option).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
+func ShowPaneOption(target, option string) (string, error) {
+	out, err := exec.Command("tmux", "show-option", "-p", "-qv", "-t", target, option).Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
+}
+
 func RefreshClients(sessionName string) error {
 	out, err := exec.Command("tmux", "list-clients", "-t", sessionName, "-F", "#{client_name}").Output()
 	if err != nil {

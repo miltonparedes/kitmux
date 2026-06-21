@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strings"
 	"syscall"
+	"time"
 
 	"github.com/miltonparedes/kitmux/internal/agentenv"
 	"github.com/miltonparedes/kitmux/internal/agents"
@@ -41,6 +42,7 @@ type Ops struct {
 	SetHook               func(string, string, string) error
 	ListThreads           func() ([]tmux.Session, error)
 	Attach                func(string) error
+	Now                   func() time.Time
 }
 
 func DefaultOps() Ops {
@@ -54,6 +56,7 @@ func DefaultOps() Ops {
 		SetHook:               tmux.SetHook,
 		ListThreads:           tmux.ListThreads,
 		Attach:                Attach,
+		Now:                   time.Now,
 	}
 }
 
@@ -226,13 +229,17 @@ func InstallAllSupport(ops Ops) (int, error) {
 }
 
 func InstallSupportForSession(session tmux.Session, ops Ops) error {
+	ops = ops.withDefaults()
 	title := initialTitle(session)
-	return ApplySupport(SupportSpec{
+	if err := ApplySupport(SupportSpec{
 		SessionName:  session.Name,
 		TargetPane:   session.Name,
 		AgentID:      session.AgentID,
 		InitialTitle: title,
-	}, ops)
+	}, ops); err != nil {
+		return err
+	}
+	return repairStaleWorkingState(session, ops)
 }
 
 func ApplySupport(spec SupportSpec, ops Ops) error {
@@ -326,6 +333,41 @@ func setThreadHooks(sessionName string, ops Ops) error {
 	return nil
 }
 
+func repairStaleWorkingState(session tmux.Session, ops Ops) error {
+	if session.Name == "" || session.AgentState != "working" {
+		return nil
+	}
+	now := ops.Now()
+	if !staleWorkingTimestamp(session.AgentUpdated, now) {
+		return nil
+	}
+	prefix := agentSymbol(session.AgentID)
+	options := []sessionOption{
+		{"@kitmux_agent_state", "idle"},
+		{"@kitmux_agent_event", "stale-working"},
+		{"@kitmux_agent_detail", ""},
+		{"@kitmux_agent_updated", fmt.Sprintf("%d", now.UnixMilli())},
+		{"@kitmux_agent_title_prefix", prefix},
+		{"@kitmux_agent_title_display", ""},
+	}
+	if err := setSessionOptions(session.Name, options, ops); err != nil {
+		return err
+	}
+	for _, opt := range options {
+		if err := ops.SetPaneOption(session.Name, opt.name, opt.value); err != nil {
+			return fmt.Errorf("set pane option %s: %w", opt.name, err)
+		}
+	}
+	return nil
+}
+
+func staleWorkingTimestamp(updated int64, now time.Time) bool {
+	if updated <= 0 {
+		return true
+	}
+	return now.Sub(time.UnixMilli(updated)) > 2*time.Hour
+}
+
 func initialTitle(session tmux.Session) string {
 	agentName := agentName(session.AgentID)
 	project := filepath.Base(filepath.Clean(session.Path))
@@ -343,6 +385,13 @@ func agentName(agentID string) string {
 		return "Agent"
 	}
 	return agentID
+}
+
+func agentSymbol(agentID string) string {
+	if agent, ok := agents.Find(agentID); ok {
+		return agent.Symbol
+	}
+	return ""
 }
 
 func threadTitleFormat() string {
@@ -421,6 +470,9 @@ func (ops Ops) withDefaults() Ops {
 	}
 	if ops.Attach == nil {
 		ops.Attach = defaults.Attach
+	}
+	if ops.Now == nil {
+		ops.Now = defaults.Now
 	}
 	return ops
 }

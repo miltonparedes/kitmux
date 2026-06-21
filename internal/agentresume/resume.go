@@ -1,6 +1,8 @@
 package agentresume
 
 import (
+	"bufio"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -22,7 +24,7 @@ type Target struct {
 
 func ResolveSessionID(target Target) (string, error) {
 	if id := strings.TrimSpace(target.ExistingSessionID); id != "" {
-		return id, nil
+		return CanonicalSessionID(target.AgentID, id, ""), nil
 	}
 	if target.PanePID <= 0 {
 		return "", fmt.Errorf("invalid pane pid %d", target.PanePID)
@@ -32,6 +34,35 @@ func ResolveSessionID(target Target) (string, error) {
 		return "", err
 	}
 	return sessionIDFromPaths(target.AgentID, paths)
+}
+
+func CanonicalSessionID(agentID, sessionID, sessionPath string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ""
+	}
+	if parentID := ParentSessionID(agentID, sessionID, sessionPath); parentID != "" {
+		return parentID
+	}
+	return sessionID
+}
+
+func IsChildSession(agentID, sessionID, sessionPath string) bool {
+	return ParentSessionID(agentID, sessionID, sessionPath) != ""
+}
+
+func ParentSessionID(agentID, sessionID, sessionPath string) string {
+	if agentID != "droid" {
+		return ""
+	}
+	if parentID := droidParentSessionIDFromPath(sessionPath); parentID != "" {
+		return parentID
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ""
+	}
+	return droidParentSessionIDFromHome(sessionID)
 }
 
 func ResumeCommand(agentID, sessionID string) (string, error) {
@@ -181,6 +212,68 @@ func droidSessionIDFromPath(path string) string {
 		candidate := strings.TrimSuffix(base, suffix)
 		if opaqueSessionPattern.MatchString(candidate) {
 			return candidate
+		}
+	}
+	return ""
+}
+
+type droidSessionHeader struct {
+	CallingSessionID      string `json:"callingSessionId"`
+	CallingSessionIDSnake string `json:"calling_session_id"`
+}
+
+func droidParentSessionIDFromPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	// #nosec G304 -- Droid session paths are read-only metadata from hooks or Factory session discovery.
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = file.Close() }()
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
+	if !scanner.Scan() {
+		return ""
+	}
+	var header droidSessionHeader
+	if err := json.Unmarshal(scanner.Bytes(), &header); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(firstNonEmpty(header.CallingSessionID, header.CallingSessionIDSnake))
+}
+
+func droidParentSessionIDFromHome(sessionID string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	for _, pattern := range []string{
+		filepath.Join(home, ".factory", "sessions", "*", sessionID+".jsonl"),
+		filepath.Join(home, ".factory", "sessions", "*", sessionID+".settings.json"),
+		filepath.Join(home, ".factory", "projects", "*", sessionID+".jsonl"),
+		filepath.Join(home, ".factory", "projects", "*", sessionID+".settings.json"),
+	} {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		for _, path := range matches {
+			if parentID := droidParentSessionIDFromPath(path); parentID != "" {
+				return parentID
+			}
+		}
+	}
+	return ""
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
 		}
 	}
 	return ""
