@@ -830,3 +830,30 @@ func TestNewHeadlessUsesLaunchDir(t *testing.T) {
 		t.Fatalf("msg = %#v", msg)
 	}
 }
+
+func TestNewHeadlessReportsHookInstallFailure(t *testing.T) {
+	originalCreateThread := createThread
+	originalInstallHooks := installThreadHooks
+	t.Cleanup(func() {
+		createThread = originalCreateThread
+		installThreadHooks = originalInstallHooks
+	})
+
+	createThread = func(agentthread.Spec, agentthread.Ops) (agentthread.Resolved, error) {
+		t.Fatal("createThread should not run when hook install fails")
+		return agentthread.Resolved{}, nil
+	}
+	installThreadHooks = func(string) error {
+		return fmt.Errorf("hooks unavailable")
+	}
+
+	agent, ok := agents.Find("droid")
+	if !ok {
+		t.Fatal("missing droid agent")
+	}
+
+	msg := newHeadlessCmd(agent, "/repo/current")()
+	if _, ok := msg.(loadedMsg); !ok {
+		t.Fatalf("msg = %#v, want loadedMsg", msg)
+	}
+}

@@ -218,7 +218,7 @@ func isDroidMainSessionRestart(eventName string, input hookInput) bool {
 		return false
 	}
 	switch eventKey(input.Source) {
-	case "clear", "resume", "compact":
+	case "clear", "resume", "compact", "startup":
 		return true
 	default:
 		return false
@@ -393,6 +393,14 @@ func deriveBell(explicit bool, eventName string) bool {
 	}
 }
 
+var (
+	notificationCompletedWord   = regexp.MustCompile(`\bcompleted\b`)
+	notificationFinishedWord    = regexp.MustCompile(`\bfinished\b`)
+	notificationWaitingWord     = regexp.MustCompile(`\bwaiting\b`)
+	notificationInputWord       = regexp.MustCompile(`\binput\b`)
+	notificationNegatedComplete = regexp.MustCompile(`\b(?:not|\w+n't)\s+\S*\s*(?:completed|finished)\b`)
+)
+
 func notificationState(input hookInput) string {
 	notifType := eventKey(input.NotificationType)
 	message := strings.ToLower(input.Message)
@@ -400,10 +408,11 @@ func notificationState(input hookInput) string {
 		strings.Contains(message, statePermission) {
 		return statePermission
 	}
-	if strings.Contains(message, "completed") || strings.Contains(message, "finished") {
+	if !notificationNegatedComplete.MatchString(message) &&
+		(notificationCompletedWord.MatchString(message) || notificationFinishedWord.MatchString(message)) {
 		return stateIdle
 	}
-	if strings.Contains(message, "waiting") || strings.Contains(message, "input") {
+	if notificationWaitingWord.MatchString(message) || notificationInputWord.MatchString(message) {
 		return stateInput
 	}
 	return stateInput

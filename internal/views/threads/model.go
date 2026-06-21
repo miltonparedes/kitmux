@@ -809,12 +809,14 @@ func rowPaneTarget(row Row) string {
 func newHeadlessCmd(agent agents.Agent, launchDir string) tea.Cmd {
 	return func() tea.Msg {
 		if err := installThreadHooks(agent.ID); err != nil {
-			return loadedMsg{}
+			_ = tmux.DisplayMessage(fmt.Sprintf("create thread: %v", err))
+			return loadRows()
 		}
 		dir := resolveLaunchDir(launchDir)
 		resolved, err := createThread(agentthread.Spec{AgentID: agent.ID, Dir: dir}, agentthread.DefaultOps())
 		if err != nil {
-			return loadedMsg{}
+			_ = tmux.DisplayMessage(fmt.Sprintf("create thread: %v", err))
+			return loadRows()
 		}
 		return messages.SwitchSessionMsg{Name: resolved.SessionName}
 	}

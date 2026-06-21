@@ -224,9 +224,21 @@ func TestRunAgentEventIgnoresDroidMismatchedNestedSessionID(t *testing.T) {
 
 	parentID := "11111111-1111-4111-8111-111111111111"
 	nestedID := "22222222-2222-4222-8222-222222222222"
+	root := t.TempDir()
+	childPath := filepath.Join(root, ".factory", "sessions", "-repo-app", nestedID+".jsonl")
+	if err := os.MkdirAll(filepath.Dir(childPath), 0o750); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(
+		childPath,
+		[]byte(`{"type":"session_start","id":"`+nestedID+`","callingSessionId":"`+parentID+`"}`+"\n"),
+		0o600,
+	); err != nil {
+		t.Fatalf("write child session: %v", err)
+	}
 	paneOptions := make(map[string]string)
 	sessionOptions := make(map[string]string)
-	payload := `{"hook_event_name":"SessionStart","session_id":"` + nestedID + `","source":"startup"}`
+	payload := `{"hook_event_name":"SessionStart","session_id":"` + nestedID + `","source":"startup","transcript_path":"` + childPath + `"}`
 	err := RunAgentEvent(AgentEvent{Agent: "droid", StdinJSON: true}, strings.NewReader(payload), nil, StateOps{
 		CurrentPaneTitle: func() (string, error) { return "hooks", nil },
 		SetPaneOption: func(_, option, value string) error {
@@ -249,6 +261,38 @@ func TestRunAgentEventIgnoresDroidMismatchedNestedSessionID(t *testing.T) {
 	}
 	if len(paneOptions) != 0 || len(sessionOptions) != 0 {
 		t.Fatalf("nested event wrote pane=%#v session=%#v", paneOptions, sessionOptions)
+	}
+}
+
+func TestRunAgentEventAcceptsDroidMainSessionRestartOnStartup(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_ID", "droid")
+	t.Setenv("KITMUX_TMUX_SESSION", "droid-app")
+	t.Setenv("KITMUX_TMUX_PANE", "%3")
+	t.Setenv("KITMUX_TMUX_THREAD", "1")
+
+	parentID := "11111111-1111-4111-8111-111111111111"
+	newMainID := "33333333-3333-4333-8333-333333333333"
+	sessionOptions := make(map[string]string)
+	payload := `{"hook_event_name":"SessionStart","session_id":"` + newMainID + `","source":"startup"}`
+	err := RunAgentEvent(AgentEvent{Agent: "droid", StdinJSON: true}, strings.NewReader(payload), nil, StateOps{
+		CurrentPaneTitle: func() (string, error) { return "hooks", nil },
+		SetPaneOption:    func(_, _, _ string) error { return nil },
+		SetSessionOption: func(_, option, value string) error {
+			sessionOptions[option] = value
+			return nil
+		},
+		ShowSessionOption: func(_, option string) (string, error) {
+			if option == agentSessionIDOption {
+				return parentID, nil
+			}
+			return "", nil
+		},
+	})
+	if err != nil {
+		t.Fatalf("RunAgentEvent() error = %v", err)
+	}
+	if sessionOptions[agentSessionIDOption] != newMainID {
+		t.Fatalf("session id = %q, want %q", sessionOptions[agentSessionIDOption], newMainID)
 	}
 }
 
@@ -569,6 +613,8 @@ func TestRunAgentEventDerivesPermissionAndDetailFromHookJSON(t *testing.T) {
 }
 
 func TestRunAgentEventPreToolAskUserIsInputNoSpinner(t *testing.T) {
+	clearTrackingEnv(t)
+	t.Setenv("KITMUX_AGENT_ID", "droid")
 	t.Setenv("KITMUX_TMUX_PANE", "%1")
 	paneOptions := make(map[string]string)
 	spinnerStarted := false
@@ -649,6 +695,15 @@ func TestNotificationStateCompletedIsIdle(t *testing.T) {
 	state := notificationState(hookInput{Message: "Task completed successfully"})
 	if state != stateIdle {
 		t.Fatalf("completed notification state = %q, want idle", state)
+	}
+}
+
+func TestNotificationStateNegativeCompletionPhrasesStayInput(t *testing.T) {
+	for _, message := range []string{"Task not completed", "Work unfinished", "Task isn't finished"} {
+		state := notificationState(hookInput{Message: message})
+		if state != stateInput {
+			t.Fatalf("message %q state = %q, want input", message, state)
+		}
 	}
 }
 
