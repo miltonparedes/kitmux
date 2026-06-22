@@ -793,8 +793,15 @@ func TestRunAgentEventReplacesDroidSymbolWithSpinnerInTitleDisplay(t *testing.T)
 }
 
 func TestRunAgentEventTargetsSessionFromEnvWithoutTmuxPane(t *testing.T) {
+	originalResolve := resolveAncestorContext
+	t.Cleanup(func() { resolveAncestorContext = originalResolve })
+	resolveAncestorContext = func(int) (agenttrack.Context, bool) {
+		return agenttrack.Context{}, false
+	}
+
 	t.Setenv("KITMUX_AGENT_ID", "droid")
 	t.Setenv("KITMUX_TMUX_SESSION", "droid-kitmux")
+	t.Setenv("KITMUX_TMUX_PANE", "")
 	t.Setenv("KITMUX_TMUX_THREAD", "1")
 	sessionOptions := make(map[string]string)
 	var spinner SpinnerTarget
@@ -826,10 +833,10 @@ func TestRunAgentEventTargetsSessionFromEnvWithoutTmuxPane(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RunAgentEvent() error = %v", err)
 	}
-	if sessionOptions[agentStateOption] != stateWorking || sessionOptions[agentTitlePrefixOption] != SpinnerFrames[0] {
+	if sessionOptions[agentStateOption] != stateWorking || sessionOptions[agentTitlePrefixOption] != "" {
 		t.Fatalf("sessionOptions = %#v", sessionOptions)
 	}
-	if spinner.SessionName != "droid-kitmux" || spinner.Token != "2026" {
+	if spinner != (SpinnerTarget{}) {
 		t.Fatalf("spinner = %#v", spinner)
 	}
 }
