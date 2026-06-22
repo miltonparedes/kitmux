@@ -4,6 +4,7 @@ package agents
 type Agent struct {
 	ID      string
 	Name    string
+	Symbol  string
 	Command string
 	Modes   []AgentMode
 }
@@ -19,22 +20,16 @@ var defaultAgents = []Agent{
 	{
 		ID:      "droid",
 		Name:    "Droid",
+		Symbol:  "⛬",
 		Command: "droid",
 		Modes: []AgentMode{
 			{ID: "default", Name: "Default", Flags: ""},
 		},
 	},
 	{
-		ID:      "codex-cloud",
-		Name:    "Codex Cloud",
-		Command: "codex",
-		Modes: []AgentMode{
-			{ID: "default", Name: "Cloud", Flags: "cloud"},
-		},
-	},
-	{
 		ID:      "codex",
 		Name:    "Codex CLI",
+		Symbol:  "⌾",
 		Command: "codex",
 		Modes: []AgentMode{
 			{ID: "default", Name: "Default", Flags: ""},
@@ -44,29 +39,22 @@ var defaultAgents = []Agent{
 		},
 	},
 	{
+		ID:      "cursor",
+		Name:    "Cursor CLI",
+		Symbol:  "⌬",
+		Command: "cursor-agent",
+		Modes: []AgentMode{
+			{ID: "default", Name: "Default", Flags: ""},
+		},
+	},
+	{
 		ID:      "claude",
 		Name:    "Claude Code",
+		Symbol:  "✳",
 		Command: "claude",
 		Modes: []AgentMode{
 			{ID: "default", Name: "Default", Flags: ""},
 			{ID: "skip-perms", Name: "Skip Permissions", Flags: "--dangerously-skip-permissions"},
-		},
-	},
-	{
-		ID:      "gemini",
-		Name:    "Gemini CLI",
-		Command: "gemini",
-		Modes: []AgentMode{
-			{ID: "default", Name: "Default", Flags: ""},
-		},
-	},
-	{
-		ID:      "aichat",
-		Name:    "AIChat",
-		Command: "aichat",
-		Modes: []AgentMode{
-			{ID: "default", Name: "Interactive", Flags: ""},
-			{ID: "execute", Name: "Execute", Flags: "-e"},
 		},
 	},
 	{
@@ -123,4 +111,11 @@ func (a Agent) FullCommand(mode AgentMode) string {
 		return a.Command
 	}
 	return a.Command + " " + mode.Flags
+}
+
+func (a Agent) DisplayName() string {
+	if a.Symbol == "" {
+		return a.Name
+	}
+	return a.Symbol + " " + a.Name
 }

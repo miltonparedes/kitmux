@@ -94,7 +94,7 @@ func TestModelFiltersAgentActivity(t *testing.T) {
 	m := New()
 	m, _ = m.Update(panesLoadedMsg{panes: []tmux.Pane{
 		{SessionName: "repo", WindowIndex: 1, PaneIndex: 0, Command: "zsh"},
-		{SessionName: "repo", WindowIndex: 1, PaneIndex: 1, Command: "codex"},
+		{SessionName: "repo", WindowIndex: 1, PaneIndex: 1, Command: "codex", AgentState: "input"},
 	}})
 
 	if len(m.activities) != 1 {
@@ -103,8 +103,8 @@ func TestModelFiltersAgentActivity(t *testing.T) {
 	if m.activities[0].Pane.Command != "codex" {
 		t.Fatalf("expected codex pane, got %q", m.activities[0].Pane.Command)
 	}
-	if m.activities[0].Status != activityStatusActive {
-		t.Fatalf("expected active status, got %q", m.activities[0].Status)
+	if !m.activities[0].NeedsInput {
+		t.Fatal("expected needs input activity")
 	}
 }
 

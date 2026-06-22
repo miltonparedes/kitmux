@@ -59,7 +59,10 @@ const (
 	actionRowHeight          = 2
 	sidepanelRefreshInterval = 2 * time.Second
 
-	activityStatusActive activityStatus = "active"
+	activityStatusActive  activityStatus = "active"
+	activityStatusIdle    activityStatus = "idle"
+	activityStatusWorking activityStatus = "working"
+	activityStatusError   activityStatus = "error"
 )
 
 type agentActivity struct {
@@ -549,9 +552,22 @@ func filterActivityPanes(panes []tmux.Pane) []tmux.Pane {
 func buildAgentActivities(panes []tmux.Pane) []agentActivity {
 	activities := make([]agentActivity, 0, len(panes))
 	for _, pane := range panes {
+		status := activityStatusActive
+		needsInput := false
+		switch pane.AgentState {
+		case "idle":
+			status = activityStatusIdle
+		case "working":
+			status = activityStatusWorking
+		case "input", "permission":
+			needsInput = true
+		case "error":
+			status = activityStatusError
+		}
 		activities = append(activities, agentActivity{
-			Pane:   pane,
-			Status: activityStatusActive,
+			Pane:       pane,
+			Status:     status,
+			NeedsInput: needsInput,
 		})
 	}
 	return activities

@@ -6,6 +6,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/miltonparedes/kitmux/internal/agentenv"
 	"github.com/miltonparedes/kitmux/internal/agentlaunch"
 	"github.com/miltonparedes/kitmux/internal/app/messages"
 	"github.com/miltonparedes/kitmux/internal/cache"
@@ -23,7 +24,7 @@ func TestLaunchAgentAutoSidepanelWhenWide(t *testing.T) {
 	m := New(ModeAgents)
 	m.launchAgent(messages.LaunchAgentMsg{AgentID: "codex", ModeID: "default", Target: "pane"})
 
-	if calls.sent != "codex" {
+	if calls.sent != trackedCommand("codex", "codex") {
 		t.Fatalf("expected codex to be sent, got %q", calls.sent)
 	}
 	if calls.sidepanelCommand != "kitmux sidepanel" {
@@ -43,7 +44,7 @@ func TestLaunchAgentAutoSidepanelSkipsWhenNarrow(t *testing.T) {
 	m := New(ModeAgents)
 	m.launchAgent(messages.LaunchAgentMsg{AgentID: "codex", ModeID: "default", Target: "pane"})
 
-	if calls.sent != "codex" {
+	if calls.sent != trackedCommand("codex", "codex") {
 		t.Fatalf("expected codex to be sent, got %q", calls.sent)
 	}
 	if calls.sidepanelCommand != "" {
@@ -85,7 +86,7 @@ func TestLaunchAgentExplicitSplitDoesNotStartSidepanel(t *testing.T) {
 	m := New(ModeAgents)
 	m.launchAgent(messages.LaunchAgentMsg{AgentID: "codex", ModeID: "default", Target: "split"})
 
-	if calls.split != "codex" {
+	if calls.split != trackedCommand("codex", "codex") {
 		t.Fatalf("expected explicit split command codex, got %q", calls.split)
 	}
 	if calls.sidepanelCommand != "" {
@@ -214,7 +215,12 @@ func stubAgentLaunch(t *testing.T, width int, widthErr error) *launchCalls {
 		calls.sidepanelRatio = percent
 		return "%2", nil
 	}
+	agentLaunchOps.InstallHooks = func(string) error { return nil }
 	return calls
+}
+
+func trackedCommand(agentID, command string) string {
+	return agentenv.WrapTmuxCommand(agentID, "", command, false)
 }
 
 func TestSidepanelLaunchAgentCreatesWindowAndSplitWhenWide(t *testing.T) {
@@ -231,7 +237,7 @@ func TestSidepanelLaunchAgentCreatesWindowAndSplitWhenWide(t *testing.T) {
 	if calls.windowDir != "/tmp/repo" {
 		t.Fatalf("expected window dir /tmp/repo, got %q", calls.windowDir)
 	}
-	if calls.windowCommand != "codex" {
+	if calls.windowCommand != trackedCommand("codex", "codex") {
 		t.Fatalf("expected codex command, got %q", calls.windowCommand)
 	}
 	if calls.sidepanelCommand != "kitmux sidepanel" {
@@ -248,9 +254,9 @@ func TestSidepanelLaunchAgentSkipsSplitWhenNarrow(t *testing.T) {
 
 	calls := stubAgentLaunch(t, 100, nil)
 	m := New(ModeSidepanel)
-	_ = m.launchSidepanelAgent(messages.LaunchSidepanelAgentMsg{AgentID: "aichat", ModeID: "default", Dir: "/tmp/repo"})()
-	if calls.windowCommand != "aichat" {
-		t.Fatalf("expected aichat command, got %q", calls.windowCommand)
+	_ = m.launchSidepanelAgent(messages.LaunchSidepanelAgentMsg{AgentID: "opencode", ModeID: "default", Dir: "/tmp/repo"})()
+	if calls.windowCommand != trackedCommand("opencode", "opencode") {
+		t.Fatalf("expected opencode command, got %q", calls.windowCommand)
 	}
 	if calls.sidepanelCommand != "" {
 		t.Fatalf("expected no sidepanel split, got %q", calls.sidepanelCommand)

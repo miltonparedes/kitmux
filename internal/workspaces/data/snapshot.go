@@ -21,6 +21,7 @@ type Snapshot struct {
 // asynchronously via StatsService.
 func LoadSnapshot(stats *StatsService) (Snapshot, error) {
 	sessions, _ := tmux.ListSessions()
+	sessions = tmux.NormalSessions(sessions)
 	panes, _ := tmux.ListPanes()
 	sessionRoots := ResolveRepoRoots(sessions)
 

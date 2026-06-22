@@ -1,0 +1,303 @@
+package agentresume
+
+import (
+	"bufio"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"regexp"
+	"strconv"
+	"strings"
+	"time"
+)
+
+var ErrUnsupported = errors.New("agent resume unsupported")
+
+type Target struct {
+	AgentID           string
+	PanePID           int
+	ExistingSessionID string
+}
+
+func ResolveSessionID(target Target) (string, error) {
+	if id := strings.TrimSpace(target.ExistingSessionID); id != "" {
+		return CanonicalSessionID(target.AgentID, id, ""), nil
+	}
+	if target.PanePID <= 0 {
+		return "", fmt.Errorf("invalid pane pid %d", target.PanePID)
+	}
+	paths, err := lsofPaths(target.PanePID)
+	if err != nil {
+		return "", err
+	}
+	return sessionIDFromPaths(target.AgentID, paths)
+}
+
+func CanonicalSessionID(agentID, sessionID, sessionPath string) string {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ""
+	}
+	if parentID := ParentSessionID(agentID, sessionID, sessionPath); parentID != "" {
+		return parentID
+	}
+	return sessionID
+}
+
+func IsChildSession(agentID, sessionID, sessionPath string) bool {
+	return ParentSessionID(agentID, sessionID, sessionPath) != ""
+}
+
+func ParentSessionID(agentID, sessionID, sessionPath string) string {
+	if agentID != "droid" {
+		return ""
+	}
+	if parentID := droidParentSessionIDFromPath(sessionPath); parentID != "" {
+		return parentID
+	}
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return ""
+	}
+	return droidParentSessionIDFromHome(sessionID)
+}
+
+func ResumeCommand(agentID, sessionID string) (string, error) {
+	sessionID = strings.TrimSpace(sessionID)
+	if sessionID == "" {
+		return "", errors.New("empty agent session id")
+	}
+	switch agentID {
+	case "droid":
+		return "droid --resume " + shellQuote(sessionID), nil
+	case "codex":
+		return "codex resume " + shellQuote(sessionID), nil
+	case "claude":
+		return "claude --resume " + shellQuote(sessionID), nil
+	case "cursor":
+		return "cursor-agent --resume " + shellQuote(sessionID), nil
+	case "opencode":
+		return "opencode --session " + shellQuote(sessionID), nil
+	default:
+		return "", fmt.Errorf("%w: %s", ErrUnsupported, agentID)
+	}
+}
+
+func lsofPaths(pid int) ([]string, error) {
+	out, err := exec.Command("lsof", "-Fn", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		return nil, fmt.Errorf("list agent files: %w", err)
+	}
+	var paths []string
+	for _, line := range strings.Split(string(out), "\n") {
+		if !strings.HasPrefix(line, "n") {
+			continue
+		}
+		path := strings.TrimPrefix(line, "n")
+		if path != "" {
+			paths = append(paths, path)
+		}
+	}
+	return paths, nil
+}
+
+func sessionIDFromPaths(agentID string, paths []string) (string, error) {
+	switch agentID {
+	case "droid":
+		return bestPathID(paths, isDroidSessionPath, droidSessionIDFromPath)
+	case "codex":
+		return bestPathID(paths, isCodexRolloutPath, codexThreadIDFromPath)
+	case "claude":
+		return bestPathID(paths, isClaudeSessionPath, sessionIDFromPath)
+	case "cursor":
+		return bestPathID(paths, isCursorTranscriptPath, sessionIDFromPath)
+	case "opencode":
+		return bestPathID(paths, isOpenCodeSessionPath, openCodeSessionIDFromPath)
+	default:
+		return "", fmt.Errorf("%w: %s", ErrUnsupported, agentID)
+	}
+}
+
+type (
+	pathPredicate func(string) bool
+	pathIDFunc    func(string) string
+)
+
+func bestPathID(paths []string, match pathPredicate, extract pathIDFunc) (string, error) {
+	var bestPath string
+	var bestMod time.Time
+	for _, path := range paths {
+		if !match(path) {
+			continue
+		}
+		info, err := os.Stat(path)
+		if err != nil {
+			continue
+		}
+		if bestPath == "" || info.ModTime().After(bestMod) {
+			bestPath = path
+			bestMod = info.ModTime()
+		}
+	}
+	if bestPath == "" {
+		return "", errors.New("agent session file not found for process")
+	}
+	id := extract(bestPath)
+	if id == "" {
+		return "", fmt.Errorf("agent session id not found in path: %s", bestPath)
+	}
+	return id, nil
+}
+
+func isDroidSessionPath(path string) bool {
+	base := filepath.Base(path)
+	factoryDir := string(filepath.Separator) + ".factory" + string(filepath.Separator)
+	return (strings.Contains(path, factoryDir+"sessions"+string(filepath.Separator)) ||
+		strings.Contains(path, factoryDir+"projects"+string(filepath.Separator))) &&
+		(strings.HasSuffix(base, ".jsonl") || strings.HasSuffix(base, ".settings.json"))
+}
+
+func isCodexRolloutPath(path string) bool {
+	base := filepath.Base(path)
+	return strings.HasPrefix(base, "rollout-") && strings.HasSuffix(base, ".jsonl") &&
+		strings.Contains(path, string(filepath.Separator)+".codex"+string(filepath.Separator)+"sessions"+string(filepath.Separator))
+}
+
+func isClaudeSessionPath(path string) bool {
+	base := filepath.Base(path)
+	return strings.HasSuffix(base, ".jsonl") &&
+		strings.Contains(path, string(filepath.Separator)+".claude"+string(filepath.Separator)+"projects"+string(filepath.Separator))
+}
+
+func isCursorTranscriptPath(path string) bool {
+	base := filepath.Base(path)
+	return strings.HasSuffix(base, ".jsonl") &&
+		strings.Contains(path, string(filepath.Separator)+".cursor"+string(filepath.Separator)) &&
+		strings.Contains(path, string(filepath.Separator)+"agent-transcripts"+string(filepath.Separator))
+}
+
+func isOpenCodeSessionPath(path string) bool {
+	base := filepath.Base(path)
+	sessionDir := strings.Join([]string{
+		".local",
+		"share",
+		"opencode",
+		"storage",
+		"session",
+	}, string(filepath.Separator))
+	return strings.HasPrefix(base, "ses_") && strings.HasSuffix(base, ".json") &&
+		strings.Contains(path, string(filepath.Separator)+sessionDir+string(filepath.Separator))
+}
+
+var (
+	uuidPattern = regexp.MustCompile(
+		`[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}`,
+	)
+	opencodeSessionPattern = regexp.MustCompile(`ses_[A-Za-z0-9]+`)
+	opaqueSessionPattern   = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{0,255}$`)
+)
+
+func droidSessionIDFromPath(path string) string {
+	if id := sessionIDFromPath(path); id != "" {
+		return id
+	}
+	base := filepath.Base(path)
+	for _, suffix := range []string{".settings.json", ".jsonl"} {
+		if !strings.HasSuffix(base, suffix) {
+			continue
+		}
+		candidate := strings.TrimSuffix(base, suffix)
+		if opaqueSessionPattern.MatchString(candidate) {
+			return candidate
+		}
+	}
+	return ""
+}
+
+type droidSessionHeader struct {
+	CallingSessionID      string `json:"callingSessionId"`
+	CallingSessionIDSnake string `json:"calling_session_id"`
+}
+
+func droidParentSessionIDFromPath(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	// #nosec G304 -- Droid session paths are read-only metadata from hooks or Factory session discovery.
+	file, err := os.Open(path)
+	if err != nil {
+		return ""
+	}
+	defer func() { _ = file.Close() }()
+
+	scanner := bufio.NewScanner(file)
+	scanner.Buffer(make([]byte, 0, 4096), 1024*1024)
+	if !scanner.Scan() {
+		return ""
+	}
+	var header droidSessionHeader
+	if err := json.Unmarshal(scanner.Bytes(), &header); err != nil {
+		return ""
+	}
+	return strings.TrimSpace(firstNonEmpty(header.CallingSessionID, header.CallingSessionIDSnake))
+}
+
+func droidParentSessionIDFromHome(sessionID string) string {
+	home, err := os.UserHomeDir()
+	if err != nil || home == "" {
+		return ""
+	}
+	for _, pattern := range []string{
+		filepath.Join(home, ".factory", "sessions", "*", sessionID+".jsonl"),
+		filepath.Join(home, ".factory", "sessions", "*", sessionID+".settings.json"),
+		filepath.Join(home, ".factory", "projects", "*", sessionID+".jsonl"),
+		filepath.Join(home, ".factory", "projects", "*", sessionID+".settings.json"),
+	} {
+		matches, err := filepath.Glob(pattern)
+		if err != nil {
+			continue
+		}
+		for _, path := range matches {
+			if parentID := droidParentSessionIDFromPath(path); parentID != "" {
+				return parentID
+			}
+		}
+	}
+	return ""
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func sessionIDFromPath(path string) string {
+	return uuidPattern.FindString(filepath.Base(path))
+}
+
+func codexThreadIDFromPath(path string) string {
+	matches := uuidPattern.FindAllString(filepath.Base(path), -1)
+	if len(matches) == 0 {
+		return ""
+	}
+	return matches[len(matches)-1]
+}
+
+func openCodeSessionIDFromPath(path string) string {
+	return opencodeSessionPattern.FindString(filepath.Base(path))
+}
+
+func shellQuote(value string) string {
+	if value == "" {
+		return "''"
+	}
+	return "'" + strings.ReplaceAll(value, "'", `'"'"'`) + "'"
+}

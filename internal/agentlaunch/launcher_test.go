@@ -3,6 +3,7 @@ package agentlaunch
 import (
 	"testing"
 
+	"github.com/miltonparedes/kitmux/internal/agentenv"
 	"github.com/miltonparedes/kitmux/internal/agents"
 )
 
@@ -18,7 +19,7 @@ func TestLaunchInSessionFreshSessionOpensSidepanel(t *testing.T) {
 	if calls.renamedTarget != "kitmux-main:0" {
 		t.Fatalf("expected window 0 rename, got %q", calls.renamedTarget)
 	}
-	if calls.sentTarget != "kitmux-main:0" || calls.sentKeys != "droid" {
+	if calls.sentTarget != "kitmux-main:0" || calls.sentKeys != trackedDroidCommand("kitmux-main") {
 		t.Fatalf("expected droid sent to window 0, got target=%q keys=%q", calls.sentTarget, calls.sentKeys)
 	}
 	if calls.sidepanelTarget != "kitmux-main:0" || calls.sidepanelDir != "/repo" {
@@ -34,7 +35,7 @@ func TestLaunchInSessionWindowOpensSidepanelFromPaneID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}
-	if calls.windowName != "droid" || calls.windowDir != "/repo" || calls.windowCommand != "droid" {
+	if calls.windowName != "droid" || calls.windowDir != "/repo" || calls.windowCommand != trackedDroidCommand("kitmux-main") {
 		t.Fatalf("unexpected window launch: name=%q dir=%q command=%q", calls.windowName, calls.windowDir, calls.windowCommand)
 	}
 	if calls.sidepanelTarget != "%9" {
@@ -50,12 +51,16 @@ func TestLaunchInSessionSplitOpensSidepanelFromPaneID(t *testing.T) {
 	if err != nil {
 		t.Fatalf("launch: %v", err)
 	}
-	if calls.splitTarget != "kitmux-main:" || calls.splitCommand != "droid" {
+	if calls.splitTarget != "kitmux-main:" || calls.splitCommand != trackedDroidCommand("kitmux-main") {
 		t.Fatalf("unexpected split launch: target=%q command=%q", calls.splitTarget, calls.splitCommand)
 	}
 	if calls.sidepanelTarget != "%7" {
 		t.Fatalf("expected sidepanel target %%7, got %q", calls.sidepanelTarget)
 	}
+}
+
+func trackedDroidCommand(sessionName string) string {
+	return agentenv.WrapTmuxCommand("droid", sessionName, "droid", false)
 }
 
 func TestLaunchInSessionHonorsSidepanelOff(t *testing.T) {
@@ -127,5 +132,6 @@ func stubOps(calls *launchCalls) Ops {
 			calls.renamedTarget = target
 			return nil
 		},
+		InstallHooks: func(string) error { return nil },
 	}
 }

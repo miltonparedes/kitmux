@@ -7,6 +7,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"github.com/miltonparedes/kitmux/internal/agentenv"
 	"github.com/miltonparedes/kitmux/internal/agentlaunch"
 	"github.com/miltonparedes/kitmux/internal/agents"
 	"github.com/miltonparedes/kitmux/internal/app/messages"
@@ -19,6 +20,7 @@ import (
 	"github.com/miltonparedes/kitmux/internal/views/palette"
 	"github.com/miltonparedes/kitmux/internal/views/sessions"
 	sidepanelview "github.com/miltonparedes/kitmux/internal/views/sidepanel"
+	threadsview "github.com/miltonparedes/kitmux/internal/views/threads"
 	"github.com/miltonparedes/kitmux/internal/views/windows"
 	workspacesview "github.com/miltonparedes/kitmux/internal/views/workspaces"
 	"github.com/miltonparedes/kitmux/internal/views/worktrees"
@@ -37,6 +39,7 @@ const (
 	ModeRun                    // Execute a palette command directly
 	ModeWorkspaces             // Workspaces dashboard
 	ModeSidepanel              // Agent sidepanel
+	ModeThreads                // Agent threads
 )
 
 type activeView int
@@ -49,6 +52,7 @@ const (
 	viewAgentAB               // A/B launcher form
 	viewWorkspaces            // Workspaces dashboard
 	viewSidepanel             // Agent sidepanel
+	viewThreads               // Agent threads
 )
 
 type Model struct {
@@ -61,6 +65,7 @@ type Model struct {
 	agentABView    agentabview.Model
 	workspacesView workspacesview.Model
 	sidepanelView  sidepanelview.Model
+	threadsView    threadsview.Model
 	palette        palette.Model
 	paletteActive  bool
 	paletteReturn  bool        // return to palette after sub-action completes
@@ -84,6 +89,7 @@ func New(mode Mode, opts ...Option) Model {
 		agentABView:    agentabview.New(),
 		workspacesView: workspacesview.New(),
 		sidepanelView:  sidepanelview.New(),
+		threadsView:    threadsview.New(),
 		palette:        palette.New(),
 	}
 	for _, opt := range opts {
@@ -103,6 +109,8 @@ func New(mode Mode, opts ...Option) Model {
 		m.view = viewWorkspaces
 	case ModeSidepanel:
 		m.view = viewSidepanel
+	case ModeThreads:
+		m.view = viewThreads
 	}
 	return m
 }
@@ -138,6 +146,8 @@ func (m Model) Init() tea.Cmd {
 			return m.workspacesView.Init()
 		case viewSidepanel:
 			return m.sidepanelView.Init()
+		case viewThreads:
+			return m.threadsView.Init()
 		default:
 			return m.sessions.Init()
 		}
@@ -203,11 +213,9 @@ func (m Model) dispatchInput(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 func (m Model) dispatchNavigation(msg tea.Msg) (tea.Model, tea.Cmd, bool) {
 	switch msg := msg.(type) {
 	case messages.SwitchSessionMsg:
-		_ = tmux.SwitchClient(msg.Name)
-		return m, tea.Quit, true
+		return m, openTmuxSessionCmd(msg.Name), true
 	case messages.SwitchWindowMsg:
-		_ = tmux.SwitchClient(msg.Target)
-		return m, tea.Quit, true
+		return m, openTmuxPaneCmd(msg.Target), true
 	case messages.DrillWindowsMsg:
 		m.view = viewWindows
 		return m, m.windows.LoadSession(msg.SessionName), true
@@ -305,6 +313,7 @@ func (m Model) applyWindowSize(msg tea.WindowSizeMsg) Model {
 	m.agentABView.SetSize(m.width, m.height-1)
 	m.workspacesView.SetSize(m.width, m.height-1)
 	m.sidepanelView.SetSize(m.width, m.height-1)
+	m.threadsView.SetSize(m.width, m.height-1)
 	m.palette.SetSize(m.width, m.height)
 	return m
 }
@@ -345,6 +354,9 @@ func (m Model) handleSwitchView(msg messages.SwitchViewMsg) (tea.Model, tea.Cmd,
 	case "sidepanel":
 		m.view = viewSidepanel
 		return m, m.sidepanelView.Init(), true
+	case "threads":
+		m.view = viewThreads
+		return m, m.threadsView.Init(), true
 	}
 	return m, nil, true
 }
@@ -450,6 +462,9 @@ func (m Model) isEditing() bool {
 	if m.view == viewSidepanel && m.sidepanelView.IsEditing() {
 		return true
 	}
+	if m.view == viewThreads && m.threadsView.IsEditing() {
+		return true
+	}
 	return false
 }
 
@@ -499,6 +514,11 @@ func (m Model) handleEscKey(msg tea.KeyMsg, isEditing bool) (Model, tea.Cmd, boo
 		m.sidepanelView, cmd = m.sidepanelView.Update(msg)
 		return m, cmd, true
 	}
+	if m.view == viewThreads && m.threadsView.IsEditing() {
+		var cmd tea.Cmd
+		m.threadsView, cmd = m.threadsView.Update(msg)
+		return m, cmd, true
+	}
 	if m.paletteReturn && !isEditing {
 		return m, m.returnToPalette(), true
 	}
@@ -540,6 +560,8 @@ func (m Model) handleEscByView() (Model, tea.Cmd, bool) {
 		return m, nil, false
 	case viewSidepanel:
 		return m.escWithMode(ModeSidepanel)
+	case viewThreads:
+		return m.escWithMode(ModeThreads)
 	default:
 		if m.sessions.IsEditing() {
 			return m, nil, false
@@ -576,6 +598,8 @@ func (m Model) routeToView(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.workspacesView = model.(workspacesview.Model)
 	case viewSidepanel:
 		m.sidepanelView, cmd = m.sidepanelView.Update(msg)
+	case viewThreads:
+		m.threadsView, cmd = m.threadsView.Update(msg)
 	}
 	return m, cmd
 }
@@ -635,6 +659,8 @@ func (m Model) View() string {
 		return m.workspacesView.View()
 	case viewSidepanel:
 		return m.sidepanelView.View()
+	case viewThreads:
+		return m.threadsView.View()
 	default:
 		return m.sessions.View()
 	}
@@ -720,16 +746,12 @@ func (m Model) execAgentCommand(id string) (tea.Model, tea.Cmd, bool) {
 	switch id {
 	case "launch_droid":
 		return m, launchAgentCmd("droid"), true
-	case "launch_codex_cloud":
-		return m, launchAgentCmd("codex-cloud"), true
 	case "launch_claude":
 		return m, launchAgentCmd("claude"), true
-	case "launch_gemini":
-		return m, launchAgentCmd("gemini"), true
 	case "launch_codex":
 		return m, launchAgentCmd("codex"), true
-	case "launch_aichat":
-		return m, launchAgentCmd("aichat"), true
+	case "launch_cursor":
+		return m, launchAgentCmd("cursor"), true
 	case "launch_opencode":
 		return m, launchAgentCmd("opencode"), true
 	case "agent_ab":
@@ -769,6 +791,9 @@ func (m Model) execViewCommand(id string) (tea.Model, tea.Cmd, bool) {
 	case "view_sidepanel":
 		m.view = viewSidepanel
 		return m, m.sidepanelView.Init(), true
+	case "view_threads":
+		m.view = viewThreads
+		return m, m.threadsView.Init(), true
 	}
 	return m, nil, false
 }
@@ -925,6 +950,16 @@ func (m Model) launchAgentAB(msg messages.LaunchAgentABMsg) (tea.Model, tea.Cmd)
 		_ = tmux.DisplayMessage(fmt.Sprintf("agent_ab claude template error: %v", err))
 		return m, nil
 	}
+	if err := agentlaunch.InstallHooks("codex"); err != nil {
+		_ = tmux.DisplayMessage(fmt.Sprintf("agent_ab codex hooks error: %v", err))
+		return m, nil
+	}
+	if err := agentlaunch.InstallHooks("claude"); err != nil {
+		_ = tmux.DisplayMessage(fmt.Sprintf("agent_ab claude hooks error: %v", err))
+		return m, nil
+	}
+	codexCmd = agentenv.WrapTmuxCommand("codex", "", codexCmd, false)
+	claudeCmd = agentenv.WrapTmuxCommand("claude", "", claudeCmd, false)
 
 	currentPath, err := tmux.CurrentPanePath()
 	if err != nil {

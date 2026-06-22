@@ -114,33 +114,21 @@ func DefaultCommands() []Command {
 			Category:    "Agent",
 		},
 		{
-			ID:          "launch_codex_cloud",
-			Title:       "Launch Codex Cloud",
-			Description: "Browse Codex Cloud tasks in the current pane",
-			Category:    "Agent",
-		},
-		{
 			ID:          "launch_codex",
 			Title:       "Launch Codex CLI",
 			Description: "Start Codex CLI in the current pane",
 			Category:    "Agent",
 		},
 		{
+			ID:          "launch_cursor",
+			Title:       "Launch Cursor CLI",
+			Description: "Start Cursor CLI in the current pane",
+			Category:    "Agent",
+		},
+		{
 			ID:          "launch_claude",
 			Title:       "Launch Claude Code",
 			Description: "Start Claude Code in the current pane",
-			Category:    "Agent",
-		},
-		{
-			ID:          "launch_gemini",
-			Title:       "Launch Gemini CLI",
-			Description: "Start Gemini CLI in the current pane",
-			Category:    "Agent",
-		},
-		{
-			ID:          "launch_aichat",
-			Title:       "Launch AIChat",
-			Description: "Start AIChat in the current pane",
 			Category:    "Agent",
 		},
 		{
@@ -201,6 +189,12 @@ func DefaultCommands() []Command {
 			ID:          "view_sidepanel",
 			Title:       "Sidepanel",
 			Description: "Open the agent sidepanel",
+			Category:    "View",
+		},
+		{
+			ID:          "view_threads",
+			Title:       "Agent Threads",
+			Description: "Open the running agent thread list",
 			Category:    "View",
 		},
 	}
