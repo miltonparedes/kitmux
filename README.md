@@ -40,7 +40,7 @@ Optional tools unlock extra commands:
 - `git` for repo and branch detection
 - `zoxide` for discovering workspace directories
 - `wt` from [worktrunk](https://github.com/max-sixty/worktrunk) for worktree operations
-- `claude`, `codex`, `cursor-agent`, `gemini`, `aichat`, or `opencode` for agent launch commands
+- `claude`, `codex`, `cursor-agent`, or `opencode` for agent launch commands
 - `lazygit` for the lazygit popup
 
 ## Quick Start
