@@ -46,6 +46,7 @@ type Row struct {
 	PanePID        int
 	AgentSessionID string
 	Path           string
+	PanePath       string
 	Project        string
 	Branch         string
 	Attached       bool
@@ -65,6 +66,8 @@ type Model struct {
 	agentIndex   int
 	spinnerFrame int
 	launchDir    string
+	filterDir    string
+	showAll      bool
 }
 
 type loadedMsg struct {
@@ -103,10 +106,12 @@ func New(launchDir ...string) Model {
 	ri := textinput.New()
 	ri.Prompt = "Rename: "
 	ri.CharLimit = 96
+	dir := resolveLaunchDir(launchDir...)
 	return Model{
 		agents:      agents.DefaultAgents(),
 		renameInput: ri,
-		launchDir:   resolveLaunchDir(launchDir...),
+		launchDir:   dir,
+		filterDir:   dir,
 	}
 }
 
@@ -123,12 +128,16 @@ func resolveLaunchDir(values ...string) string {
 }
 
 func (m Model) Init() tea.Cmd {
-	return tea.Batch(syncSupportAndLoadCmd(), tickCmd())
+	return tea.Batch(m.syncSupportAndLoadCmd(), tickCmd())
 }
 
 func (m *Model) SetSize(w, h int) {
 	m.width = w
 	m.height = h
+}
+
+func (m *Model) SetShowAll(showAll bool) {
+	m.showAll = showAll
 }
 
 func (m Model) IsEditing() bool {
@@ -145,7 +154,7 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	case tickMsg:
 		m.spinnerFrame++
 		if m.spinnerFrame%refreshEveryFrames == 0 {
-			return m, tea.Batch(tickCmd(), loadCmd())
+			return m, tea.Batch(tickCmd(), m.loadCmd())
 		}
 		return m, tickCmd()
 	case tea.MouseMsg:
@@ -237,11 +246,11 @@ func (m Model) handleAction(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	case "d", "K":
 		if row := m.selected(); row != nil && row.Kind == RowHeadless {
-			return m, killHeadlessCmd(row.SessionName), true
+			return m, killHeadlessCmd(row.SessionName, m.loadOptions()), true
 		}
 		return m, nil, true
 	case "ctrl+r":
-		return m, loadCmd(), true
+		return m, m.loadCmd(), true
 	case "r":
 		if row := m.selected(); row != nil {
 			m.renaming = true
@@ -252,7 +261,7 @@ func (m Model) handleAction(msg tea.KeyMsg) (Model, tea.Cmd, bool) {
 		return m, nil, true
 	case "R":
 		if row := m.selected(); row != nil && row.Kind == RowHeadless {
-			return m, relaunchHeadlessCmd(*row), true
+			return m, relaunchHeadlessCmd(*row, m.loadOptions()), true
 		}
 		return m, nil, true
 	case "esc", "q":
@@ -270,7 +279,7 @@ func (m Model) handleRenameKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 			return m, nil
 		}
 		title := strings.TrimSpace(m.renameInput.Value())
-		return m, renameRowCmd(*row, title)
+		return m, renameRowCmd(*row, title, m.loadOptions())
 	case "esc":
 		m.renaming = false
 		return m, nil
@@ -291,7 +300,7 @@ func (m Model) handlePickerKey(msg tea.KeyMsg) (Model, tea.Cmd) {
 	case "enter":
 		m.picking = false
 		if m.agentIndex >= 0 && m.agentIndex < len(m.agents) {
-			return m, newHeadlessCmd(m.agents[m.agentIndex], m.launchDir)
+			return m, newHeadlessCmd(m.agents[m.agentIndex], m.launchDir, m.loadOptions())
 		}
 	case "esc":
 		m.picking = false
@@ -373,27 +382,87 @@ func (m Model) cardsPerView() int {
 	return n
 }
 
-func loadCmd() tea.Cmd {
+type loadOptions struct {
+	filterDir string
+	showAll   bool
+}
+
+func (m Model) loadOptions() loadOptions {
+	return loadOptions{filterDir: m.filterDir, showAll: m.showAll}
+}
+
+func (m Model) loadCmd() tea.Cmd {
+	return loadCmd(m.loadOptions())
+}
+
+func loadCmd(opts ...loadOptions) tea.Cmd {
 	return func() tea.Msg {
-		return loadRows()
+		return loadRows(opts...)
 	}
 }
 
-func syncSupportAndLoadCmd() tea.Cmd {
+func (m Model) syncSupportAndLoadCmd() tea.Cmd {
+	return syncSupportAndLoadCmd(m.loadOptions())
+}
+
+func syncSupportAndLoadCmd(opts ...loadOptions) tea.Cmd {
 	return func() tea.Msg {
 		_, _ = agentthread.InstallAllSupport(agentthread.DefaultOps())
-		return loadRows()
+		return loadRows(opts...)
 	}
 }
 
-func loadRows() loadedMsg {
+func loadRows(opts ...loadOptions) loadedMsg {
 	sessions, _ := tmux.ListSessions()
 	panes, _ := tmux.ListPanes()
 	rows := buildRows(sessions, panes)
+	if len(opts) > 0 {
+		rows = filterRows(rows, opts[0])
+	}
 	rows = reconcilePaneTitleRenames(rows)
 	rows = enrichAgentTitles(rows)
 	rows = repairThreadTitlePrefixes(rows)
 	return loadedMsg{rows: enrichGitMeta(rows)}
+}
+
+func filterRows(rows []Row, opts loadOptions) []Row {
+	if opts.showAll || strings.TrimSpace(opts.filterDir) == "" {
+		return rows
+	}
+	dir := canonicalDir(opts.filterDir)
+	if dir == "" {
+		return rows
+	}
+	filtered := make([]Row, 0, len(rows))
+	for _, row := range rows {
+		if rowMatchesDir(row, dir) {
+			filtered = append(filtered, row)
+		}
+	}
+	return filtered
+}
+
+func rowMatchesDir(row Row, dir string) bool {
+	for _, path := range []string{row.Path, row.PanePath} {
+		if canonicalDir(path) == dir {
+			return true
+		}
+	}
+	return false
+}
+
+func canonicalDir(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return ""
+	}
+	if abs, err := filepath.Abs(path); err == nil {
+		path = abs
+	}
+	if resolved, err := filepath.EvalSymlinks(path); err == nil {
+		path = resolved
+	}
+	return filepath.Clean(path)
 }
 
 func reconcilePaneTitleRenames(rows []Row) []Row {
@@ -550,6 +619,7 @@ func buildRows(sessions []tmux.Session, panes []tmux.Pane) []Row {
 			PanePID:        pane.PID,
 			AgentSessionID: canonicalAgentSessionID(session.AgentID, firstNonEmpty(session.AgentSessionID, pane.AgentSessionID)),
 			Path:           path,
+			PanePath:       pane.Path,
 			Attached:       session.Attached,
 			Activity:       session.Activity,
 		})
@@ -581,6 +651,7 @@ func buildRows(sessions []tmux.Session, panes []tmux.Pane) []Row {
 			PanePID:        pane.PID,
 			AgentSessionID: canonicalAgentSessionID(agent.ID, pane.AgentSessionID),
 			Path:           pane.Path,
+			PanePath:       pane.Path,
 		})
 	}
 
@@ -717,17 +788,17 @@ func openRowCmd(row Row) tea.Cmd {
 	}
 }
 
-func killHeadlessCmd(sessionName string) tea.Cmd {
+func killHeadlessCmd(sessionName string, opts loadOptions) tea.Cmd {
 	return func() tea.Msg {
 		_ = tmux.KillSession(sessionName)
-		return loadCmd()()
+		return loadCmd(opts)()
 	}
 }
 
-func relaunchHeadlessCmd(row Row) tea.Cmd {
+func relaunchHeadlessCmd(row Row, opts loadOptions) tea.Cmd {
 	return func() tea.Msg {
 		_ = relaunchHeadless(row)
-		return loadCmd()()
+		return loadCmd(opts)()
 	}
 }
 
@@ -769,10 +840,10 @@ func canonicalAgentSessionID(agentID, sessionID string) string {
 	return agentresume.CanonicalSessionID(agentID, sessionID, "")
 }
 
-func renameRowCmd(row Row, title string) tea.Cmd {
+func renameRowCmd(row Row, title string, opts loadOptions) tea.Cmd {
 	return func() tea.Msg {
 		_ = renameRow(row, title)
-		return loadCmd()()
+		return loadCmd(opts)()
 	}
 }
 
@@ -806,17 +877,17 @@ func rowPaneTarget(row Row) string {
 	return fmt.Sprintf("%s:%d.%d", row.SessionName, row.WindowIndex, row.PaneIndex)
 }
 
-func newHeadlessCmd(agent agents.Agent, launchDir string) tea.Cmd {
+func newHeadlessCmd(agent agents.Agent, launchDir string, opts ...loadOptions) tea.Cmd {
 	return func() tea.Msg {
 		if err := installThreadHooks(agent.ID); err != nil {
 			_ = tmux.DisplayMessage(fmt.Sprintf("create thread: %v", err))
-			return loadRows()
+			return loadRows(opts...)
 		}
 		dir := resolveLaunchDir(launchDir)
 		resolved, err := createThread(agentthread.Spec{AgentID: agent.ID, Dir: dir}, agentthread.DefaultOps())
 		if err != nil {
 			_ = tmux.DisplayMessage(fmt.Sprintf("create thread: %v", err))
-			return loadRows()
+			return loadRows(opts...)
 		}
 		return messages.SwitchSessionMsg{Name: resolved.SessionName}
 	}

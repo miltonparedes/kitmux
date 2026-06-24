@@ -38,6 +38,7 @@ func addViewCommands(parent *cobra.Command) {
 func viewCmd(v viewDef) *cobra.Command {
 	var installHooks bool
 	var installAgentHooks bool
+	var showAllThreads bool
 	command := &cobra.Command{
 		Use:     v.name,
 		Aliases: v.aliases,
@@ -49,10 +50,16 @@ func viewCmd(v viewDef) *cobra.Command {
 			if v.mode == app.ModeThreads && installHooks {
 				return installAgentSupport(cmd, nil)
 			}
-			return runTUI(v.mode)
+			opts := []app.Option{}
+			if v.mode == app.ModeThreads {
+				opts = append(opts, app.WithThreadsAll(showAllThreads))
+			}
+			return runTUI(v.mode, opts...)
 		},
 	}
 	if v.mode == app.ModeThreads {
+		command.Flags().BoolVar(&showAllThreads, "all", false,
+			"show agent threads from all directories")
 		command.Flags().BoolVar(&installHooks, "install-support", false,
 			"install or update official kitmux agent support on existing headless threads")
 		command.Flags().BoolVar(&installHooks, "install-hooks", false,
