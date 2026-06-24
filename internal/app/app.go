@@ -125,6 +125,12 @@ func WithRunCommand(id string) Option {
 	}
 }
 
+func WithThreadsAll(showAll bool) Option {
+	return func(m *Model) {
+		m.threadsView.SetShowAll(showAll)
+	}
+}
+
 func (m Model) Init() tea.Cmd {
 	switch m.mode {
 	case ModeRun:

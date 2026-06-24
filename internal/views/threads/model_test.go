@@ -52,6 +52,107 @@ func TestBuildRowsKeepsHeadlessDetailedAndSkipsDuplicatePane(t *testing.T) {
 	}
 }
 
+func TestFilterRowsKeepsOnlyMatchingDirectory(t *testing.T) {
+	root := t.TempDir()
+	matchDir := filepath.Join(root, "app")
+	otherDir := filepath.Join(root, "other")
+	if err := os.MkdirAll(matchDir, 0o750); err != nil {
+		t.Fatalf("mkdir match dir: %v", err)
+	}
+	if err := os.MkdirAll(otherDir, 0o750); err != nil {
+		t.Fatalf("mkdir other dir: %v", err)
+	}
+	rows := []Row{
+		{Kind: RowHeadless, SessionName: "droid-app", Path: matchDir},
+		{Kind: RowEphemeral, SessionName: "work", PaneID: "%1", Path: matchDir},
+		{Kind: RowHeadless, SessionName: "droid-pane", Path: otherDir, PanePath: matchDir},
+		{Kind: RowHeadless, SessionName: "codex-other", Path: otherDir},
+		{Kind: RowEphemeral, SessionName: "empty"},
+	}
+
+	got := filterRows(rows, loadOptions{filterDir: matchDir})
+
+	if len(got) != 3 {
+		t.Fatalf("len(got) = %d, got = %#v", len(got), got)
+	}
+	if got[0].Kind != RowHeadless || got[0].SessionName != "droid-app" {
+		t.Fatalf("first row = %#v", got[0])
+	}
+	if got[1].Kind != RowEphemeral || got[1].SessionName != "work" {
+		t.Fatalf("second row = %#v", got[1])
+	}
+	if got[2].Kind != RowHeadless || got[2].SessionName != "droid-pane" {
+		t.Fatalf("third row = %#v", got[2])
+	}
+}
+
+func TestFilterRowsShowAllSkipsDirectoryFilter(t *testing.T) {
+	rows := []Row{
+		{Kind: RowHeadless, SessionName: "droid-app", Path: "/repo/app"},
+		{Kind: RowEphemeral, SessionName: "work", Path: "/repo/app"},
+		{Kind: RowHeadless, SessionName: "codex-other", Path: "/repo/other"},
+	}
+
+	got := filterRows(rows, loadOptions{filterDir: "/repo/app", showAll: true})
+
+	if len(got) != len(rows) {
+		t.Fatalf("len(got) = %d, want %d", len(got), len(rows))
+	}
+	for i := range rows {
+		if got[i].SessionName != rows[i].SessionName {
+			t.Fatalf("row %d = %q, want %q", i, got[i].SessionName, rows[i].SessionName)
+		}
+	}
+}
+
+func TestPrepareRowsReconcilesHiddenRowsBeforeFiltering(t *testing.T) {
+	originalSync := syncThreadTitle
+	originalPrefix := syncThreadPrefix
+	originalRefresh := refreshThreadClient
+	t.Cleanup(func() {
+		syncThreadTitle = originalSync
+		syncThreadPrefix = originalPrefix
+		refreshThreadClient = originalRefresh
+	})
+
+	var synced []string
+	syncThreadTitle = func(sessionName, title string) error {
+		synced = append(synced, sessionName+"="+title)
+		return nil
+	}
+	syncThreadPrefix = func(_, _ string) error { return nil }
+	refreshThreadClient = func(string) error { return nil }
+
+	root := t.TempDir()
+	matchDir := filepath.Join(root, "app")
+	otherDir := filepath.Join(root, "other")
+	if err := os.MkdirAll(matchDir, 0o750); err != nil {
+		t.Fatalf("mkdir match dir: %v", err)
+	}
+	if err := os.MkdirAll(otherDir, 0o750); err != nil {
+		t.Fatalf("mkdir other dir: %v", err)
+	}
+
+	rows := prepareRows(
+		[]tmux.Session{
+			{Name: "droid-app", Path: matchDir, Thread: true, AgentID: "droid", AgentState: "idle"},
+			{Name: "droid-other", Path: otherDir, Thread: true, AgentID: "droid", AgentState: "idle", ThreadTitle: "old title"},
+		},
+		[]tmux.Pane{
+			{SessionName: "droid-app", Path: matchDir, Title: "droid"},
+			{SessionName: "droid-other", Path: otherDir, Title: "new hidden title"},
+		},
+		loadOptions{filterDir: matchDir},
+	)
+
+	if len(rows) != 1 || rows[0].SessionName != "droid-app" {
+		t.Fatalf("filtered rows = %#v", rows)
+	}
+	if len(synced) != 1 || synced[0] != "droid-other=new hidden title" {
+		t.Fatalf("synced titles = %#v", synced)
+	}
+}
+
 func TestRowAgentMetadataUsesNewestExplicitState(t *testing.T) {
 	now := time.Now().UnixMilli()
 	state, event, _, updated := rowAgentMetadata(
