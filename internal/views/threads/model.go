@@ -415,14 +415,19 @@ func syncSupportAndLoadCmd(opts ...loadOptions) tea.Cmd {
 func loadRows(opts ...loadOptions) loadedMsg {
 	sessions, _ := tmux.ListSessions()
 	panes, _ := tmux.ListPanes()
+	return loadedMsg{rows: prepareRows(sessions, panes, opts...)}
+}
+
+func prepareRows(sessions []tmux.Session, panes []tmux.Pane, opts ...loadOptions) []Row {
 	rows := buildRows(sessions, panes)
-	if len(opts) > 0 {
-		rows = filterRows(rows, opts[0])
-	}
 	rows = reconcilePaneTitleRenames(rows)
 	rows = enrichAgentTitles(rows)
 	rows = repairThreadTitlePrefixes(rows)
-	return loadedMsg{rows: enrichGitMeta(rows)}
+	rows = enrichGitMeta(rows)
+	if len(opts) > 0 {
+		rows = filterRows(rows, opts[0])
+	}
+	return rows
 }
 
 func filterRows(rows []Row, opts loadOptions) []Row {
