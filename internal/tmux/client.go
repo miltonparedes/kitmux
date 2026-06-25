@@ -25,6 +25,7 @@ func ListSessions() ([]Session, error) {
 		"#{@kitmux_agent_session_id}",
 		"#{@kitmux_agent_title_prefix}",
 		"#{@kitmux_agent_title_display}",
+		"#{@kitmux_initial_title}",
 	}, "\t")
 	out, err := exec.Command("tmux", "list-sessions", "-F",
 		format).Output()
@@ -44,7 +45,7 @@ func parseSessionsOutput(output string) []Session {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 15)
+		parts := strings.SplitN(line, "\t", 16)
 		if len(parts) < 3 {
 			continue
 		}
@@ -73,6 +74,7 @@ func parseSessionsOutput(output string) []Session {
 			AgentSessionID:    sessionAgentSessionID(parts),
 			AgentTitlePrefix:  sessionAgentTitlePrefix(parts),
 			AgentTitleDisplay: sessionAgentTitleDisplay(parts),
+			InitialTitle:      sessionInitialTitle(parts),
 		})
 	}
 	return sessions
@@ -140,6 +142,13 @@ func sessionAgentTitleDisplay(parts []string) string {
 		return ""
 	}
 	return parts[14]
+}
+
+func sessionInitialTitle(parts []string) string {
+	if len(parts) < 16 {
+		return ""
+	}
+	return parts[15]
 }
 
 func NormalSessions(sessions []Session) []Session {

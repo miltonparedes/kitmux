@@ -37,6 +37,7 @@ type Row struct {
 	AgentUpdated      int64
 	AgentTitlePrefix  string
 	AgentTitleDisplay string
+	InitialTitle      string
 	Title             string
 	TitleOverride     bool
 	ThreadTitle       string
@@ -503,7 +504,8 @@ func reconcilePaneTitleRenames(rows []Row) []Row {
 
 func livePaneThreadTitle(row Row) string {
 	title := strings.TrimSpace(stripLeadingStatusGlyph(row.PaneTitle))
-	if title == "" || isDefaultPaneTitle(row, title) || isTransientAgentTitle(title) {
+	if title == "" || isDefaultPaneTitle(row, title) || isAutomaticAgentTitle(row, title) ||
+		isTransientAgentTitle(title) {
 		return ""
 	}
 	return title
@@ -523,6 +525,11 @@ func isDefaultPaneTitle(row Row, title string) bool {
 		}
 	}
 	return false
+}
+
+func isAutomaticAgentTitle(row Row, title string) bool {
+	display := strings.TrimSpace(stripLeadingStatusGlyph(row.AgentTitleDisplay))
+	return display != "" && strings.EqualFold(display, title)
 }
 
 func isTransientAgentTitle(title string) bool {
@@ -665,7 +672,8 @@ func buildRows(sessions []tmux.Session, panes []tmux.Pane) []Row {
 			AgentUpdated:      agentUpdated,
 			AgentTitlePrefix:  firstNonEmpty(session.AgentTitlePrefix, pane.AgentTitlePrefix),
 			AgentTitleDisplay: firstNonEmpty(session.AgentTitleDisplay, pane.AgentTitleDisplay),
-			Title:             firstNonEmpty(session.ThreadTitle, pane.Title),
+			InitialTitle:      session.InitialTitle,
+			Title:             firstNonEmpty(session.ThreadTitle, session.InitialTitle, pane.Title),
 			TitleOverride:     session.ThreadTitle != "",
 			ThreadTitle:       session.ThreadTitle,
 			PaneTitle:         pane.Title,

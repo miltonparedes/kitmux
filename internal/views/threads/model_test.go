@@ -381,6 +381,54 @@ func TestReconcilePaneTitleRenamesIgnoresWorkerTitle(t *testing.T) {
 	}
 }
 
+func TestReconcilePaneTitleRenamesIgnoresAgentDisplayTitle(t *testing.T) {
+	originalSync := syncThreadTitle
+	t.Cleanup(func() {
+		syncThreadTitle = originalSync
+	})
+	syncThreadTitle = func(_, _ string) error {
+		t.Fatal("syncThreadTitle should not run for agent display title")
+		return nil
+	}
+
+	rows := reconcilePaneTitleRenames([]Row{{
+		Kind:              RowHeadless,
+		AgentID:           "droid",
+		AgentName:         "Droid",
+		Title:             "Droid · kitmux",
+		AgentTitleDisplay: "Authenticate Logfire MCP server",
+		PaneTitle:         "⛬ Authenticate Logfire MCP server",
+		SessionName:       droidKitmuxSession,
+	}})
+
+	if rows[0].Title != "Droid · kitmux" || rows[0].ThreadTitle != "" {
+		t.Fatalf("titles changed = %q/%q", rows[0].Title, rows[0].ThreadTitle)
+	}
+}
+
+func TestBuildRowsFallsBackToInitialTitleBeforePaneTitle(t *testing.T) {
+	rows := buildRows(
+		[]tmux.Session{{
+			Name:         droidKitmuxSession,
+			Path:         "/repo/kitmux",
+			Thread:       true,
+			AgentID:      "droid",
+			InitialTitle: "⛬ Droid · kitmux",
+		}},
+		[]tmux.Pane{{
+			SessionName:       droidKitmuxSession,
+			ID:                "%1",
+			Path:              "/repo/kitmux",
+			Title:             "⛬ Authenticate Logfire MCP server",
+			AgentTitleDisplay: "Authenticate Logfire MCP server",
+		}},
+	)
+
+	if rows[0].Title != "⛬ Droid · kitmux" {
+		t.Fatalf("title = %q", rows[0].Title)
+	}
+}
+
 func TestReconcilePaneTitleRenamesPersistsFirstLiveRename(t *testing.T) {
 	originalSync := syncThreadTitle
 	originalPrefix := syncThreadPrefix

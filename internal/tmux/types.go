@@ -16,6 +16,7 @@ type Session struct {
 	ThreadTitle       string // optional kitmux display title override for agent threads
 	AgentTitlePrefix  string // optional prefix used to compose the thread title
 	AgentTitleDisplay string // optional agent-provided display title
+	InitialTitle      string // title assigned when kitmux created or repaired the thread
 	AgentSessionID    string // optional persisted agent conversation/session id
 }
 

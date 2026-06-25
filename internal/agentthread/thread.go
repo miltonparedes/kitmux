@@ -290,7 +290,8 @@ type sessionOption struct {
 func supportSessionOptions(spec SupportSpec) []sessionOption {
 	return []sessionOption{
 		{"status", "off"},
-		{"set-titles", "off"},
+		{"set-titles", "on"},
+		{"set-titles-string", threadTitleFormat()},
 		{"allow-set-title", "on"},
 		{"monitor-bell", "on"},
 		{"bell-action", "any"},
@@ -394,10 +395,7 @@ func agentSymbol(agentID string) string {
 }
 
 func threadTitleFormat() string {
-	return "#{?#{@kitmux_agent_title_prefix},#{@kitmux_agent_title_prefix}" +
-		"#{?#{@kitmux_thread_title}, #{@kitmux_thread_title}," +
-		"#{?#{@kitmux_agent_title_display}, #{@kitmux_agent_title_display},}}," +
-		"#{?#{@kitmux_thread_title},#{@kitmux_thread_title},#{pane_title}}}"
+	return "#{session_name}"
 }
 
 const supportVersion = "5"

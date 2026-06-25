@@ -29,7 +29,7 @@ func TestThreadSessionsFiltersNormalSessions(t *testing.T) {
 }
 
 func TestParseSessionsOutputReadsThreadTitleAndAgentSessionID(t *testing.T) {
-	output := "codex-kitmux\t1\t1\t/Users/me/kitmux\t1781300000\t1\tcodex\tworking\tturn\tcmd\t1781300000000\tRenamed thread\t22222222-2222-4222-8222-222222222222\t⌾\tRenamed thread\n"
+	output := "codex-kitmux\t1\t1\t/Users/me/kitmux\t1781300000\t1\tcodex\tworking\tturn\tcmd\t1781300000000\tRenamed thread\t22222222-2222-4222-8222-222222222222\t⌾\tRenamed thread\t⌾ Codex CLI · kitmux\n"
 
 	got := parseSessionsOutput(output)
 	if len(got) != 1 {
@@ -47,6 +47,9 @@ func TestParseSessionsOutputReadsThreadTitleAndAgentSessionID(t *testing.T) {
 	}
 	if session.AgentTitlePrefix != "⌾" || session.AgentTitleDisplay != "Renamed thread" {
 		t.Fatalf("title prefix/display = %q/%q", session.AgentTitlePrefix, session.AgentTitleDisplay)
+	}
+	if session.InitialTitle != "⌾ Codex CLI · kitmux" {
+		t.Fatalf("InitialTitle = %q", session.InitialTitle)
 	}
 }
 
