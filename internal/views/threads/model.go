@@ -27,30 +27,32 @@ const (
 )
 
 type Row struct {
-	Kind           RowKind
-	AgentID        string
-	AgentName      string
-	AgentSymbol    string
-	AgentState     string
-	AgentEvent     string
-	AgentDetail    string
-	AgentUpdated   int64
-	Title          string
-	TitleOverride  bool
-	ThreadTitle    string
-	PaneTitle      string
-	SessionName    string
-	WindowIndex    int
-	PaneIndex      int
-	PaneID         string
-	PanePID        int
-	AgentSessionID string
-	Path           string
-	PanePath       string
-	Project        string
-	Branch         string
-	Attached       bool
-	Activity       int64
+	Kind              RowKind
+	AgentID           string
+	AgentName         string
+	AgentSymbol       string
+	AgentState        string
+	AgentEvent        string
+	AgentDetail       string
+	AgentUpdated      int64
+	AgentTitlePrefix  string
+	AgentTitleDisplay string
+	Title             string
+	TitleOverride     bool
+	ThreadTitle       string
+	PaneTitle         string
+	SessionName       string
+	WindowIndex       int
+	PaneIndex         int
+	PaneID            string
+	PanePID           int
+	AgentSessionID    string
+	Path              string
+	PanePath          string
+	Project           string
+	Branch            string
+	Attached          bool
+	Activity          int64
 }
 
 type Model struct {
@@ -483,11 +485,18 @@ func reconcilePaneTitleRenames(rows []Row) []Row {
 		rows[i].Title = title
 		rows[i].ThreadTitle = title
 		rows[i].TitleOverride = true
-		_ = syncThreadTitle(row.SessionName, title)
-		if prefix := staticThreadTitlePrefix(rows[i]); prefix != "" {
-			_ = syncThreadPrefix(row.SessionName, prefix)
+		prefix := staticThreadTitlePrefix(rows[i])
+		_ = syncThreadTitleState(row.SessionName, threadTitleState{
+			title:         title,
+			setTitle:      true,
+			currentTitle:  row.ThreadTitle,
+			prefix:        prefix,
+			setPrefix:     prefix != "",
+			currentPrefix: row.AgentTitlePrefix,
+		})
+		if prefix != "" {
+			rows[i].AgentTitlePrefix = prefix
 		}
-		_ = refreshThreadClient(row.SessionName)
 	}
 	return rows
 }
@@ -542,11 +551,18 @@ func enrichAgentTitles(rows []Row) []Row {
 		rows[i].ThreadTitle = title
 		rows[i].TitleOverride = true
 		if row.SessionName != "" {
-			_ = syncThreadTitle(row.SessionName, title)
-			if prefix := staticThreadTitlePrefix(rows[i]); prefix != "" {
-				_ = syncThreadPrefix(row.SessionName, prefix)
+			prefix := staticThreadTitlePrefix(rows[i])
+			_ = syncThreadTitleState(row.SessionName, threadTitleState{
+				title:         title,
+				setTitle:      true,
+				currentTitle:  row.ThreadTitle,
+				prefix:        prefix,
+				setPrefix:     prefix != "",
+				currentPrefix: row.AgentTitlePrefix,
+			})
+			if prefix != "" {
+				rows[i].AgentTitlePrefix = prefix
 			}
-			_ = refreshThreadClient(row.SessionName)
 		}
 	}
 	return rows
@@ -562,10 +578,44 @@ func repairThreadTitlePrefixes(rows []Row) []Row {
 		if prefix == "" {
 			continue
 		}
-		_ = syncThreadPrefix(row.SessionName, prefix)
-		_ = refreshThreadClient(row.SessionName)
+		_ = syncThreadTitleState(row.SessionName, threadTitleState{
+			prefix:        prefix,
+			setPrefix:     true,
+			currentPrefix: row.AgentTitlePrefix,
+		})
+		rows[i].AgentTitlePrefix = prefix
 	}
 	return rows
+}
+
+type threadTitleState struct {
+	title         string
+	setTitle      bool
+	currentTitle  string
+	prefix        string
+	setPrefix     bool
+	currentPrefix string
+}
+
+func syncThreadTitleState(sessionName string, state threadTitleState) error {
+	if sessionName == "" {
+		return nil
+	}
+	changed := false
+	if state.setTitle && state.title != state.currentTitle {
+		if err := syncThreadTitle(sessionName, state.title); err != nil {
+			return err
+		}
+		changed = true
+	}
+	if state.setPrefix && state.prefix != state.currentPrefix {
+		_ = syncThreadPrefix(sessionName, state.prefix)
+		changed = true
+	}
+	if changed {
+		_ = refreshThreadClient(sessionName)
+	}
+	return nil
 }
 
 func staticThreadTitlePrefix(row Row) string {
@@ -605,28 +655,30 @@ func buildRows(sessions []tmux.Session, panes []tmux.Pane) []Row {
 		}
 		threadSet[session.Name] = struct{}{}
 		rows = append(rows, Row{
-			Kind:           RowHeadless,
-			AgentID:        session.AgentID,
-			AgentName:      agentName,
-			AgentSymbol:    agentSymbol,
-			AgentState:     agentState,
-			AgentEvent:     agentEvent,
-			AgentDetail:    agentDetail,
-			AgentUpdated:   agentUpdated,
-			Title:          firstNonEmpty(session.ThreadTitle, pane.Title),
-			TitleOverride:  session.ThreadTitle != "",
-			ThreadTitle:    session.ThreadTitle,
-			PaneTitle:      pane.Title,
-			SessionName:    session.Name,
-			WindowIndex:    pane.WindowIndex,
-			PaneIndex:      pane.PaneIndex,
-			PaneID:         pane.ID,
-			PanePID:        pane.PID,
-			AgentSessionID: canonicalAgentSessionID(session.AgentID, firstNonEmpty(session.AgentSessionID, pane.AgentSessionID)),
-			Path:           path,
-			PanePath:       pane.Path,
-			Attached:       session.Attached,
-			Activity:       session.Activity,
+			Kind:              RowHeadless,
+			AgentID:           session.AgentID,
+			AgentName:         agentName,
+			AgentSymbol:       agentSymbol,
+			AgentState:        agentState,
+			AgentEvent:        agentEvent,
+			AgentDetail:       agentDetail,
+			AgentUpdated:      agentUpdated,
+			AgentTitlePrefix:  firstNonEmpty(session.AgentTitlePrefix, pane.AgentTitlePrefix),
+			AgentTitleDisplay: firstNonEmpty(session.AgentTitleDisplay, pane.AgentTitleDisplay),
+			Title:             firstNonEmpty(session.ThreadTitle, pane.Title),
+			TitleOverride:     session.ThreadTitle != "",
+			ThreadTitle:       session.ThreadTitle,
+			PaneTitle:         pane.Title,
+			SessionName:       session.Name,
+			WindowIndex:       pane.WindowIndex,
+			PaneIndex:         pane.PaneIndex,
+			PaneID:            pane.ID,
+			PanePID:           pane.PID,
+			AgentSessionID:    canonicalAgentSessionID(session.AgentID, firstNonEmpty(session.AgentSessionID, pane.AgentSessionID)),
+			Path:              path,
+			PanePath:          pane.Path,
+			Attached:          session.Attached,
+			Activity:          session.Activity,
 		})
 	}
 
@@ -640,23 +692,25 @@ func buildRows(sessions []tmux.Session, panes []tmux.Pane) []Row {
 			continue
 		}
 		rows = append(rows, Row{
-			Kind:           RowEphemeral,
-			AgentID:        agent.ID,
-			AgentName:      agent.Name,
-			AgentSymbol:    agent.Symbol,
-			AgentState:     normalizeAgentState(pane.AgentState, pane.AgentUpdated),
-			AgentEvent:     pane.AgentEvent,
-			AgentDetail:    pane.AgentDetail,
-			AgentUpdated:   pane.AgentUpdated,
-			Title:          pane.Title,
-			SessionName:    pane.SessionName,
-			WindowIndex:    pane.WindowIndex,
-			PaneIndex:      pane.PaneIndex,
-			PaneID:         pane.ID,
-			PanePID:        pane.PID,
-			AgentSessionID: canonicalAgentSessionID(agent.ID, pane.AgentSessionID),
-			Path:           pane.Path,
-			PanePath:       pane.Path,
+			Kind:              RowEphemeral,
+			AgentID:           agent.ID,
+			AgentName:         agent.Name,
+			AgentSymbol:       agent.Symbol,
+			AgentState:        normalizeAgentState(pane.AgentState, pane.AgentUpdated),
+			AgentEvent:        pane.AgentEvent,
+			AgentDetail:       pane.AgentDetail,
+			AgentUpdated:      pane.AgentUpdated,
+			AgentTitlePrefix:  pane.AgentTitlePrefix,
+			AgentTitleDisplay: pane.AgentTitleDisplay,
+			Title:             pane.Title,
+			SessionName:       pane.SessionName,
+			WindowIndex:       pane.WindowIndex,
+			PaneIndex:         pane.PaneIndex,
+			PaneID:            pane.ID,
+			PanePID:           pane.PID,
+			AgentSessionID:    canonicalAgentSessionID(agent.ID, pane.AgentSessionID),
+			Path:              pane.Path,
+			PanePath:          pane.Path,
 		})
 	}
 
@@ -855,16 +909,20 @@ func renameRowCmd(row Row, title string, opts loadOptions) tea.Cmd {
 func renameRow(row Row, title string) error {
 	switch row.Kind {
 	case RowHeadless:
-		if err := syncThreadTitle(row.SessionName, title); err != nil {
+		prefix := staticThreadTitlePrefix(row)
+		if err := syncThreadTitleState(row.SessionName, threadTitleState{
+			title:         title,
+			setTitle:      true,
+			currentTitle:  row.ThreadTitle,
+			prefix:        prefix,
+			setPrefix:     prefix != "",
+			currentPrefix: row.AgentTitlePrefix,
+		}); err != nil {
 			return err
 		}
 		if title != "" {
 			_ = syncPaneTitle(rowPaneTarget(row), title)
 		}
-		if prefix := staticThreadTitlePrefix(row); prefix != "" {
-			_ = syncThreadPrefix(row.SessionName, prefix)
-		}
-		_ = refreshThreadClient(row.SessionName)
 		_ = agentrename.Rename(agentrename.Target{
 			AgentID: row.AgentID,
 			PanePID: row.PanePID,

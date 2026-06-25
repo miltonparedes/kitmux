@@ -60,11 +60,13 @@ func TestEnsureCreatesMissingThread(t *testing.T) {
 	wantPrefix := []string{
 		"new:droid-app:/tmp/app:" + threadCommand("droid", "droid-app", "droid"),
 		"session:status=off",
-		"session:set-titles=on",
-		"session:set-titles-string=" + threadTitleFormat(),
+		"session:set-titles=off",
 	}
 	if !reflect.DeepEqual(calls[:len(wantPrefix)], wantPrefix) {
 		t.Fatalf("calls prefix = %#v", calls[:len(wantPrefix)])
+	}
+	if contains(calls, "session:set-titles-string="+threadTitleFormat()) {
+		t.Fatalf("set-titles-string should not be installed: %#v", calls)
 	}
 	if !contains(calls, "session:@kitmux_agent_support="+supportVersion) {
 		t.Fatalf("missing support version option: %#v", calls)

@@ -122,6 +122,7 @@ func RunStateEvent(event StateEvent, out io.Writer, ops StateOps) error {
 }
 
 func RunAgentEvent(event AgentEvent, in io.Reader, out io.Writer, ops StateOps) error {
+	canCompareSessionOptions := ops.ShowSessionOption != nil
 	ops = ops.withDefaults()
 
 	var input hookInput
@@ -155,8 +156,17 @@ func RunAgentEvent(event AgentEvent, in io.Reader, out io.Writer, ops StateOps) 
 
 	setPaneOptions(ops, ctx.PaneID, state, eventName, detail, updated, prefix, displayTitle, sessionID)
 	if shouldSyncSession(ctx) {
-		setSessionOptions(ops, ctx.SessionName, state, eventName, detail, updated, prefix, displayTitle, sessionID)
-		ops.RefreshSessionClients(ctx.SessionName)
+		syncSessionState(ops, sessionStateUpdate{
+			sessionName:     ctx.SessionName,
+			state:           state,
+			eventName:       eventName,
+			detail:          detail,
+			updated:         updated,
+			prefix:          prefix,
+			displayTitle:    displayTitle,
+			sessionID:       sessionID,
+			compareExisting: canCompareSessionOptions,
+		})
 		if state == stateWorking && prefix != "" {
 			_ = ops.StartSpinner(SpinnerTarget{
 				PaneID:      ctx.PaneID,
@@ -288,25 +298,60 @@ func setPaneOptions(ops StateOps, paneID, state, eventName, detail, updated, pre
 	}
 }
 
-func setSessionOptions(ops StateOps, sessionName, state, eventName, detail, updated, prefix, displayTitle, sessionID string) {
-	if sessionName == "" {
-		return
+type sessionStateUpdate struct {
+	sessionName     string
+	state           string
+	eventName       string
+	detail          string
+	updated         string
+	prefix          string
+	displayTitle    string
+	sessionID       string
+	compareExisting bool
+}
+
+func syncSessionState(ops StateOps, update sessionStateUpdate) {
+	if setSessionOptions(ops, update) {
+		ops.RefreshSessionClients(update.sessionName)
+	}
+}
+
+func setSessionOptions(ops StateOps, update sessionStateUpdate) bool {
+	if update.sessionName == "" {
+		return false
+	}
+	titleChanged := true
+	if update.compareExisting {
+		titleChanged = sessionOptionWillChange(ops, update.sessionName, agentTitlePrefixOption, update.prefix) ||
+			sessionOptionWillChange(ops, update.sessionName, agentTitleDisplayOption, update.displayTitle)
 	}
 	set := ops.SetCurrentSessionOption
-	if sessionName != "" && ops.SetSessionOption != nil {
+	if update.sessionName != "" && ops.SetSessionOption != nil {
 		set = func(option, value string) error {
-			return ops.SetSessionOption(sessionName, option, value)
+			return ops.SetSessionOption(update.sessionName, option, value)
 		}
 	}
-	_ = set(agentStateOption, state)
-	_ = set(agentEventOption, eventName)
-	_ = set(agentDetailOption, detail)
-	_ = set(agentUpdatedOption, updated)
-	_ = set(agentTitlePrefixOption, prefix)
-	_ = set(agentTitleDisplayOption, displayTitle)
-	if sessionID != "" {
-		_ = set(agentSessionIDOption, sessionID)
+	_ = set(agentStateOption, update.state)
+	_ = set(agentEventOption, update.eventName)
+	_ = set(agentDetailOption, update.detail)
+	_ = set(agentUpdatedOption, update.updated)
+	_ = set(agentTitlePrefixOption, update.prefix)
+	_ = set(agentTitleDisplayOption, update.displayTitle)
+	if update.sessionID != "" {
+		_ = set(agentSessionIDOption, update.sessionID)
 	}
+	return titleChanged
+}
+
+func sessionOptionWillChange(ops StateOps, sessionName, option, value string) bool {
+	if ops.ShowSessionOption == nil {
+		return true
+	}
+	current, err := ops.ShowSessionOption(sessionName, option)
+	if err != nil {
+		return true
+	}
+	return current != value
 }
 
 func readHookInputRaw(in io.Reader) (hookInput, []byte) {

@@ -13,6 +13,8 @@ import (
 	"github.com/miltonparedes/kitmux/internal/agenttrack"
 )
 
+const testHookTitle = "hooks"
+
 func TestRunStateEventUpdatesPaneForAnyTmuxPane(t *testing.T) {
 	t.Setenv("KITMUX_TMUX_PANE", "%1")
 	paneOptions := make(map[string]string)
@@ -95,6 +97,79 @@ func TestRunStateEventSyncsSessionForThread(t *testing.T) {
 	}
 	if spinner.PaneID != "%2" || spinner.SessionName != "droid-app" || spinner.Token != "5678" {
 		t.Fatalf("spinner = %#v", spinner)
+	}
+}
+
+func TestRunAgentEventSkipsRefreshWhenSessionTitleStateIsUnchanged(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_ID", "droid")
+	t.Setenv("KITMUX_TMUX_SESSION", "droid-app")
+	t.Setenv("KITMUX_TMUX_PANE", "%2")
+	t.Setenv("KITMUX_TMUX_THREAD", "1")
+	var refreshes int
+	err := RunAgentEvent(AgentEvent{Agent: "droid", Event: "stop", State: stateIdle}, nil, nil, StateOps{
+		CurrentPaneTitle: func() (string, error) {
+			return testHookTitle, nil
+		},
+		SetPaneOption:    func(_, _, _ string) error { return nil },
+		SetSessionOption: func(_, _, _ string) error { return nil },
+		ShowSessionOption: func(_, option string) (string, error) {
+			switch option {
+			case agentTitlePrefixOption:
+				return "⛬", nil
+			case agentTitleDisplayOption:
+				return testHookTitle, nil
+			default:
+				return "", nil
+			}
+		},
+		EmitBell: func(_ io.Writer) error { return nil },
+		StartSpinner: func(SpinnerTarget) error {
+			t.Fatal("spinner should not start for idle state")
+			return nil
+		},
+		RefreshSessionClients: func(string) { refreshes++ },
+		Now:                   func() time.Time { return time.UnixMilli(5678) },
+	})
+	if err != nil {
+		t.Fatalf("RunAgentEvent() error = %v", err)
+	}
+	if refreshes != 0 {
+		t.Fatalf("refreshes = %d, want 0", refreshes)
+	}
+}
+
+func TestRunAgentEventRefreshesWhenSessionTitleStateChanges(t *testing.T) {
+	t.Setenv("KITMUX_AGENT_ID", "droid")
+	t.Setenv("KITMUX_TMUX_SESSION", "droid-app")
+	t.Setenv("KITMUX_TMUX_PANE", "%2")
+	t.Setenv("KITMUX_TMUX_THREAD", "1")
+	var refreshed string
+	err := RunAgentEvent(AgentEvent{Agent: "droid", Event: "stop", State: stateIdle}, nil, nil, StateOps{
+		CurrentPaneTitle: func() (string, error) {
+			return testHookTitle, nil
+		},
+		SetPaneOption:    func(_, _, _ string) error { return nil },
+		SetSessionOption: func(_, _, _ string) error { return nil },
+		ShowSessionOption: func(_, option string) (string, error) {
+			switch option {
+			case agentTitlePrefixOption:
+				return "", nil
+			case agentTitleDisplayOption:
+				return "old", nil
+			default:
+				return "", nil
+			}
+		},
+		EmitBell:              func(_ io.Writer) error { return nil },
+		StartSpinner:          func(SpinnerTarget) error { return nil },
+		RefreshSessionClients: func(sessionName string) { refreshed = sessionName },
+		Now:                   func() time.Time { return time.UnixMilli(5678) },
+	})
+	if err != nil {
+		t.Fatalf("RunAgentEvent() error = %v", err)
+	}
+	if refreshed != "droid-app" {
+		t.Fatalf("refreshed = %q", refreshed)
 	}
 }
 
@@ -240,7 +315,7 @@ func TestRunAgentEventIgnoresDroidMismatchedNestedSessionID(t *testing.T) {
 	sessionOptions := make(map[string]string)
 	payload := `{"hook_event_name":"SessionStart","session_id":"` + nestedID + `","source":"startup","transcript_path":"` + childPath + `"}`
 	err := RunAgentEvent(AgentEvent{Agent: "droid", StdinJSON: true}, strings.NewReader(payload), nil, StateOps{
-		CurrentPaneTitle: func() (string, error) { return "hooks", nil },
+		CurrentPaneTitle: func() (string, error) { return testHookTitle, nil },
 		SetPaneOption: func(_, option, value string) error {
 			paneOptions[option] = value
 			return nil
@@ -275,7 +350,7 @@ func TestRunAgentEventAcceptsDroidMainSessionRestartOnStartup(t *testing.T) {
 	sessionOptions := make(map[string]string)
 	payload := `{"hook_event_name":"SessionStart","session_id":"` + newMainID + `","source":"startup"}`
 	err := RunAgentEvent(AgentEvent{Agent: "droid", StdinJSON: true}, strings.NewReader(payload), nil, StateOps{
-		CurrentPaneTitle: func() (string, error) { return "hooks", nil },
+		CurrentPaneTitle: func() (string, error) { return testHookTitle, nil },
 		SetPaneOption:    func(_, _, _ string) error { return nil },
 		SetSessionOption: func(_, option, value string) error {
 			sessionOptions[option] = value
@@ -306,7 +381,7 @@ func TestRunAgentEventAcceptsDroidSessionIDWhenThreadHasNoSessionID(t *testing.T
 	sessionID := "11111111-1111-4111-8111-111111111111"
 	payload := `{"hook_event_name":"SessionStart","session_id":"` + sessionID + `","source":"startup"}`
 	err := RunAgentEvent(AgentEvent{Agent: "droid", StdinJSON: true}, strings.NewReader(payload), nil, StateOps{
-		CurrentPaneTitle: func() (string, error) { return "hooks", nil },
+		CurrentPaneTitle: func() (string, error) { return testHookTitle, nil },
 		SetPaneOption:    func(_, _, _ string) error { return nil },
 		SetSessionOption: func(_, option, value string) error {
 			sessionOptions[option] = value
@@ -430,7 +505,7 @@ func TestRunAgentEventIgnoresDifferentTrackedAgent(t *testing.T) {
 	paneOptions := make(map[string]string)
 	sessionOptions := make(map[string]string)
 	err := RunAgentEvent(AgentEvent{Agent: "cursor", Event: "pre-tool-use"}, nil, nil, StateOps{
-		CurrentPaneTitle: func() (string, error) { return "hooks", nil },
+		CurrentPaneTitle: func() (string, error) { return testHookTitle, nil },
 		SetPaneOption: func(_, option, value string) error {
 			paneOptions[option] = value
 			return nil

@@ -625,6 +625,86 @@ func TestRepairThreadTitlePrefixesKeepsAgentIconForIdleRenamedThreads(t *testing
 	}
 }
 
+func TestSyncThreadTitleStateSkipsUnchangedValues(t *testing.T) {
+	originalSync := syncThreadTitle
+	originalPrefix := syncThreadPrefix
+	originalRefresh := refreshThreadClient
+	t.Cleanup(func() {
+		syncThreadTitle = originalSync
+		syncThreadPrefix = originalPrefix
+		refreshThreadClient = originalRefresh
+	})
+
+	syncThreadTitle = func(_, _ string) error {
+		t.Fatal("syncThreadTitle should not run for unchanged title")
+		return nil
+	}
+	syncThreadPrefix = func(_, _ string) error {
+		t.Fatal("syncThreadPrefix should not run for unchanged prefix")
+		return nil
+	}
+	refreshThreadClient = func(string) error {
+		t.Fatal("refreshThreadClient should not run for unchanged state")
+		return nil
+	}
+
+	err := syncThreadTitleState(droidKitmuxSession, threadTitleState{
+		title:         "hooks",
+		setTitle:      true,
+		currentTitle:  "hooks",
+		prefix:        "⛬",
+		setPrefix:     true,
+		currentPrefix: "⛬",
+	})
+	if err != nil {
+		t.Fatalf("syncThreadTitleState() error = %v", err)
+	}
+}
+
+func TestSyncThreadTitleStateRefreshesOnceForChangedValues(t *testing.T) {
+	originalSync := syncThreadTitle
+	originalPrefix := syncThreadPrefix
+	originalRefresh := refreshThreadClient
+	t.Cleanup(func() {
+		syncThreadTitle = originalSync
+		syncThreadPrefix = originalPrefix
+		refreshThreadClient = originalRefresh
+	})
+
+	var syncedTitle, syncedPrefix string
+	var refreshes int
+	syncThreadTitle = func(_, title string) error {
+		syncedTitle = title
+		return nil
+	}
+	syncThreadPrefix = func(_, prefix string) error {
+		syncedPrefix = prefix
+		return nil
+	}
+	refreshThreadClient = func(string) error {
+		refreshes++
+		return nil
+	}
+
+	err := syncThreadTitleState(droidKitmuxSession, threadTitleState{
+		title:         "new title",
+		setTitle:      true,
+		currentTitle:  "old title",
+		prefix:        "⛬",
+		setPrefix:     true,
+		currentPrefix: "old",
+	})
+	if err != nil {
+		t.Fatalf("syncThreadTitleState() error = %v", err)
+	}
+	if syncedTitle != "new title" || syncedPrefix != "⛬" {
+		t.Fatalf("synced title/prefix = %q/%q", syncedTitle, syncedPrefix)
+	}
+	if refreshes != 1 {
+		t.Fatalf("refreshes = %d, want 1", refreshes)
+	}
+}
+
 func TestRowIconAndTitleComposeStateGlyphWithoutDuplication(t *testing.T) {
 	compose := func(row Row) string {
 		return rowIcon(row, 0) + " " + rowTitle(row)

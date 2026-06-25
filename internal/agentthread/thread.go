@@ -290,8 +290,7 @@ type sessionOption struct {
 func supportSessionOptions(spec SupportSpec) []sessionOption {
 	return []sessionOption{
 		{"status", "off"},
-		{"set-titles", "on"},
-		{"set-titles-string", threadTitleFormat()},
+		{"set-titles", "off"},
 		{"allow-set-title", "on"},
 		{"monitor-bell", "on"},
 		{"bell-action", "any"},
