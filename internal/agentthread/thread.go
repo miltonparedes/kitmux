@@ -395,13 +395,11 @@ func agentSymbol(agentID string) string {
 }
 
 func threadTitleFormat() string {
-	return "#{?#{@kitmux_agent_title_prefix},#{@kitmux_agent_title_prefix}" +
-		"#{?#{@kitmux_thread_title}, #{@kitmux_thread_title}," +
-		"#{?#{@kitmux_agent_title_display}, #{@kitmux_agent_title_display},}}," +
-		"#{?#{@kitmux_thread_title},#{@kitmux_thread_title},#{pane_title}}}"
+	return "#{?#{@kitmux_agent_title_prefix},#{@kitmux_agent_title_prefix} ,}" +
+		"#{?#{@kitmux_thread_title},#{@kitmux_thread_title},#{session_name}}"
 }
 
-const supportVersion = "5"
+const supportVersion = "8"
 
 type threadHook struct {
 	name    string

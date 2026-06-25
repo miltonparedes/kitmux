@@ -23,6 +23,9 @@ func ListSessions() ([]Session, error) {
 		"#{@kitmux_agent_updated}",
 		"#{@kitmux_thread_title}",
 		"#{@kitmux_agent_session_id}",
+		"#{@kitmux_agent_title_prefix}",
+		"#{@kitmux_agent_title_display}",
+		"#{@kitmux_initial_title}",
 	}, "\t")
 	out, err := exec.Command("tmux", "list-sessions", "-F",
 		format).Output()
@@ -42,7 +45,7 @@ func parseSessionsOutput(output string) []Session {
 		if line == "" {
 			continue
 		}
-		parts := strings.SplitN(line, "\t", 13)
+		parts := strings.SplitN(line, "\t", 16)
 		if len(parts) < 3 {
 			continue
 		}
@@ -56,19 +59,22 @@ func parseSessionsOutput(output string) []Session {
 			activity, _ = strconv.ParseInt(parts[4], 10, 64)
 		}
 		sessions = append(sessions, Session{
-			Name:           parts[0],
-			Windows:        wins,
-			Attached:       parts[2] == "1",
-			Path:           path,
-			Activity:       activity,
-			Thread:         len(parts) >= 6 && parts[5] == "1",
-			AgentID:        sessionAgentID(parts),
-			AgentState:     sessionAgentState(parts),
-			AgentEvent:     sessionAgentEvent(parts),
-			AgentDetail:    sessionAgentDetail(parts),
-			AgentUpdated:   sessionAgentUpdated(parts),
-			ThreadTitle:    sessionThreadTitle(parts),
-			AgentSessionID: sessionAgentSessionID(parts),
+			Name:              parts[0],
+			Windows:           wins,
+			Attached:          parts[2] == "1",
+			Path:              path,
+			Activity:          activity,
+			Thread:            len(parts) >= 6 && parts[5] == "1",
+			AgentID:           sessionAgentID(parts),
+			AgentState:        sessionAgentState(parts),
+			AgentEvent:        sessionAgentEvent(parts),
+			AgentDetail:       sessionAgentDetail(parts),
+			AgentUpdated:      sessionAgentUpdated(parts),
+			ThreadTitle:       sessionThreadTitle(parts),
+			AgentSessionID:    sessionAgentSessionID(parts),
+			AgentTitlePrefix:  sessionAgentTitlePrefix(parts),
+			AgentTitleDisplay: sessionAgentTitleDisplay(parts),
+			InitialTitle:      sessionInitialTitle(parts),
 		})
 	}
 	return sessions
@@ -122,6 +128,27 @@ func sessionAgentSessionID(parts []string) string {
 		return ""
 	}
 	return parts[12]
+}
+
+func sessionAgentTitlePrefix(parts []string) string {
+	if len(parts) < 14 {
+		return ""
+	}
+	return parts[13]
+}
+
+func sessionAgentTitleDisplay(parts []string) string {
+	if len(parts) < 15 {
+		return ""
+	}
+	return parts[14]
+}
+
+func sessionInitialTitle(parts []string) string {
+	if len(parts) < 16 {
+		return ""
+	}
+	return parts[15]
 }
 
 func NormalSessions(sessions []Session) []Session {
@@ -531,6 +558,8 @@ func ListPanes() ([]Pane, error) {
 		"#{@kitmux_agent_detail}",
 		"#{@kitmux_agent_updated}",
 		"#{@kitmux_agent_session_id}",
+		"#{@kitmux_agent_title_prefix}",
+		"#{@kitmux_agent_title_display}",
 	}, "\t")
 	out, err := exec.Command("tmux", "list-panes", "-a", "-F", format).Output()
 	if err != nil {
@@ -549,7 +578,7 @@ func parsePaneLine(line string) (Pane, bool) {
 	if line == "" {
 		return Pane{}, false
 	}
-	parts := strings.SplitN(line, "\t", 13)
+	parts := strings.SplitN(line, "\t", 15)
 	if len(parts) < 5 {
 		return Pane{}, false
 	}
@@ -590,6 +619,12 @@ func applyPaneOptionalFields(pane *Pane, parts []string) {
 	}
 	if len(parts) >= 13 {
 		pane.AgentSessionID = parts[12]
+	}
+	if len(parts) >= 14 {
+		pane.AgentTitlePrefix = parts[13]
+	}
+	if len(parts) >= 15 {
+		pane.AgentTitleDisplay = parts[14]
 	}
 }
 

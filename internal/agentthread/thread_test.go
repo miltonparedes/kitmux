@@ -2,6 +2,7 @@ package agentthread
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -77,6 +78,25 @@ func TestEnsureCreatesMissingThread(t *testing.T) {
 	}
 	if !contains(calls, `hook:alert-bell=`+bellHookCommand()) {
 		t.Fatalf("missing alert-bell hook: %#v", calls)
+	}
+}
+
+func TestThreadTitleFormatKeepsSessionNameDynamic(t *testing.T) {
+	got := threadTitleFormat()
+	for _, forbidden := range []string{
+		"#{@kitmux_thread_base_title}",
+		"#{@kitmux_agent_title_display}",
+		"#{pane_title}",
+	} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("threadTitleFormat() should not contain %q: %q", forbidden, got)
+		}
+	}
+	if !strings.Contains(got, "#{session_name}") || !strings.Contains(got, "#{@kitmux_agent_title_prefix}") {
+		t.Fatalf("threadTitleFormat() = %q", got)
+	}
+	if !strings.Contains(got, "#{@kitmux_thread_title}") {
+		t.Fatalf("threadTitleFormat() should include explicit thread titles: %q", got)
 	}
 }
 
