@@ -14,6 +14,15 @@ const (
 )
 
 func WrapTmuxCommand(agentID, sessionName, command string, thread bool) string {
+	if shouldWaitForClient(agentID, thread) {
+		parts := append(
+			trackingAssignments(agentID, sessionName, thread),
+			";", "export", strings.Join(exportKeys(agentID, thread), " "),
+			";", waitForClientCommand(),
+			";", "exec", command,
+		)
+		return strings.Join(parts, " ")
+	}
 	parts := append(trackingAssignments(agentID, sessionName, thread), "exec", command)
 	return strings.Join(parts, " ")
 }
@@ -23,7 +32,11 @@ func WrapRegisteredTmuxCommand(agentID, sessionName, command string, thread bool
 	exports := "export " + strings.Join(exportKeys(agentID, thread), " ")
 	register := shellQuote(kitmuxPath) + ` hook agent-register --pid "$$" --agent "$` + AgentIDKey +
 		`" --session "$` + TmuxSessionKey + `" --pane "$` + TmuxPaneKey + `" --thread "$` + TmuxThreadKey + `"`
-	assignments = append(assignments, ";", exports, ";", register, ">/dev/null", "2>&1", "||", "true", ";", "exec", command)
+	assignments = append(assignments, ";", exports, ";", register, ">/dev/null", "2>&1", "||", "true")
+	if shouldWaitForClient(agentID, thread) {
+		assignments = append(assignments, ";", waitForClientCommand())
+	}
+	assignments = append(assignments, ";", "exec", command)
 	return strings.Join(assignments, " ")
 }
 
@@ -59,8 +72,9 @@ func exportKeys(agentID string, thread bool) []string {
 }
 
 type envDefault struct {
-	key   string
-	value string
+	key              string
+	value            string
+	preserveExisting bool
 }
 
 func colorEnvDefaults(agentID string, thread bool) []envDefault {
@@ -68,15 +82,26 @@ func colorEnvDefaults(agentID string, thread bool) []envDefault {
 		return nil
 	}
 	return []envDefault{
-		{ColorTermKey, "truecolor"},
-		{ForceColorKey, "3"},
-		{CliColorKey, "1"},
-		{CliColorForce, "1"},
+		{key: ColorTermKey, value: "truecolor", preserveExisting: true},
+		{key: ForceColorKey, value: "3"},
+		{key: CliColorKey, value: "1"},
+		{key: CliColorForce, value: "1"},
 	}
 }
 
 func defaultAssignment(item envDefault) string {
+	if !item.preserveExisting {
+		return item.key + "=" + shellQuote(item.value)
+	}
 	return item.key + `="${` + item.key + `:-` + item.value + `}"`
+}
+
+func shouldWaitForClient(agentID string, thread bool) bool {
+	return agentID == "codex" && thread
+}
+
+func waitForClientCommand() string {
+	return `while [ -z "$(tmux list-clients -t "$` + TmuxSessionKey + `" -F '#{client_name}' 2>/dev/null)" ]; do sleep 0.05; done`
 }
 
 func WrapHookCommand(agentID, command string) string {
@@ -110,8 +135,11 @@ func WithTrackingEnv(env []string, agentID, sessionName, paneID string, thread b
 
 func withEnvDefaults(env []string, defaults []envDefault) []string {
 	for _, item := range defaults {
-		if hasEnvKey(env, item.key) {
+		if item.preserveExisting && hasEnvKey(env, item.key) {
 			continue
+		}
+		if !item.preserveExisting {
+			env = withoutKeys(env, item.key)
 		}
 		env = append(env, item.key+"="+item.value)
 	}
