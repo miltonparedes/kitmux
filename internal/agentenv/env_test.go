@@ -34,6 +34,50 @@ func TestWrapRegisteredTmuxCommandRegistersAgentPID(t *testing.T) {
 	}
 }
 
+func TestWrapTmuxCommandDefaultsCodexThreadColorTerm(t *testing.T) {
+	got := WrapTmuxCommand("codex", "codex-app", "codex", true)
+	for _, want := range []string{
+		`COLORTERM="${COLORTERM:-truecolor}"`,
+		`FORCE_COLOR="${FORCE_COLOR:-3}"`,
+		`CLICOLOR="${CLICOLOR:-1}"`,
+		`CLICOLOR_FORCE="${CLICOLOR_FORCE:-1}"`,
+		"KITMUX_AGENT_ID='codex'",
+		"KITMUX_TMUX_THREAD=1",
+		"exec codex",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("WrapTmuxCommand() missing %q in %q", want, got)
+		}
+	}
+}
+
+func TestWrapRegisteredTmuxCommandExportsCodexThreadColorTerm(t *testing.T) {
+	got := WrapRegisteredTmuxCommand("codex", "codex-app", "codex", true, "/tmp/kitmux")
+	for _, want := range []string{
+		`COLORTERM="${COLORTERM:-truecolor}"`,
+		`FORCE_COLOR="${FORCE_COLOR:-3}"`,
+		`CLICOLOR="${CLICOLOR:-1}"`,
+		`CLICOLOR_FORCE="${CLICOLOR_FORCE:-1}"`,
+		"export COLORTERM FORCE_COLOR CLICOLOR CLICOLOR_FORCE KITMUX_AGENT_ID KITMUX_TMUX_SESSION KITMUX_TMUX_PANE KITMUX_TMUX_THREAD",
+		"exec codex",
+	} {
+		if !strings.Contains(got, want) {
+			t.Fatalf("WrapRegisteredTmuxCommand() missing %q in %q", want, got)
+		}
+	}
+}
+
+func TestColorTermDefaultOnlyAppliesToCodexThreads(t *testing.T) {
+	for name, got := range map[string]string{
+		"droid thread":     WrapTmuxCommand("droid", "droid-app", "droid", true),
+		"codex non-thread": WrapTmuxCommand("codex", "codex-app", "codex", false),
+	} {
+		if strings.Contains(got, "COLORTERM") || strings.Contains(got, "FORCE_COLOR") {
+			t.Fatalf("%s should not set color defaults: %q", name, got)
+		}
+	}
+}
+
 func TestWithTrackingEnvReplacesExistingValues(t *testing.T) {
 	got := WithTrackingEnv([]string{
 		"PATH=/bin",
@@ -43,6 +87,24 @@ func TestWithTrackingEnvReplacesExistingValues(t *testing.T) {
 		"KITMUX_TMUX_THREAD=1",
 	}, "codex", "work", "%2", false)
 	want := []string{"PATH=/bin", "KITMUX_AGENT_ID=codex", "KITMUX_TMUX_SESSION=work", "KITMUX_TMUX_PANE=%2"}
+	if strings.Join(got, "|") != strings.Join(want, "|") {
+		t.Fatalf("WithTrackingEnv() = %#v", got)
+	}
+}
+
+func TestWithTrackingEnvDefaultsCodexThreadColors(t *testing.T) {
+	got := WithTrackingEnv([]string{"PATH=/bin", "COLORTERM=24bit"}, "codex", "work", "%2", true)
+	want := []string{
+		"PATH=/bin",
+		"COLORTERM=24bit",
+		"FORCE_COLOR=3",
+		"CLICOLOR=1",
+		"CLICOLOR_FORCE=1",
+		"KITMUX_AGENT_ID=codex",
+		"KITMUX_TMUX_SESSION=work",
+		"KITMUX_TMUX_PANE=%2",
+		"KITMUX_TMUX_THREAD=1",
+	}
 	if strings.Join(got, "|") != strings.Join(want, "|") {
 		t.Fatalf("WithTrackingEnv() = %#v", got)
 	}

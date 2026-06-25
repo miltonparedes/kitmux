@@ -7,6 +7,10 @@ const (
 	TmuxSessionKey = "KITMUX_TMUX_SESSION"
 	TmuxPaneKey    = "KITMUX_TMUX_PANE"
 	TmuxThreadKey  = "KITMUX_TMUX_THREAD"
+	ColorTermKey   = "COLORTERM"
+	ForceColorKey  = "FORCE_COLOR"
+	CliColorKey    = "CLICOLOR"
+	CliColorForce  = "CLICOLOR_FORCE"
 )
 
 func WrapTmuxCommand(agentID, sessionName, command string, thread bool) string {
@@ -16,7 +20,7 @@ func WrapTmuxCommand(agentID, sessionName, command string, thread bool) string {
 
 func WrapRegisteredTmuxCommand(agentID, sessionName, command string, thread bool, kitmuxPath string) string {
 	assignments := trackingAssignments(agentID, sessionName, thread)
-	exports := "export " + AgentIDKey + " " + TmuxSessionKey + " " + TmuxPaneKey + " " + TmuxThreadKey
+	exports := "export " + strings.Join(exportKeys(agentID, thread), " ")
 	register := shellQuote(kitmuxPath) + ` hook agent-register --pid "$$" --agent "$` + AgentIDKey +
 		`" --session "$` + TmuxSessionKey + `" --pane "$` + TmuxPaneKey + `" --thread "$` + TmuxThreadKey + `"`
 	assignments = append(assignments, ";", exports, ";", register, ">/dev/null", "2>&1", "||", "true", ";", "exec", command)
@@ -24,16 +28,55 @@ func WrapRegisteredTmuxCommand(agentID, sessionName, command string, thread bool
 }
 
 func trackingAssignments(agentID, sessionName string, thread bool) []string {
-	parts := []string{
-		AgentIDKey + "=" + shellQuote(agentID),
-		TmuxSessionKey + "=" + shellValueOrTmuxFormat(sessionName, "session_name"),
-		TmuxPaneKey + "=" + tmuxPaneValue(),
-		TmuxThreadKey + "=" + shellQuote(""),
+	defaults := colorEnvDefaults(agentID, thread)
+	parts := make([]string, 0, 4+len(defaults))
+	for _, item := range defaults {
+		parts = append(parts, defaultAssignment(item))
 	}
+	parts = append(parts,
+		AgentIDKey+"="+shellQuote(agentID),
+		TmuxSessionKey+"="+shellValueOrTmuxFormat(sessionName, "session_name"),
+		TmuxPaneKey+"="+tmuxPaneValue(),
+		TmuxThreadKey+"="+shellQuote(""),
+	)
 	if thread {
 		parts[len(parts)-1] = TmuxThreadKey + "=1"
 	}
 	return parts
+}
+
+func exportKeys(agentID string, thread bool) []string {
+	keys := []string{AgentIDKey, TmuxSessionKey, TmuxPaneKey, TmuxThreadKey}
+	defaults := colorEnvDefaults(agentID, thread)
+	if len(defaults) == 0 {
+		return keys
+	}
+	out := make([]string, 0, len(keys)+len(defaults))
+	for _, item := range defaults {
+		out = append(out, item.key)
+	}
+	return append(out, keys...)
+}
+
+type envDefault struct {
+	key   string
+	value string
+}
+
+func colorEnvDefaults(agentID string, thread bool) []envDefault {
+	if agentID != "codex" || !thread {
+		return nil
+	}
+	return []envDefault{
+		{ColorTermKey, "truecolor"},
+		{ForceColorKey, "3"},
+		{CliColorKey, "1"},
+		{CliColorForce, "1"},
+	}
+}
+
+func defaultAssignment(item envDefault) string {
+	return item.key + `="${` + item.key + `:-` + item.value + `}"`
 }
 
 func WrapHookCommand(agentID, command string) string {
@@ -49,6 +92,7 @@ func WrapHookCommand(agentID, command string) string {
 
 func WithTrackingEnv(env []string, agentID, sessionName, paneID string, thread bool) []string {
 	env = withoutKeys(env, AgentIDKey, TmuxSessionKey, TmuxPaneKey, TmuxThreadKey)
+	env = withEnvDefaults(env, colorEnvDefaults(agentID, thread))
 	if agentID != "" {
 		env = append(env, AgentIDKey+"="+agentID)
 	}
@@ -62,6 +106,26 @@ func WithTrackingEnv(env []string, agentID, sessionName, paneID string, thread b
 		env = append(env, TmuxThreadKey+"=1")
 	}
 	return env
+}
+
+func withEnvDefaults(env []string, defaults []envDefault) []string {
+	for _, item := range defaults {
+		if hasEnvKey(env, item.key) {
+			continue
+		}
+		env = append(env, item.key+"="+item.value)
+	}
+	return env
+}
+
+func hasEnvKey(env []string, key string) bool {
+	prefix := key + "="
+	for _, item := range env {
+		if strings.HasPrefix(item, prefix) {
+			return true
+		}
+	}
+	return false
 }
 
 func shellValueOrTmuxFormat(value, format string) string {
