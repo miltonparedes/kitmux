@@ -406,8 +406,7 @@ func threadBaseTitle(spec SupportSpec) string {
 
 func threadTitleFormat() string {
 	return "#{?#{@kitmux_agent_title_prefix},#{@kitmux_agent_title_prefix} ,}" +
-		"#{?#{@kitmux_thread_title},#{@kitmux_thread_title}," +
-		"#{?#{@kitmux_thread_base_title},#{@kitmux_thread_base_title},#{session_name}}}"
+		"#{?#{@kitmux_thread_title},#{@kitmux_thread_title},#{session_name}}"
 }
 
 const supportVersion = "6"

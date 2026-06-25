@@ -2,6 +2,7 @@ package agentthread
 
 import (
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -87,6 +88,18 @@ func TestThreadBaseTitleStripsAgentSymbol(t *testing.T) {
 	got := threadBaseTitle(SupportSpec{AgentID: "droid", InitialTitle: "⛬ Droid · app"})
 	if got != "Droid · app" {
 		t.Fatalf("threadBaseTitle() = %q", got)
+	}
+}
+
+func TestThreadTitleFormatKeepsSessionNameFallbackDynamic(t *testing.T) {
+	got := threadTitleFormat()
+	for _, forbidden := range []string{"#{@kitmux_thread_base_title}", "#{@kitmux_agent_title_display}", "#{pane_title}"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("threadTitleFormat() should not contain %q: %q", forbidden, got)
+		}
+	}
+	if !strings.Contains(got, "#{session_name}") || !strings.Contains(got, "#{@kitmux_agent_title_prefix}") {
+		t.Fatalf("threadTitleFormat() = %q", got)
 	}
 }
 
