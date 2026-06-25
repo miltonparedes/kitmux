@@ -94,6 +94,7 @@ var (
 	syncThreadTitle     = tmux.SetThreadTitle
 	syncThreadPrefix    = tmux.SetThreadTitlePrefix
 	syncPaneTitle       = tmux.SetPaneTitle
+	syncWindowTitle     = tmux.RenameWindow
 	refreshThreadClient = tmux.RefreshClients
 	createThread        = agentthread.Create
 	installThreadHooks  = agentlaunch.InstallHooks
@@ -930,6 +931,9 @@ func renameRow(row Row, title string) error {
 		}
 		if title != "" {
 			_ = syncPaneTitle(rowPaneTarget(row), title)
+			if target := rowWindowTarget(row); target != "" {
+				_ = syncWindowTitle(target, title)
+			}
 		}
 		_ = agentrename.Rename(agentrename.Target{
 			AgentID: row.AgentID,
@@ -946,6 +950,13 @@ func rowPaneTarget(row Row) string {
 		return row.PaneID
 	}
 	return fmt.Sprintf("%s:%d.%d", row.SessionName, row.WindowIndex, row.PaneIndex)
+}
+
+func rowWindowTarget(row Row) string {
+	if row.SessionName == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s:%d", row.SessionName, row.WindowIndex)
 }
 
 func newHeadlessCmd(agent agents.Agent, launchDir string, opts ...loadOptions) tea.Cmd {

@@ -971,15 +971,17 @@ func TestRenameHeadlessSyncsThreadAndPaneTitle(t *testing.T) {
 	originalSyncThread := syncThreadTitle
 	originalSyncPrefix := syncThreadPrefix
 	originalSyncPane := syncPaneTitle
+	originalSyncWindow := syncWindowTitle
 	originalRefresh := refreshThreadClient
 	t.Cleanup(func() {
 		syncThreadTitle = originalSyncThread
 		syncThreadPrefix = originalSyncPrefix
 		syncPaneTitle = originalSyncPane
+		syncWindowTitle = originalSyncWindow
 		refreshThreadClient = originalRefresh
 	})
 
-	var threadTitle, paneTarget, paneTitle, prefix, refreshed string
+	var threadTitle, paneTarget, paneTitle, windowTarget, windowTitle, prefix, refreshed string
 	syncThreadTitle = func(sessionName, title string) error {
 		if sessionName != droidKitmuxSession {
 			t.Fatalf("thread session = %q", sessionName)
@@ -990,6 +992,11 @@ func TestRenameHeadlessSyncsThreadAndPaneTitle(t *testing.T) {
 	syncPaneTitle = func(target, title string) error {
 		paneTarget = target
 		paneTitle = title
+		return nil
+	}
+	syncWindowTitle = func(target, title string) error {
+		windowTarget = target
+		windowTitle = title
 		return nil
 	}
 	syncThreadPrefix = func(_, value string) error {
@@ -1015,6 +1022,9 @@ func TestRenameHeadlessSyncsThreadAndPaneTitle(t *testing.T) {
 	}
 	if threadTitle != "Hello" || paneTarget != "%51" || paneTitle != "Hello" {
 		t.Fatalf("thread/pane titles = %q/%q:%q", threadTitle, paneTarget, paneTitle)
+	}
+	if windowTarget != droidKitmuxSession+":0" || windowTitle != "Hello" {
+		t.Fatalf("window title = %q:%q", windowTarget, windowTitle)
 	}
 	if prefix != "⛬" {
 		t.Fatalf("prefix = %q", prefix)
