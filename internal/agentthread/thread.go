@@ -300,7 +300,6 @@ func supportSessionOptions(spec SupportSpec) []sessionOption {
 		{"@kitmux_agent", spec.AgentID},
 		{"@kitmux_agent_support", supportVersion},
 		{"@kitmux_initial_title", spec.InitialTitle},
-		{"@kitmux_thread_base_title", threadBaseTitle(spec)},
 	}
 }
 
@@ -395,21 +394,12 @@ func agentSymbol(agentID string) string {
 	return ""
 }
 
-func threadBaseTitle(spec SupportSpec) string {
-	title := strings.TrimSpace(spec.InitialTitle)
-	symbol := agentSymbol(spec.AgentID)
-	if symbol == "" {
-		return title
-	}
-	return strings.TrimSpace(strings.TrimPrefix(title, symbol))
-}
-
 func threadTitleFormat() string {
 	return "#{?#{@kitmux_agent_title_prefix},#{@kitmux_agent_title_prefix} ,}" +
-		"#{?#{@kitmux_thread_title},#{@kitmux_thread_title},#{session_name}}"
+		"#{session_name}"
 }
 
-const supportVersion = "6"
+const supportVersion = "7"
 
 type threadHook struct {
 	name    string

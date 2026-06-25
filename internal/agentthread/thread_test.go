@@ -73,9 +73,6 @@ func TestEnsureCreatesMissingThread(t *testing.T) {
 	if !contains(calls, "session:@kitmux_initial_title=⛬ Droid · app") {
 		t.Fatalf("missing initial title option: %#v", calls)
 	}
-	if !contains(calls, "session:@kitmux_thread_base_title=Droid · app") {
-		t.Fatalf("missing base title option: %#v", calls)
-	}
 	if !contains(calls, "session:@kitmux_agent_state=idle") {
 		t.Fatalf("missing initial agent state option: %#v", calls)
 	}
@@ -84,16 +81,14 @@ func TestEnsureCreatesMissingThread(t *testing.T) {
 	}
 }
 
-func TestThreadBaseTitleStripsAgentSymbol(t *testing.T) {
-	got := threadBaseTitle(SupportSpec{AgentID: "droid", InitialTitle: "⛬ Droid · app"})
-	if got != "Droid · app" {
-		t.Fatalf("threadBaseTitle() = %q", got)
-	}
-}
-
-func TestThreadTitleFormatKeepsSessionNameFallbackDynamic(t *testing.T) {
+func TestThreadTitleFormatKeepsSessionNameDynamic(t *testing.T) {
 	got := threadTitleFormat()
-	for _, forbidden := range []string{"#{@kitmux_thread_base_title}", "#{@kitmux_agent_title_display}", "#{pane_title}"} {
+	for _, forbidden := range []string{
+		"#{@kitmux_thread_base_title}",
+		"#{@kitmux_thread_title}",
+		"#{@kitmux_agent_title_display}",
+		"#{pane_title}",
+	} {
 		if strings.Contains(got, forbidden) {
 			t.Fatalf("threadTitleFormat() should not contain %q: %q", forbidden, got)
 		}
