@@ -396,10 +396,10 @@ func agentSymbol(agentID string) string {
 
 func threadTitleFormat() string {
 	return "#{?#{@kitmux_agent_title_prefix},#{@kitmux_agent_title_prefix} ,}" +
-		"#{session_name}"
+		"#{?#{@kitmux_thread_title},#{@kitmux_thread_title},#{session_name}}"
 }
 
-const supportVersion = "7"
+const supportVersion = "8"
 
 type threadHook struct {
 	name    string

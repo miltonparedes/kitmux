@@ -85,7 +85,6 @@ func TestThreadTitleFormatKeepsSessionNameDynamic(t *testing.T) {
 	got := threadTitleFormat()
 	for _, forbidden := range []string{
 		"#{@kitmux_thread_base_title}",
-		"#{@kitmux_thread_title}",
 		"#{@kitmux_agent_title_display}",
 		"#{pane_title}",
 	} {
@@ -95,6 +94,9 @@ func TestThreadTitleFormatKeepsSessionNameDynamic(t *testing.T) {
 	}
 	if !strings.Contains(got, "#{session_name}") || !strings.Contains(got, "#{@kitmux_agent_title_prefix}") {
 		t.Fatalf("threadTitleFormat() = %q", got)
+	}
+	if !strings.Contains(got, "#{@kitmux_thread_title}") {
+		t.Fatalf("threadTitleFormat() should include explicit thread titles: %q", got)
 	}
 }
 
