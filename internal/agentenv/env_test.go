@@ -38,11 +38,13 @@ func TestWrapTmuxCommandDefaultsCodexThreadColorTerm(t *testing.T) {
 	got := WrapTmuxCommand("codex", "codex-app", "codex", true)
 	for _, want := range []string{
 		`COLORTERM="${COLORTERM:-truecolor}"`,
-		`FORCE_COLOR="${FORCE_COLOR:-3}"`,
-		`CLICOLOR="${CLICOLOR:-1}"`,
-		`CLICOLOR_FORCE="${CLICOLOR_FORCE:-1}"`,
+		"FORCE_COLOR='3'",
+		"CLICOLOR='1'",
+		"CLICOLOR_FORCE='1'",
 		"KITMUX_AGENT_ID='codex'",
 		"KITMUX_TMUX_THREAD=1",
+		"export COLORTERM FORCE_COLOR CLICOLOR CLICOLOR_FORCE KITMUX_AGENT_ID KITMUX_TMUX_SESSION KITMUX_TMUX_PANE KITMUX_TMUX_THREAD",
+		`tmux list-clients -t "$KITMUX_TMUX_SESSION"`,
 		"exec codex",
 	} {
 		if !strings.Contains(got, want) {
@@ -55,10 +57,11 @@ func TestWrapRegisteredTmuxCommandExportsCodexThreadColorTerm(t *testing.T) {
 	got := WrapRegisteredTmuxCommand("codex", "codex-app", "codex", true, "/tmp/kitmux")
 	for _, want := range []string{
 		`COLORTERM="${COLORTERM:-truecolor}"`,
-		`FORCE_COLOR="${FORCE_COLOR:-3}"`,
-		`CLICOLOR="${CLICOLOR:-1}"`,
-		`CLICOLOR_FORCE="${CLICOLOR_FORCE:-1}"`,
+		"FORCE_COLOR='3'",
+		"CLICOLOR='1'",
+		"CLICOLOR_FORCE='1'",
 		"export COLORTERM FORCE_COLOR CLICOLOR CLICOLOR_FORCE KITMUX_AGENT_ID KITMUX_TMUX_SESSION KITMUX_TMUX_PANE KITMUX_TMUX_THREAD",
+		`tmux list-clients -t "$KITMUX_TMUX_SESSION"`,
 		"exec codex",
 	} {
 		if !strings.Contains(got, want) {
@@ -78,6 +81,32 @@ func TestColorTermDefaultOnlyAppliesToCodexThreads(t *testing.T) {
 	}
 }
 
+func TestWaitForClientOnlyAppliesToCodexThreads(t *testing.T) {
+	for name, got := range map[string]string{
+		"droid thread":     WrapTmuxCommand("droid", "droid-app", "droid", true),
+		"codex non-thread": WrapTmuxCommand("codex", "codex-app", "codex", false),
+	} {
+		if strings.Contains(got, "list-clients") {
+			t.Fatalf("%s should not wait for client: %q", name, got)
+		}
+	}
+}
+
+func TestWrapTmuxCommandPreservesCodexResumeCommand(t *testing.T) {
+	got := WrapTmuxCommand("codex", "codex-app", "codex resume 'abc'", true)
+	want := "exec codex resume 'abc'"
+	if !strings.Contains(got, want) {
+		t.Fatalf("WrapTmuxCommand() missing %q in %q", want, got)
+	}
+}
+
+func TestWrapTmuxCommandDoesNotOverrideCodexStatusLineColors(t *testing.T) {
+	got := WrapTmuxCommand("codex", "codex-app", "codex", true)
+	if strings.Contains(got, "tui.status_line_use_colors") {
+		t.Fatalf("WrapTmuxCommand() should not override status line colors: %q", got)
+	}
+}
+
 func TestWithTrackingEnvReplacesExistingValues(t *testing.T) {
 	got := WithTrackingEnv([]string{
 		"PATH=/bin",
@@ -93,7 +122,13 @@ func TestWithTrackingEnvReplacesExistingValues(t *testing.T) {
 }
 
 func TestWithTrackingEnvDefaultsCodexThreadColors(t *testing.T) {
-	got := WithTrackingEnv([]string{"PATH=/bin", "COLORTERM=24bit"}, "codex", "work", "%2", true)
+	got := WithTrackingEnv([]string{
+		"PATH=/bin",
+		"COLORTERM=24bit",
+		"FORCE_COLOR=0",
+		"CLICOLOR=0",
+		"CLICOLOR_FORCE=0",
+	}, "codex", "work", "%2", true)
 	want := []string{
 		"PATH=/bin",
 		"COLORTERM=24bit",
