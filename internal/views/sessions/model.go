@@ -32,6 +32,7 @@ type Model struct {
 	picking     bool // zoxide directory picker active
 	picker      zoxidePicker
 	justLoaded  bool // set on sessionsLoadedMsg, cleared by ConsumeLoaded
+	status      string
 }
 
 func New() Model {
@@ -87,6 +88,11 @@ type statsLoadedMsg struct {
 	stats map[string]sessionStats
 }
 
+type sessionKillFailedMsg struct {
+	name string
+	err  error
+}
+
 // cachedSnapshotMsg delivers a cached snapshot for immediate display.
 type cachedSnapshotMsg struct {
 	sessions  []tmux.Session
@@ -94,8 +100,13 @@ type cachedSnapshotMsg struct {
 	stats     map[string]sessionStats
 }
 
+var (
+	listTmuxSessions = tmux.ListSessions
+	killTmuxSession  = tmux.KillSession
+)
+
 func (m Model) loadSessions() tea.Msg {
-	sessions, err := tmux.ListSessions()
+	sessions, err := listTmuxSessions()
 	if err != nil {
 		return sessionsLoadedMsg{}
 	}
@@ -254,6 +265,9 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 		return m.handleCachedSnapshot(msg)
 	case sessionsLoadedMsg:
 		return m.handleSessionsLoaded(msg)
+	case sessionKillFailedMsg:
+		m.status = "kill failed for " + msg.name + ": " + msg.err.Error()
+		return m, nil
 	case statsLoadedMsg:
 		applyStats(m.roots, msg.stats)
 		return m, nil
@@ -279,6 +293,7 @@ func (m Model) handleCachedSnapshot(msg cachedSnapshotMsg) (Model, tea.Cmd) {
 }
 
 func (m Model) handleSessionsLoaded(msg sessionsLoadedMsg) (Model, tea.Cmd) {
+	m.status = ""
 	m.roots = BuildTree(msg.sessions, msg.repoRoots)
 	if snapStats := sharedStatsForSessions(msg.sessions); len(snapStats) > 0 {
 		applyStats(m.roots, snapStats)
@@ -497,6 +512,7 @@ func (m Model) actionStartSearch() (Model, tea.Cmd, bool) {
 
 func (m Model) actionDelete() (Model, tea.Cmd, bool) {
 	if node := m.selected(); node != nil && node.Kind == KindSession {
+		m.status = ""
 		m.confirming = true
 	}
 	return m, nil, true
@@ -574,9 +590,11 @@ func (m Model) handleConfirm(msg tea.KeyMsg) (Model, tea.Cmd) {
 		if node := m.selected(); node != nil && node.Kind == KindSession {
 			name := node.SessionName
 			return m, func() tea.Msg {
-				_ = tmux.KillSession(name)
+				if err := killTmuxSession(name); err != nil {
+					return sessionKillFailedMsg{name: name, err: err}
+				}
 				// Reload sessions from tmux after kill
-				sessions, _ := tmux.ListSessions()
+				sessions, _ := listTmuxSessions()
 				sessions = tmux.NormalSessions(sessions)
 				repoRoots := resolveRepoRoots(sessions)
 				return sessionsLoadedMsg{sessions: sessions, repoRoots: repoRoots}

@@ -75,7 +75,7 @@ func TestAgentDisplayNameUsesSymbol(t *testing.T) {
 	if !ok {
 		t.Fatal("expected codex agent")
 	}
-	if codex.DisplayName() != "⌾ Codex CLI" {
+	if codex.DisplayName() != "⌘ Codex CLI" {
 		t.Fatalf("Codex DisplayName() = %q", codex.DisplayName())
 	}
 
@@ -85,5 +85,13 @@ func TestAgentDisplayNameUsesSymbol(t *testing.T) {
 	}
 	if cursor.DisplayName() != "⌬ Cursor CLI" {
 		t.Fatalf("Cursor DisplayName() = %q", cursor.DisplayName())
+	}
+
+	opencode, ok := Find("opencode")
+	if !ok {
+		t.Fatal("expected opencode agent")
+	}
+	if opencode.DisplayName() != "□ OpenCode" {
+		t.Fatalf("OpenCode DisplayName() = %q", opencode.DisplayName())
 	}
 }

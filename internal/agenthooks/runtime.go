@@ -628,7 +628,7 @@ func stripLeadingStateGlyph(title string) string {
 	return title
 }
 
-const statusGlyphs = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⠂⠆⠤⠰⠠⠐⛬✳✻✶✢✤✱›⌾⌬⮞"
+const statusGlyphs = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⠂⠆⠤⠰⠠⠐⛬✳✻✶✢✤✱›⌘⌬□⮞"
 
 func agentSymbol(agentID string) string {
 	if agent, ok := agents.Find(agentID); ok {

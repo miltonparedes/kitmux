@@ -65,6 +65,14 @@ func (m Model) footerLine() string {
 		right := theme.HelpStyle.Render("enter save   esc cancel ")
 		return padBetween(left, right, m.width)
 	}
+	if m.status != "" {
+		left := theme.DiffRemoved.Render(" " + m.status)
+		pager := ""
+		if len(m.rows) > 0 {
+			pager = theme.TreeMeta.Render(fmt.Sprintf("%d / %d ", m.cursor+1, len(m.rows)))
+		}
+		return padBetween(left, pager, m.width)
+	}
 	help := theme.HelpStyle.Render(" ⏎ open   n new   r rename   R relaunch   d/K kill   ctrl+r refresh   q quit")
 	pager := ""
 	if len(m.rows) > 0 {
@@ -367,7 +375,7 @@ func stripLeadingStatusGlyph(title string) string {
 	return title
 }
 
-const statusGlyphs = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⠂⠆⠤⠰⠠⠐⛬✳✻✶✢✤✱›⌾⌬⮞"
+const statusGlyphs = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⠂⠆⠤⠰⠠⠐⛬✳✻✶✢✤✱›⌘⌬□⮞"
 
 func rowSymbol(row Row) string {
 	if row.AgentSymbol != "" {

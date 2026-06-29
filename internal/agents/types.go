@@ -29,7 +29,7 @@ var defaultAgents = []Agent{
 	{
 		ID:      "codex",
 		Name:    "Codex CLI",
-		Symbol:  "⌾",
+		Symbol:  "⌘",
 		Command: "codex",
 		Modes: []AgentMode{
 			{ID: "default", Name: "Default", Flags: ""},
@@ -60,6 +60,7 @@ var defaultAgents = []Agent{
 	{
 		ID:      "opencode",
 		Name:    "OpenCode",
+		Symbol:  "□",
 		Command: "opencode",
 		Modes: []AgentMode{
 			{ID: "default", Name: "Default", Flags: ""},

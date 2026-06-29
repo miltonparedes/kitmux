@@ -2,6 +2,7 @@ package threads
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -71,6 +72,7 @@ type Model struct {
 	launchDir    string
 	filterDir    string
 	showAll      bool
+	status       string
 }
 
 type loadedMsg struct {
@@ -78,6 +80,10 @@ type loadedMsg struct {
 }
 
 type tickMsg struct{}
+
+type threadStatusMsg struct {
+	text string
+}
 
 const refreshEveryFrames = 6
 
@@ -94,7 +100,11 @@ var (
 	syncThreadTitle     = tmux.SetThreadTitle
 	syncThreadPrefix    = tmux.SetThreadTitlePrefix
 	syncPaneTitle       = tmux.SetPaneTitle
+	syncWindowTitle     = tmux.RenameWindow
 	refreshThreadClient = tmux.RefreshClients
+	listThreadSessions  = tmux.ListSessions
+	listThreadPanes     = tmux.ListPanes
+	killThreadSession   = tmux.KillSession
 	createThread        = agentthread.Create
 	installThreadHooks  = agentlaunch.InstallHooks
 	resolveAgentSession = agentresume.ResolveSessionID
@@ -103,6 +113,7 @@ var (
 	wrapThreadCommand   = agentthread.ThreadCommand
 	respawnThreadPane   = tmux.RespawnPaneInDir
 	applyThreadSupport  = agentthread.ApplySupport
+	localHostname       = os.Hostname
 )
 
 func New(launchDir ...string) Model {
@@ -151,8 +162,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case loadedMsg:
 		m.rows = msg.rows
+		m.status = ""
 		m.clampCursor()
 		m.ensureVisible()
+		return m, nil
+	case threadStatusMsg:
+		m.status = msg.text
 		return m, nil
 	case tickMsg:
 		m.spinnerFrame++
@@ -416,8 +431,8 @@ func syncSupportAndLoadCmd(opts ...loadOptions) tea.Cmd {
 }
 
 func loadRows(opts ...loadOptions) loadedMsg {
-	sessions, _ := tmux.ListSessions()
-	panes, _ := tmux.ListPanes()
+	sessions, _ := listThreadSessions()
+	panes, _ := listThreadPanes()
 	return loadedMsg{rows: prepareRows(sessions, panes, opts...)}
 }
 
@@ -505,7 +520,7 @@ func reconcilePaneTitleRenames(rows []Row) []Row {
 func livePaneThreadTitle(row Row) string {
 	title := strings.TrimSpace(stripLeadingStatusGlyph(row.PaneTitle))
 	if title == "" || isDefaultPaneTitle(row, title) || isAutomaticAgentTitle(row, title) ||
-		isTransientAgentTitle(title) {
+		isTransientAgentTitle(title) || isLocalHostnameTitle(title) {
 		return ""
 	}
 	return title
@@ -535,6 +550,23 @@ func isAutomaticAgentTitle(row Row, title string) bool {
 func isTransientAgentTitle(title string) bool {
 	title = strings.ToLower(strings.TrimSpace(title))
 	return strings.HasPrefix(title, "worker:") || strings.HasPrefix(title, "subagent:")
+}
+
+func isLocalHostnameTitle(title string) bool {
+	title = strings.ToLower(strings.TrimSpace(title))
+	if title == "" {
+		return false
+	}
+	hostname, err := localHostname()
+	if err != nil {
+		return false
+	}
+	hostname = strings.ToLower(strings.TrimSpace(hostname))
+	if hostname == "" {
+		return false
+	}
+	short := strings.SplitN(hostname, ".", 2)[0]
+	return title == hostname || (short != "" && (title == short || title == short+".local"))
 }
 
 func enrichAgentTitles(rows []Row) []Row {
@@ -857,7 +889,9 @@ func openRowCmd(row Row) tea.Cmd {
 
 func killHeadlessCmd(sessionName string, opts loadOptions) tea.Cmd {
 	return func() tea.Msg {
-		_ = tmux.KillSession(sessionName)
+		if err := killThreadSession(sessionName); err != nil {
+			return threadStatusMsg{text: "kill failed for " + sessionName + ": " + err.Error()}
+		}
 		return loadCmd(opts)()
 	}
 }
@@ -928,8 +962,15 @@ func renameRow(row Row, title string) error {
 		}); err != nil {
 			return err
 		}
-		if title != "" {
-			_ = syncPaneTitle(rowPaneTarget(row), title)
+		paneTitle := title
+		windowTitle := title
+		if title == "" {
+			paneTitle = rowResetPaneTitle(row)
+			windowTitle = rowResetWindowTitle(row)
+		}
+		_ = syncPaneTitle(rowPaneTarget(row), paneTitle)
+		if target := rowWindowTarget(row); target != "" && windowTitle != "" {
+			_ = syncWindowTitle(target, windowTitle)
 		}
 		_ = agentrename.Rename(agentrename.Target{
 			AgentID: row.AgentID,
@@ -946,6 +987,53 @@ func rowPaneTarget(row Row) string {
 		return row.PaneID
 	}
 	return fmt.Sprintf("%s:%d.%d", row.SessionName, row.WindowIndex, row.PaneIndex)
+}
+
+func rowWindowTarget(row Row) string {
+	if row.SessionName == "" {
+		return ""
+	}
+	return fmt.Sprintf("%s:%d", row.SessionName, row.WindowIndex)
+}
+
+func rowResetPaneTitle(row Row) string {
+	if title := automaticPaneTitle(row); title != "" {
+		return title
+	}
+	if title := strings.TrimSpace(row.InitialTitle); title != "" {
+		return title
+	}
+	if row.AgentName != "" {
+		return row.AgentName
+	}
+	return row.AgentID
+}
+
+func automaticPaneTitle(row Row) string {
+	display := strings.TrimSpace(stripLeadingStatusGlyph(row.AgentTitleDisplay))
+	if display == "" {
+		return ""
+	}
+	if prefix := staticThreadTitlePrefix(row); prefix != "" {
+		return prefix + " " + display
+	}
+	if prefix := strings.TrimSpace(row.AgentTitlePrefix); prefix != "" {
+		return prefix + " " + display
+	}
+	return display
+}
+
+func rowResetWindowTitle(row Row) string {
+	if row.AgentID != "" {
+		return row.AgentID
+	}
+	if row.AgentName != "" {
+		return row.AgentName
+	}
+	if title := strings.TrimSpace(stripLeadingStatusGlyph(row.InitialTitle)); title != "" {
+		return title
+	}
+	return row.SessionName
 }
 
 func newHeadlessCmd(agent agents.Agent, launchDir string, opts ...loadOptions) tea.Cmd {
