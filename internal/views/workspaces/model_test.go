@@ -1,6 +1,7 @@
 package workspaces
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -1067,8 +1068,108 @@ func TestDOnDetailSessionOpensActionPicker(t *testing.T) {
 	if m.mode != modeActionPicker {
 		t.Fatalf("expected modeActionPicker on active session branch, got %d", m.mode)
 	}
-	if len(m.actionItems) < 2 {
-		t.Fatalf("expected archive/delete actions, got %+v", m.actionItems)
+	if len(m.actionItems) != 1 || m.actionItems[0].Kind != actionKindDeleteWorktree {
+		t.Fatalf("expected only delete action on active session branch, got %+v", m.actionItems)
+	}
+}
+
+func TestArchiveActionRejectsActiveSessionBranch(t *testing.T) {
+	m := newSeededModel()
+	updated, _ := m.Update(keyMsg("l"))
+	m = updated.(Model)
+
+	found := -1
+	for i, br := range m.branches {
+		if br.IsSession && br.SessionName == "kitmux-feature" {
+			found = i
+			break
+		}
+	}
+	if found < 0 {
+		t.Fatal("expected active feature session in detail")
+	}
+	m.detCursor = found
+
+	updated, cmd := m.dispatchArchiveWorktreeAction()
+	m = updated.(Model)
+	if cmd == nil {
+		t.Fatal("expected toast clear command")
+	}
+	if !strings.Contains(m.toast, "active sessions cannot be archived") {
+		t.Fatalf("expected active-session archive warning, got %q", m.toast)
+	}
+}
+
+func TestDeleteWorktreeKillsMatchingSessionBeforeRemove(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+
+	originalList := listWorkspaceSessions
+	originalKill := killWorkspaceSession
+	originalRemove := removeWorktreeInDir
+	defer func() {
+		listWorkspaceSessions = originalList
+		killWorkspaceSession = originalKill
+		removeWorktreeInDir = originalRemove
+	}()
+
+	listWorkspaceSessions = func() ([]tmux.Session, error) {
+		return []tmux.Session{
+			{Name: "kitmux-feature", Path: "/home/user/kitmux-feature"},
+			{Name: "other", Path: "/home/user/other"},
+		}, nil
+	}
+	var killed []string
+	killWorkspaceSession = func(name string) error {
+		killed = append(killed, name)
+		return nil
+	}
+	var removedWorkspace, removedBranch string
+	removeWorktreeInDir = func(workspacePath, branch string) error {
+		removedWorkspace = workspacePath
+		removedBranch = branch
+		return nil
+	}
+
+	msg := (Model{}).deleteWorktree("/home/user/kitmux", "/home/user/kitmux-feature", "feature")()
+	if _, ok := msg.(actionDoneMsg); !ok {
+		t.Fatalf("message = %T, want actionDoneMsg", msg)
+	}
+	if len(killed) != 1 || killed[0] != "kitmux-feature" {
+		t.Fatalf("killed sessions = %+v, want [kitmux-feature]", killed)
+	}
+	if removedWorkspace != "/home/user/kitmux" || removedBranch != "feature" {
+		t.Fatalf("remove args = %q/%q", removedWorkspace, removedBranch)
+	}
+}
+
+func TestDeleteWorktreeStopsWhenKillFails(t *testing.T) {
+	originalList := listWorkspaceSessions
+	originalKill := killWorkspaceSession
+	originalRemove := removeWorktreeInDir
+	defer func() {
+		listWorkspaceSessions = originalList
+		killWorkspaceSession = originalKill
+		removeWorktreeInDir = originalRemove
+	}()
+
+	listWorkspaceSessions = func() ([]tmux.Session, error) {
+		return []tmux.Session{{Name: "kitmux-feature", Path: "/home/user/kitmux-feature"}}, nil
+	}
+	killWorkspaceSession = func(string) error {
+		return errors.New("tmux refused")
+	}
+	removeWorktreeInDir = func(string, string) error {
+		t.Fatal("removeWorktreeInDir should not run after kill failure")
+		return nil
+	}
+
+	msg := (Model{}).deleteWorktree("/home/user/kitmux", "/home/user/kitmux-feature", "feature")()
+	toast, ok := msg.(toastMsg)
+	if !ok {
+		t.Fatalf("message = %T, want toastMsg", msg)
+	}
+	if toast.level != toastError || !strings.Contains(toast.text, "tmux refused") {
+		t.Fatalf("toast = %+v, want tmux kill error", toast)
 	}
 }
 

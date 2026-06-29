@@ -1,6 +1,7 @@
 package threads
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -853,6 +854,67 @@ func TestRelaunchKeyReturnsCommandForHeadlessRows(t *testing.T) {
 	_, cmd := m.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("R")})
 	if cmd == nil {
 		t.Fatal("expected relaunch command")
+	}
+}
+
+func TestKillHeadlessCmdKillsSessionAndReloads(t *testing.T) {
+	originalKill := killThreadSession
+	originalListSessions := listThreadSessions
+	originalListPanes := listThreadPanes
+	defer func() {
+		killThreadSession = originalKill
+		listThreadSessions = originalListSessions
+		listThreadPanes = originalListPanes
+	}()
+
+	var killed string
+	killThreadSession = func(name string) error {
+		killed = name
+		return nil
+	}
+	listThreadSessions = func() ([]tmux.Session, error) {
+		return nil, nil
+	}
+	listThreadPanes = func() ([]tmux.Pane, error) {
+		return nil, nil
+	}
+
+	msg := killHeadlessCmd("droid-app", loadOptions{})()
+	if killed != "droid-app" {
+		t.Fatalf("killed session = %q, want droid-app", killed)
+	}
+	loaded, ok := msg.(loadedMsg)
+	if !ok {
+		t.Fatalf("message = %T, want loadedMsg", msg)
+	}
+	if len(loaded.rows) != 0 {
+		t.Fatalf("expected empty reload, got %+v", loaded.rows)
+	}
+}
+
+func TestKillHeadlessCmdReportsFailure(t *testing.T) {
+	originalKill := killThreadSession
+	defer func() {
+		killThreadSession = originalKill
+	}()
+
+	killThreadSession = func(string) error {
+		return errors.New("tmux refused")
+	}
+
+	msg := killHeadlessCmd("droid-app", loadOptions{})()
+	status, ok := msg.(threadStatusMsg)
+	if !ok {
+		t.Fatalf("message = %T, want threadStatusMsg", msg)
+	}
+	if !strings.Contains(status.text, "tmux refused") {
+		t.Fatalf("status = %q, want kill failure", status.text)
+	}
+
+	m := New()
+	m, _ = m.Update(status)
+	if !strings.Contains(m.footerLine(), "tmux refused") {
+		t.Fatalf("expected failure in footer, got %q", m.footerLine())
 	}
 }
 

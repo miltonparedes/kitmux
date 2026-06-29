@@ -17,7 +17,12 @@ import (
 	"github.com/miltonparedes/kitmux/internal/worktree"
 )
 
-var workspaceAgentLaunchOps = agentlaunch.DefaultOps()
+var (
+	workspaceAgentLaunchOps = agentlaunch.DefaultOps()
+	listWorkspaceSessions   = tmux.ListSessions
+	killWorkspaceSession    = tmux.KillSession
+	removeWorktreeInDir     = worktree.RemoveInDir
+)
 
 func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
@@ -748,13 +753,18 @@ func (m Model) deleteWorktree(workspacePath, worktreePath, branch string) tea.Cm
 		if worktreePath == "" {
 			return toastMsg{text: "missing worktree path", level: toastWarn}
 		}
-		sessions, _ := tmux.ListSessions()
+		sessions, err := listWorkspaceSessions()
+		if err != nil {
+			return toastMsg{text: "list sessions failed: " + err.Error(), level: toastError}
+		}
 		for _, s := range sessions {
 			if s.Path == worktreePath {
-				_ = tmux.KillSession(s.Name)
+				if err := killWorkspaceSession(s.Name); err != nil {
+					return toastMsg{text: "kill session " + s.Name + " failed: " + err.Error(), level: toastError}
+				}
 			}
 		}
-		if err := worktree.RemoveInDir(workspacePath, branch); err != nil {
+		if err := removeWorktreeInDir(workspacePath, branch); err != nil {
 			return toastMsg{text: "wt remove failed: " + err.Error(), level: toastError}
 		}
 		_ = wsreg.RemoveArchivedWorktree(workspacePath, worktreePath)
@@ -791,10 +801,10 @@ func (m Model) openActionPicker() (tea.Model, tea.Cmd) {
 	} else if m.detCursor >= 0 && m.detCursor < len(m.branches) {
 		br := m.branches[m.detCursor]
 		if !br.IsMain && !isMainBranch(br.Name) {
-			items = append(items,
-				actionMenuItem{Label: "Archive worktree (hide from view)", Kind: actionKindArchiveWorktree},
-				actionMenuItem{Label: "Delete worktree permanently", Kind: actionKindDeleteWorktree},
-			)
+			if !br.IsSession {
+				items = append(items, actionMenuItem{Label: "Archive worktree (hide from view)", Kind: actionKindArchiveWorktree})
+			}
+			items = append(items, actionMenuItem{Label: "Delete worktree permanently", Kind: actionKindDeleteWorktree})
 		}
 	}
 	if len(items) == 0 {
@@ -868,6 +878,9 @@ func (m Model) dispatchArchiveWorktreeAction() (tea.Model, tea.Cmd) {
 	}
 	if br.Path == "" {
 		return m, m.pushToast("missing worktree path", toastWarn)
+	}
+	if br.IsSession {
+		return m, m.pushToast("active sessions cannot be archived", toastWarn)
 	}
 	p := m.workspaces[m.wsCursor]
 	return m, m.archiveWorktree(p.Path, br.Path)

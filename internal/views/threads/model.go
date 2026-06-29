@@ -72,6 +72,7 @@ type Model struct {
 	launchDir    string
 	filterDir    string
 	showAll      bool
+	status       string
 }
 
 type loadedMsg struct {
@@ -79,6 +80,10 @@ type loadedMsg struct {
 }
 
 type tickMsg struct{}
+
+type threadStatusMsg struct {
+	text string
+}
 
 const refreshEveryFrames = 6
 
@@ -97,6 +102,9 @@ var (
 	syncPaneTitle       = tmux.SetPaneTitle
 	syncWindowTitle     = tmux.RenameWindow
 	refreshThreadClient = tmux.RefreshClients
+	listThreadSessions  = tmux.ListSessions
+	listThreadPanes     = tmux.ListPanes
+	killThreadSession   = tmux.KillSession
 	createThread        = agentthread.Create
 	installThreadHooks  = agentlaunch.InstallHooks
 	resolveAgentSession = agentresume.ResolveSessionID
@@ -154,8 +162,12 @@ func (m Model) Update(msg tea.Msg) (Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case loadedMsg:
 		m.rows = msg.rows
+		m.status = ""
 		m.clampCursor()
 		m.ensureVisible()
+		return m, nil
+	case threadStatusMsg:
+		m.status = msg.text
 		return m, nil
 	case tickMsg:
 		m.spinnerFrame++
@@ -419,8 +431,8 @@ func syncSupportAndLoadCmd(opts ...loadOptions) tea.Cmd {
 }
 
 func loadRows(opts ...loadOptions) loadedMsg {
-	sessions, _ := tmux.ListSessions()
-	panes, _ := tmux.ListPanes()
+	sessions, _ := listThreadSessions()
+	panes, _ := listThreadPanes()
 	return loadedMsg{rows: prepareRows(sessions, panes, opts...)}
 }
 
@@ -877,7 +889,9 @@ func openRowCmd(row Row) tea.Cmd {
 
 func killHeadlessCmd(sessionName string, opts loadOptions) tea.Cmd {
 	return func() tea.Msg {
-		_ = tmux.KillSession(sessionName)
+		if err := killThreadSession(sessionName); err != nil {
+			return threadStatusMsg{text: "kill failed for " + sessionName + ": " + err.Error()}
+		}
 		return loadCmd(opts)()
 	}
 }

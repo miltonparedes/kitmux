@@ -103,6 +103,9 @@ func (m Model) StatusLine() string {
 	if m.searching {
 		return " " + m.searchInput.View()
 	}
+	if m.status != "" {
+		return theme.DiffRemoved.Render(" " + m.status)
+	}
 	return theme.HelpStyle.Render(" ⏎ switch  ␣ fold  J/K group  / search  n open  d kill  r rename  q quit")
 }
 
