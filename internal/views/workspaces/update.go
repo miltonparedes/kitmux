@@ -795,18 +795,7 @@ func (m Model) openActionPicker() (tea.Model, tea.Cmd) {
 	if len(m.workspaces) == 0 {
 		return m, nil
 	}
-	items := []actionMenuItem{}
-	if m.focus == colWorkspaces {
-		items = append(items, actionMenuItem{Label: "Remove workspace from list", Kind: actionKindRemoveWorkspace})
-	} else if m.detCursor >= 0 && m.detCursor < len(m.branches) {
-		br := m.branches[m.detCursor]
-		if !br.IsMain && !isMainBranch(br.Name) {
-			if !br.IsSession {
-				items = append(items, actionMenuItem{Label: "Archive worktree (hide from view)", Kind: actionKindArchiveWorktree})
-			}
-			items = append(items, actionMenuItem{Label: "Delete worktree permanently", Kind: actionKindDeleteWorktree})
-		}
-	}
+	items := m.availableActionItems()
 	if len(items) == 0 {
 		return m, m.pushToast("no actions available for this selection", toastInfo)
 	}
@@ -814,6 +803,26 @@ func (m Model) openActionPicker() (tea.Model, tea.Cmd) {
 	m.actionCursor = 0
 	m.mode = modeActionPicker
 	return m, nil
+}
+
+func (m Model) availableActionItems() []actionMenuItem {
+	if m.focus == colWorkspaces {
+		return []actionMenuItem{{Label: "Remove workspace from list", Kind: actionKindRemoveWorkspace}}
+	}
+	if m.detCursor < 0 || m.detCursor >= len(m.branches) {
+		return nil
+	}
+	br := m.branches[m.detCursor]
+	if br.IsMain || isMainBranch(br.Name) {
+		return nil
+	}
+
+	items := []actionMenuItem{}
+	if !br.IsSession {
+		items = append(items, actionMenuItem{Label: "Archive worktree (hide from view)", Kind: actionKindArchiveWorktree})
+	}
+	items = append(items, actionMenuItem{Label: "Delete worktree permanently", Kind: actionKindDeleteWorktree})
+	return items
 }
 
 func (m Model) handleActionPicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
