@@ -367,7 +367,7 @@ func stripLeadingStatusGlyph(title string) string {
 	return title
 }
 
-const statusGlyphs = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⠂⠆⠤⠰⠠⠐⛬✳✻✶✢✤✱›⌾⌬⮞"
+const statusGlyphs = "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏⠂⠆⠤⠰⠠⠐⛬✳✻✶✢✤✱›⌘⌬□⮞"
 
 func rowSymbol(row Row) string {
 	if row.AgentSymbol != "" {

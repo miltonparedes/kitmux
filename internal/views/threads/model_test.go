@@ -19,15 +19,18 @@ import (
 	"github.com/miltonparedes/kitmux/internal/tmux"
 )
 
-const droidKitmuxSession = "droid-kitmux"
+const (
+	droidAgentID       = "droid"
+	droidKitmuxSession = "droid-kitmux"
+)
 
 func TestBuildRowsKeepsHeadlessDetailedAndSkipsDuplicatePane(t *testing.T) {
 	sessions := []tmux.Session{
-		{Name: "droid-app", Path: "/repo/app", Activity: 10, Thread: true, AgentID: "droid", AgentState: "idle", ThreadTitle: "custom thread title", AgentSessionID: "11111111-1111-4111-8111-111111111111"},
+		{Name: "droid-app", Path: "/repo/app", Activity: 10, Thread: true, AgentID: droidAgentID, AgentState: "idle", ThreadTitle: "custom thread title", AgentSessionID: "11111111-1111-4111-8111-111111111111"},
 		{Name: "work", Path: "/repo/app"},
 	}
 	panes := []tmux.Pane{
-		{SessionName: "droid-app", WindowIndex: 0, PaneIndex: 0, ID: "%1", Command: "droid", Path: "/repo/app", Title: "feat/threads", AgentState: "working", AgentUpdated: time.Now().UnixMilli()},
+		{SessionName: "droid-app", WindowIndex: 0, PaneIndex: 0, ID: "%1", Command: droidAgentID, Path: "/repo/app", Title: "feat/threads", AgentState: "working", AgentUpdated: time.Now().UnixMilli()},
 		{SessionName: "work", WindowIndex: 1, PaneIndex: 2, ID: "%2", Command: "codex", Path: "/repo/app", Title: "codex review", AgentState: "input"},
 	}
 
@@ -35,7 +38,7 @@ func TestBuildRowsKeepsHeadlessDetailedAndSkipsDuplicatePane(t *testing.T) {
 	if len(rows) != 2 {
 		t.Fatalf("len(rows) = %d, rows = %#v", len(rows), rows)
 	}
-	if rows[0].Kind != RowHeadless || rows[0].AgentID != "droid" {
+	if rows[0].Kind != RowHeadless || rows[0].AgentID != droidAgentID {
 		t.Fatalf("headless row = %#v", rows[0])
 	}
 	if rows[0].Title != "custom thread title" || rows[0].AgentState != "working" || rows[0].AgentSymbol != "⛬" {
@@ -135,11 +138,11 @@ func TestPrepareRowsReconcilesHiddenRowsBeforeFiltering(t *testing.T) {
 
 	rows := prepareRows(
 		[]tmux.Session{
-			{Name: "droid-app", Path: matchDir, Thread: true, AgentID: "droid", AgentState: "idle"},
-			{Name: "droid-other", Path: otherDir, Thread: true, AgentID: "droid", AgentState: "idle", ThreadTitle: "old title"},
+			{Name: "droid-app", Path: matchDir, Thread: true, AgentID: droidAgentID, AgentState: "idle"},
+			{Name: "droid-other", Path: otherDir, Thread: true, AgentID: droidAgentID, AgentState: "idle", ThreadTitle: "old title"},
 		},
 		[]tmux.Pane{
-			{SessionName: "droid-app", Path: matchDir, Title: "droid"},
+			{SessionName: "droid-app", Path: matchDir, Title: droidAgentID},
 			{SessionName: "droid-other", Path: otherDir, Title: "new hidden title"},
 		},
 		loadOptions{filterDir: matchDir},
@@ -252,7 +255,7 @@ func TestEnrichAgentTitlesUsesCodexThreadTitleAndSyncsTmux(t *testing.T) {
 	rows := enrichAgentTitles([]Row{{
 		Kind:        RowHeadless,
 		AgentID:     "codex",
-		AgentSymbol: "⌾",
+		AgentSymbol: "⌘",
 		AgentState:  "idle",
 		Title:       "⠋ kitmux",
 		SessionName: "codex-kitmux",
@@ -265,7 +268,7 @@ func TestEnrichAgentTitlesUsesCodexThreadTitleAndSyncsTmux(t *testing.T) {
 	if syncedSession != "codex-kitmux" || syncedTitle != "improve rename" {
 		t.Fatalf("synced session/title = %q/%q", syncedSession, syncedTitle)
 	}
-	if syncedPrefix != "⌾" {
+	if syncedPrefix != "⌘" {
 		t.Fatalf("synced prefix = %q", syncedPrefix)
 	}
 	if refreshedSession != "codex-kitmux" {
@@ -303,7 +306,7 @@ func TestReconcilePaneTitleRenamesSyncsLivePaneTitleOverride(t *testing.T) {
 
 	rows := reconcilePaneTitleRenames([]Row{{
 		Kind:        RowHeadless,
-		AgentID:     "droid",
+		AgentID:     droidAgentID,
 		AgentName:   "Droid",
 		AgentSymbol: "⛬",
 		AgentState:  "idle",
@@ -343,7 +346,7 @@ func TestReconcilePaneTitleRenamesIgnoresDefaultAgentTitle(t *testing.T) {
 
 	rows := reconcilePaneTitleRenames([]Row{{
 		Kind:        RowHeadless,
-		AgentID:     "droid",
+		AgentID:     droidAgentID,
 		AgentName:   "Droid",
 		Title:       "custom title",
 		ThreadTitle: "custom title",
@@ -368,7 +371,7 @@ func TestReconcilePaneTitleRenamesIgnoresWorkerTitle(t *testing.T) {
 
 	rows := reconcilePaneTitleRenames([]Row{{
 		Kind:        RowHeadless,
-		AgentID:     "droid",
+		AgentID:     droidAgentID,
 		AgentName:   "Droid",
 		Title:       "hooks",
 		ThreadTitle: "hooks",
@@ -393,12 +396,39 @@ func TestReconcilePaneTitleRenamesIgnoresAgentDisplayTitle(t *testing.T) {
 
 	rows := reconcilePaneTitleRenames([]Row{{
 		Kind:              RowHeadless,
-		AgentID:           "droid",
+		AgentID:           droidAgentID,
 		AgentName:         "Droid",
 		Title:             "Droid · kitmux",
 		AgentTitleDisplay: "Authenticate Logfire MCP server",
 		PaneTitle:         "⛬ Authenticate Logfire MCP server",
 		SessionName:       droidKitmuxSession,
+	}})
+
+	if rows[0].Title != "Droid · kitmux" || rows[0].ThreadTitle != "" {
+		t.Fatalf("titles changed = %q/%q", rows[0].Title, rows[0].ThreadTitle)
+	}
+}
+
+func TestReconcilePaneTitleRenamesIgnoresLocalHostnameTitle(t *testing.T) {
+	originalSync := syncThreadTitle
+	originalHostname := localHostname
+	t.Cleanup(func() {
+		syncThreadTitle = originalSync
+		localHostname = originalHostname
+	})
+	localHostname = func() (string, error) { return "pro.local", nil }
+	syncThreadTitle = func(_, _ string) error {
+		t.Fatal("syncThreadTitle should not run for local hostname title")
+		return nil
+	}
+
+	rows := reconcilePaneTitleRenames([]Row{{
+		Kind:        RowHeadless,
+		AgentID:     droidAgentID,
+		AgentName:   "Droid",
+		Title:       "Droid · kitmux",
+		PaneTitle:   "pro.local",
+		SessionName: droidKitmuxSession,
 	}})
 
 	if rows[0].Title != "Droid · kitmux" || rows[0].ThreadTitle != "" {
@@ -412,7 +442,7 @@ func TestBuildRowsFallsBackToInitialTitleBeforePaneTitle(t *testing.T) {
 			Name:         droidKitmuxSession,
 			Path:         "/repo/kitmux",
 			Thread:       true,
-			AgentID:      "droid",
+			AgentID:      droidAgentID,
 			InitialTitle: "⛬ Droid · kitmux",
 		}},
 		[]tmux.Pane{{
@@ -449,7 +479,7 @@ func TestReconcilePaneTitleRenamesPersistsFirstLiveRename(t *testing.T) {
 
 	rows := reconcilePaneTitleRenames([]Row{{
 		Kind:        RowHeadless,
-		AgentID:     "droid",
+		AgentID:     droidAgentID,
 		AgentName:   "Droid",
 		AgentSymbol: "⛬",
 		AgentState:  "idle",
@@ -512,14 +542,15 @@ func TestReconcilePaneTitleRenamesSupportsRegisteredAgents(t *testing.T) {
 				Kind:        RowHeadless,
 				AgentID:     "opencode",
 				AgentName:   "OpenCode",
+				AgentSymbol: "□",
 				AgentState:  "idle",
 				ThreadTitle: "old opencode title",
-				PaneTitle:   "audit release notes",
+				PaneTitle:   "□ audit release notes",
 				SessionName: "opencode-kitmux",
 				Path:        "/repo/app",
 			},
 			wantTitle:  "audit release notes",
-			wantPrefix: "O",
+			wantPrefix: "□",
 		},
 	}
 
@@ -583,7 +614,7 @@ func TestReconcilePaneTitleRenamesAgainstTmux(t *testing.T) {
 	}{
 		{agent: "claude", paneTitle: "✳ review auth flow", wantTitle: "review auth flow", wantPrefix: "✳"},
 		{agent: "cursor", paneTitle: "⌬ fix search panel", wantTitle: "fix search panel", wantPrefix: "⌬"},
-		{agent: "opencode", paneTitle: "audit release notes", wantTitle: "audit release notes", wantPrefix: "O"},
+		{agent: "opencode", paneTitle: "□ audit release notes", wantTitle: "audit release notes", wantPrefix: "□"},
 	}
 
 	for _, tt := range tests {
@@ -661,7 +692,7 @@ func TestRepairThreadTitlePrefixesKeepsAgentIconForIdleRenamedThreads(t *testing
 	refreshThreadClient = func(string) error { return nil }
 
 	rows := repairThreadTitlePrefixes([]Row{
-		{Kind: RowHeadless, AgentID: "droid", AgentSymbol: "⛬", AgentState: "idle", Title: "Greeting the assistant", TitleOverride: true, SessionName: droidKitmuxSession},
+		{Kind: RowHeadless, AgentID: droidAgentID, AgentSymbol: "⛬", AgentState: "idle", Title: "Greeting the assistant", TitleOverride: true, SessionName: droidKitmuxSession},
 		{Kind: RowHeadless, AgentID: "claude", AgentSymbol: "✳", AgentState: "working", Title: "Still working", TitleOverride: true, SessionName: "claude-kitmux"},
 	})
 
@@ -778,9 +809,14 @@ func TestRowIconAndTitleComposeStateGlyphWithoutDuplication(t *testing.T) {
 		t.Fatalf("codex working = %q", got)
 	}
 
-	droidWorkingWithNativePrefix := Row{AgentID: "droid", AgentSymbol: "⛬", AgentState: "working", Title: "⠂ ⛬ Android app"}
+	droidWorkingWithNativePrefix := Row{AgentID: droidAgentID, AgentSymbol: "⛬", AgentState: "working", Title: "⠂ ⛬ Android app"}
 	if got := compose(droidWorkingWithNativePrefix); got != "⠋ Android app" {
 		t.Fatalf("droid working = %q", got)
+	}
+
+	opencodeWorkingWithNativePrefix := Row{AgentID: "opencode", AgentSymbol: "□", AgentState: "working", Title: "□ build cli"}
+	if got := compose(opencodeWorkingWithNativePrefix); got != "⠋ build cli" {
+		t.Fatalf("opencode working = %q", got)
 	}
 
 	idle := Row{AgentSymbol: "⛬", AgentState: "idle", Title: "⛬ Droid · app"}
@@ -808,7 +844,7 @@ func TestRelaunchKeyReturnsCommandForHeadlessRows(t *testing.T) {
 	m := New()
 	m, _ = m.Update(loadedMsg{rows: []Row{{
 		Kind:           RowHeadless,
-		AgentID:        "droid",
+		AgentID:        droidAgentID,
 		SessionName:    "droid-app",
 		PanePID:        123,
 		AgentSessionID: "11111111-1111-4111-8111-111111111111",
@@ -845,7 +881,7 @@ func TestRelaunchHeadlessUsesPersistedDroidSessionID(t *testing.T) {
 		return nil
 	}
 	wrapThreadCommand = func(agentID, sessionName, command string) string {
-		if agentID != "droid" || sessionName != droidKitmuxSession {
+		if agentID != droidAgentID || sessionName != droidKitmuxSession {
 			t.Fatalf("wrap target = %q/%q", agentID, sessionName)
 		}
 		return "wrapped:" + command
@@ -865,7 +901,7 @@ func TestRelaunchHeadlessUsesPersistedDroidSessionID(t *testing.T) {
 
 	err := relaunchHeadless(Row{
 		Kind:           RowHeadless,
-		AgentID:        "droid",
+		AgentID:        droidAgentID,
 		SessionName:    droidKitmuxSession,
 		PaneID:         "%51",
 		Path:           "/repo/app",
@@ -881,7 +917,7 @@ func TestRelaunchHeadlessUsesPersistedDroidSessionID(t *testing.T) {
 	if respawnTarget != "%51" || respawnDir != "/repo/app" || respawnCommand != "wrapped:droid --resume 'abc123'" {
 		t.Fatalf("respawn = %q %q %q", respawnTarget, respawnDir, respawnCommand)
 	}
-	if supportSpec.SessionName != droidKitmuxSession || supportSpec.TargetPane != "%51" || supportSpec.AgentID != "droid" {
+	if supportSpec.SessionName != droidKitmuxSession || supportSpec.TargetPane != "%51" || supportSpec.AgentID != droidAgentID {
 		t.Fatalf("support spec = %#v", supportSpec)
 	}
 }
@@ -939,7 +975,7 @@ func TestRelaunchHeadlessCanonicalizesDroidChildSessionID(t *testing.T) {
 
 	err := relaunchHeadless(Row{
 		Kind:           RowHeadless,
-		AgentID:        "droid",
+		AgentID:        droidAgentID,
 		SessionName:    droidKitmuxSession,
 		PaneID:         "%51",
 		Path:           "/repo/app",
@@ -1010,7 +1046,7 @@ func TestRenameHeadlessSyncsThreadAndPaneTitle(t *testing.T) {
 
 	err := renameRow(Row{
 		Kind:        RowHeadless,
-		AgentID:     "droid",
+		AgentID:     droidAgentID,
 		AgentSymbol: "⛬",
 		AgentState:  "idle",
 		SessionName: droidKitmuxSession,
@@ -1034,6 +1070,63 @@ func TestRenameHeadlessSyncsThreadAndPaneTitle(t *testing.T) {
 	}
 }
 
+func TestRenameHeadlessEmptyTitleResetsPaneAndWindowTitle(t *testing.T) {
+	originalSyncThread := syncThreadTitle
+	originalSyncPrefix := syncThreadPrefix
+	originalSyncPane := syncPaneTitle
+	originalSyncWindow := syncWindowTitle
+	originalRefresh := refreshThreadClient
+	t.Cleanup(func() {
+		syncThreadTitle = originalSyncThread
+		syncThreadPrefix = originalSyncPrefix
+		syncPaneTitle = originalSyncPane
+		syncWindowTitle = originalSyncWindow
+		refreshThreadClient = originalRefresh
+	})
+
+	var threadTitle, paneTitle, windowTitle string
+	syncThreadTitle = func(_, title string) error {
+		threadTitle = title
+		return nil
+	}
+	syncThreadPrefix = func(_, _ string) error { return nil }
+	syncPaneTitle = func(_, title string) error {
+		paneTitle = title
+		return nil
+	}
+	syncWindowTitle = func(_, title string) error {
+		windowTitle = title
+		return nil
+	}
+	refreshThreadClient = func(string) error { return nil }
+
+	err := renameRow(Row{
+		Kind:              RowHeadless,
+		AgentID:           droidAgentID,
+		AgentName:         "Droid",
+		AgentSymbol:       "⛬",
+		AgentState:        "idle",
+		AgentTitlePrefix:  "⛬",
+		AgentTitleDisplay: "New Session",
+		SessionName:       droidKitmuxSession,
+		ThreadTitle:       "pro.local",
+		InitialTitle:      "⛬ Droid · kitmux",
+		PaneID:            "%51",
+	}, "")
+	if err != nil {
+		t.Fatalf("renameRow() error = %v", err)
+	}
+	if threadTitle != "" {
+		t.Fatalf("thread title = %q, want empty", threadTitle)
+	}
+	if paneTitle != "⛬ New Session" {
+		t.Fatalf("pane title = %q", paneTitle)
+	}
+	if windowTitle != droidAgentID {
+		t.Fatalf("window title = %q", windowTitle)
+	}
+}
+
 func TestNewHeadlessUsesLaunchDir(t *testing.T) {
 	originalCreateThread := createThread
 	originalInstallHooks := installThreadHooks
@@ -1053,7 +1146,7 @@ func TestNewHeadlessUsesLaunchDir(t *testing.T) {
 		return nil
 	}
 
-	agent, ok := agents.Find("droid")
+	agent, ok := agents.Find(droidAgentID)
 	if !ok {
 		t.Fatal("missing droid agent")
 	}
@@ -1062,7 +1155,7 @@ func TestNewHeadlessUsesLaunchDir(t *testing.T) {
 	if gotSpec.Dir != "/repo/current" {
 		t.Fatalf("dir = %q, want launch dir", gotSpec.Dir)
 	}
-	if installedAgent != "droid" {
+	if installedAgent != droidAgentID {
 		t.Fatalf("installed agent = %q", installedAgent)
 	}
 	if got, ok := msg.(messages.SwitchSessionMsg); !ok || got.Name != "droid-current" {
@@ -1086,7 +1179,7 @@ func TestNewHeadlessReportsHookInstallFailure(t *testing.T) {
 		return fmt.Errorf("hooks unavailable")
 	}
 
-	agent, ok := agents.Find("droid")
+	agent, ok := agents.Find(droidAgentID)
 	if !ok {
 		t.Fatal("missing droid agent")
 	}

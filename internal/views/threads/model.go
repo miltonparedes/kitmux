@@ -2,6 +2,7 @@ package threads
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -104,6 +105,7 @@ var (
 	wrapThreadCommand   = agentthread.ThreadCommand
 	respawnThreadPane   = tmux.RespawnPaneInDir
 	applyThreadSupport  = agentthread.ApplySupport
+	localHostname       = os.Hostname
 )
 
 func New(launchDir ...string) Model {
@@ -506,7 +508,7 @@ func reconcilePaneTitleRenames(rows []Row) []Row {
 func livePaneThreadTitle(row Row) string {
 	title := strings.TrimSpace(stripLeadingStatusGlyph(row.PaneTitle))
 	if title == "" || isDefaultPaneTitle(row, title) || isAutomaticAgentTitle(row, title) ||
-		isTransientAgentTitle(title) {
+		isTransientAgentTitle(title) || isLocalHostnameTitle(title) {
 		return ""
 	}
 	return title
@@ -536,6 +538,23 @@ func isAutomaticAgentTitle(row Row, title string) bool {
 func isTransientAgentTitle(title string) bool {
 	title = strings.ToLower(strings.TrimSpace(title))
 	return strings.HasPrefix(title, "worker:") || strings.HasPrefix(title, "subagent:")
+}
+
+func isLocalHostnameTitle(title string) bool {
+	title = strings.ToLower(strings.TrimSpace(title))
+	if title == "" {
+		return false
+	}
+	hostname, err := localHostname()
+	if err != nil {
+		return false
+	}
+	hostname = strings.ToLower(strings.TrimSpace(hostname))
+	if hostname == "" {
+		return false
+	}
+	short := strings.SplitN(hostname, ".", 2)[0]
+	return title == hostname || (short != "" && (title == short || title == short+".local"))
 }
 
 func enrichAgentTitles(rows []Row) []Row {
@@ -929,11 +948,15 @@ func renameRow(row Row, title string) error {
 		}); err != nil {
 			return err
 		}
-		if title != "" {
-			_ = syncPaneTitle(rowPaneTarget(row), title)
-			if target := rowWindowTarget(row); target != "" {
-				_ = syncWindowTitle(target, title)
-			}
+		paneTitle := title
+		windowTitle := title
+		if title == "" {
+			paneTitle = rowResetPaneTitle(row)
+			windowTitle = rowResetWindowTitle(row)
+		}
+		_ = syncPaneTitle(rowPaneTarget(row), paneTitle)
+		if target := rowWindowTarget(row); target != "" && windowTitle != "" {
+			_ = syncWindowTitle(target, windowTitle)
 		}
 		_ = agentrename.Rename(agentrename.Target{
 			AgentID: row.AgentID,
@@ -957,6 +980,46 @@ func rowWindowTarget(row Row) string {
 		return ""
 	}
 	return fmt.Sprintf("%s:%d", row.SessionName, row.WindowIndex)
+}
+
+func rowResetPaneTitle(row Row) string {
+	if title := automaticPaneTitle(row); title != "" {
+		return title
+	}
+	if title := strings.TrimSpace(row.InitialTitle); title != "" {
+		return title
+	}
+	if row.AgentName != "" {
+		return row.AgentName
+	}
+	return row.AgentID
+}
+
+func automaticPaneTitle(row Row) string {
+	display := strings.TrimSpace(stripLeadingStatusGlyph(row.AgentTitleDisplay))
+	if display == "" {
+		return ""
+	}
+	if prefix := staticThreadTitlePrefix(row); prefix != "" {
+		return prefix + " " + display
+	}
+	if prefix := strings.TrimSpace(row.AgentTitlePrefix); prefix != "" {
+		return prefix + " " + display
+	}
+	return display
+}
+
+func rowResetWindowTitle(row Row) string {
+	if row.AgentID != "" {
+		return row.AgentID
+	}
+	if row.AgentName != "" {
+		return row.AgentName
+	}
+	if title := strings.TrimSpace(stripLeadingStatusGlyph(row.InitialTitle)); title != "" {
+		return title
+	}
+	return row.SessionName
 }
 
 func newHeadlessCmd(agent agents.Agent, launchDir string, opts ...loadOptions) tea.Cmd {
